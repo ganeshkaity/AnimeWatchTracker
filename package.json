@@ -1,0 +1,49 @@
+{
+  "name": "watchanime",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "electron:dev": "electron .",
+    "pack": "next build && electron-builder --dir",
+    "dist": "next build && electron-builder"
+  },
+  "dependencies": {
+    "artplayer": "^5.4.0",
+    "firebase": "^10.8.0",
+    "framer-motion": "^11.0.8",
+    "lucide-react": "^0.344.0",
+    "next": "^14.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.18",
+    "cross-env": "^10.1.0",
+    "electron": "^42.3.3",
+    "electron-builder": "^26.8.1",
+    "get-port": "^7.2.0",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.watchanime.app",
+    "productName": "WatchAnime",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      ".next/standalone/**/*",
+      ".next/static/**/*",
+      "public/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    }
+  }
+}
