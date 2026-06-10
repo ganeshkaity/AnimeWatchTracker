@@ -281,32 +281,67 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
-  // Change Thumbnail
+  // Compress an image data URI to a low-quality JPEG via Canvas (client-side)
+  const compressImageToBase64 = (dataUri, maxPx = 400, quality = 0.45) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = dataUri;
+    });
+  };
+
+  // Change Thumbnail — reads local file, compresses, stores base64 in Firestore document
   const handleChangeThumbnail = async (anime, e) => {
     e.stopPropagation();
     try {
       const animeId = anime.id;
       const targetUserId = anime.userId || currentUser.uid;
-      const response = await fetch('/api/select-image');
-      const data = await response.json();
-      if (data.success && data.path) {
-        upsertLocalAnime({ id: animeId, thumbnailPath: data.path, updatedAt: new Date().toISOString() });
-        if (!isOffline && db) {
-          await updateDoc(doc(db, 'users', targetUserId, 'anime', animeId), {
-            thumbnailPath: data.path,
-            updatedAt: new Date().toISOString(),
-          });
-        } else {
-          addToDirtyQueue({
-            type: 'SET_ANIME',
-            dedupeKey: `SET_ANIME_${animeId}`,
-            payload: { id: animeId, userId: targetUserId, thumbnailPath: data.path, updatedAt: new Date().toISOString() },
-          });
-        }
+
+      // Step 1: open native image picker
+      const pickRes = await fetch('/api/select-image');
+      const pickData = await pickRes.json();
+      if (!pickData.success || !pickData.path) return;
+
+      // Step 2: read the raw image bytes from server as base64 data URI
+      const b64Res = await fetch(`/api/image-base64?path=${encodeURIComponent(pickData.path)}`);
+      const b64Data = await b64Res.json();
+      if (!b64Data.success || !b64Data.dataUri) {
+        alert('Failed to read image file.');
+        return;
+      }
+
+      // Step 3: compress client-side using Canvas (max 400px, quality 0.45)
+      const compressedBase64 = await compressImageToBase64(b64Data.dataUri, 400, 0.45);
+
+      // Step 4: persist — store base64 string directly in document
+      const updatedAt = new Date().toISOString();
+      upsertLocalAnime({ id: animeId, thumbnailBase64: compressedBase64, updatedAt });
+      if (!isOffline && db) {
+        await updateDoc(doc(db, 'users', targetUserId, 'anime', animeId), {
+          thumbnailBase64: compressedBase64,
+          updatedAt,
+        });
+      } else {
+        addToDirtyQueue({
+          type: 'SET_ANIME',
+          dedupeKey: `SET_ANIME_${animeId}`,
+          payload: { id: animeId, userId: targetUserId, thumbnailBase64: compressedBase64, updatedAt },
+        });
       }
     } catch (err) {
       console.error('Thumbnail selection error:', err);
-      alert('Failed to select thumbnail: ' + err.message);
+      alert('Failed to set thumbnail: ' + err.message);
     }
   };
 
@@ -769,9 +804,15 @@ export default function Dashboard({ onSelectAnime }) {
                 onClick={() => onSelectAnime(anime.id)}
                 className="group relative h-72 glass-card rounded-2xl flex flex-col justify-between overflow-hidden cursor-pointer"
               >
-                {/* Visual Cover */}
-                <div className={`h-40 ${!anime.thumbnailPath ? `bg-gradient-to-tr ${anime.coverGradient || 'from-violet-500 to-indigo-600'}` : ''} flex items-center justify-center relative overflow-hidden`}>
-                  {anime.thumbnailPath ? (
+                {/* Visual Cover — prefers compressed base64, falls back to legacy local path */}
+                <div className={`h-40 ${!anime.thumbnailBase64 && !anime.thumbnailPath ? `bg-gradient-to-tr ${anime.coverGradient || 'from-violet-500 to-indigo-600'}` : ''} flex items-center justify-center relative overflow-hidden`}>
+                  {anime.thumbnailBase64 ? (
+                    <img
+                      src={anime.thumbnailBase64}
+                      alt={anime.title}
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                  ) : anime.thumbnailPath ? (
                     <img 
                       src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} 
                       alt={anime.title}
