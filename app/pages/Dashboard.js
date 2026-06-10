@@ -798,12 +798,16 @@ export default function Dashboard({ onSelectAnime }) {
             </div>
 
             {filteredAnimes.map((anime) => (
-              <motion.div
-                layout
+              <Link
                 key={anime.id}
-                onClick={() => onSelectAnime(anime.id)}
-                className="group relative h-72 glass-card rounded-2xl flex flex-col justify-between overflow-hidden cursor-pointer"
+                href={`/anime/${anime.id}`}
+                className="group relative h-72 glass-card rounded-2xl flex flex-col justify-between overflow-hidden cursor-pointer block"
+                style={{ display: 'flex', flexDirection: 'column' }}
               >
+                <motion.div
+                  layout
+                  className="flex flex-col flex-1 overflow-hidden"
+                >
                 {/* Visual Cover — prefers compressed base64, falls back to legacy local path */}
                 <div className={`h-40 ${!anime.thumbnailBase64 && !anime.thumbnailPath ? `bg-gradient-to-tr ${anime.coverGradient || 'from-violet-500 to-indigo-600'}` : ''} flex items-center justify-center relative overflow-hidden`}>
                   {anime.thumbnailBase64 ? (
@@ -833,7 +837,7 @@ export default function Dashboard({ onSelectAnime }) {
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-2 transition-opacity duration-300">
                     <div className="flex items-center gap-3">
                       <button
-                        onClick={(e) => handleDeleteAnime(anime, e)}
+                        onClick={(e) => { e.preventDefault(); handleDeleteAnime(anime, e); }}
                         className="p-2.5 rounded-full bg-red-950/80 border border-red-500/30 text-red-400 hover:bg-red-600 hover:text-white transition shadow-lg cursor-pointer"
                         title="Stop Tracking"
                       >
@@ -843,7 +847,7 @@ export default function Dashboard({ onSelectAnime }) {
                         <Play size={20} fill="#03030d" />
                       </div>
                       <button
-                        onClick={(e) => handleChangeThumbnail(anime, e)}
+                        onClick={(e) => { e.preventDefault(); handleChangeThumbnail(anime, e); }}
                         className="p-2.5 rounded-full bg-violet-950/80 border border-violet-500/30 text-violet-400 hover:bg-violet-600 hover:text-white transition shadow-lg cursor-pointer"
                         title="Change Thumbnail"
                       >
@@ -894,7 +898,8 @@ export default function Dashboard({ onSelectAnime }) {
                     </div>
                   </div>
                 </div>
-              </motion.div>
+                </motion.div>
+              </Link>
             ))}
           </div>
         )}

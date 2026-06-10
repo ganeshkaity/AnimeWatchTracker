@@ -742,7 +742,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     return true;
   });
 
-  // Group episodes by folder
+  // Group filtered episodes by folder (for rendering)
   const groupedEpisodes = {};
   filteredEpisodes.forEach(ep => {
     const folder = getSubfolder(ep.filePath, anime?.folderPath || '');
@@ -752,7 +752,40 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     groupedEpisodes[folder].push(ep);
   });
 
+  // Group ALL episodes by folder (unfiltered, for stable numbering)
+  // sortEpisodes already ran when setting state, so `episodes` is sorted
+  const allGroupedEpisodes = {};
+  episodes.forEach(ep => {
+    const folder = getSubfolder(ep.filePath, anime?.folderPath || '');
+    if (!allGroupedEpisodes[folder]) {
+      allGroupedEpisodes[folder] = [];
+    }
+    allGroupedEpisodes[folder].push(ep);
+  });
+
   const sortedFolderKeys = Object.keys(groupedEpisodes).sort(sortFolders);
+
+  // Confirmation modal state for Mark All Complete
+  const [showMarkCompleteConfirm, setShowMarkCompleteConfirm] = useState(false);
+
+  /**
+   * Returns the stable display label for an episode based on its true
+   * position inside the full (unfiltered) folder list.
+   * Off-pattern files get "SP 01" labels; regular episodes get "EP 01".
+   */
+  const getEpisodeDisplayNumber = (ep, folderKey) => {
+    const fullFolderList = allGroupedEpisodes[folderKey] || [];
+    const trueIndex = fullFolderList.findIndex(e => e.id === ep.id);
+    if (trueIndex === -1) {
+      // Fallback if not found (shouldn't happen)
+      return ep.isOffPattern ? 'SP ??' : `EP ??`;
+    }
+    const offPatternBefore = fullFolderList.slice(0, trueIndex).filter(e => e.isOffPattern).length;
+    if (ep.isOffPattern) {
+      return `SP ${String(trueIndex + 1).padStart(2, '0')}`;
+    }
+    return `EP ${String(trueIndex + 1 - offPatternBefore).padStart(2, '0')}`;
+  };
 
   return (
     <div className="min-h-screen text-white" style={{ background: anime?.coverGradient ? `linear-gradient(160deg, ${anime.coverGradient.replace('from-','').replace('to-','').split(' ').map(c => c.replace(/-\d+$/,'').replace('neonCyan','#00f0ff').replace('neonPurple','#bd00ff').replace('neonPink','#ff2d78')).join(', ')})` : undefined }}>
@@ -796,7 +829,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
 
               {anime.progressPercent !== 100 && (
                 <button
-                  onClick={handleMarkAllWatched}
+                  onClick={() => setShowMarkCompleteConfirm(true)}
                   className="px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500 text-emerald-300 hover:text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-all shadow-inner whitespace-nowrap"
                 >
                   <CheckCheck size={14} />
@@ -931,6 +964,8 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                         >
                           {folderEpisodes.map((ep) => {
                             const percentage = ep.durationSeconds > 0 ? (ep.watchedSeconds / ep.durationSeconds) * 100 : 0;
+                            // Stable display number — always based on the full unfiltered folder list
+                            const displayNumber = getEpisodeDisplayNumber(ep, folderKey);
                             
                             return (
                               <div
@@ -965,9 +1000,9 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                                   <div className="min-w-0">
                                     <div className="flex items-center gap-2 flex-wrap">
                                       <span className={`text-xs font-bold uppercase tracking-wider ${
-                                        ep.isWatched ? 'text-emerald-400' : 'text-neonCyan'
+                                        ep.isWatched ? 'text-emerald-400' : ep.isOffPattern ? 'text-amber-400' : 'text-neonCyan'
                                       }`}>
-                                        EP {String(ep.episodeNumber).padStart(2, '0')}
+                                        {displayNumber}
                                       </span>
                                       
                                       {/* Active flag chips */}
@@ -1466,6 +1501,64 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                     Processing...
                   </button>
                 )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+        </AnimatePresence>
+      {/* ── Mark All Complete Confirmation Modal ──────────────────────── */}
+      <AnimatePresence>
+        {showMarkCompleteConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.93, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.93, y: 12 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="w-full max-w-sm glass-panel p-6 rounded-2xl border border-emerald-500/20 shadow-neon-border"
+            >
+              {/* Icon + Title */}
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30">
+                  <CheckCheck className="text-emerald-400" size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base tracking-wide">Mark All as Watched?</h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">This action affects all episodes</p>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="bg-white/[0.03] border border-white/5 rounded-xl p-4 mb-5 space-y-2">
+                <p className="text-sm text-gray-300 leading-relaxed">
+                  All <span className="font-bold text-white">{anime?.episodeCount || episodes.length}</span> episodes
+                  of <span className="font-bold text-emerald-400">{anime?.title}</span> will be marked as
+                  watched and the library progress will be set to&nbsp;
+                  <span className="font-bold text-white">100%</span>.
+                </p>
+                <p className="text-[11px] text-amber-400/80 flex items-center gap-1.5">
+                  <AlertTriangle size={11} />
+                  This cannot be undone in bulk — individual episodes can still be toggled.
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowMarkCompleteConfirm(false)}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:bg-white/10 text-xs font-bold uppercase tracking-wider cursor-pointer transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setShowMarkCompleteConfirm(false);
+                    handleMarkAllWatched();
+                  }}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold uppercase tracking-wider cursor-pointer transition shadow-inner"
+                >
+                  Yes, Mark All
+                </button>
               </div>
             </motion.div>
           </div>
