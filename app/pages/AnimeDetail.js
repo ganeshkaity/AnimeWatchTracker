@@ -93,6 +93,24 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   // Expanded/Collapsed subfolder groups (initially closed)
   const [expandedFolders, setExpandedFolders] = useState({});
 
+  const [helperExpanded, setHelperExpanded] = useState(false);
+  const [flagsExpanded, setFlagsExpanded] = useState(false);
+  const [ratingExpanded, setRatingExpanded] = useState(true);
+
+  const [playbackSpeed, setPlaybackSpeed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return parseFloat(localStorage.getItem('watchanime_vlc_speed') || '1.0');
+    }
+    return 1.0;
+  });
+
+  const [playbackVolume, setPlaybackVolume] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return parseInt(localStorage.getItem('watchanime_vlc_volume') || '100');
+    }
+    return 100;
+  });
+
   // Rescan Modal state
   const [showRescanModal, setShowRescanModal] = useState(false);
   const [rescanStatus, setRescanStatus] = useState('idle'); // idle, scanning, comparing, syncing, completed, error
@@ -259,6 +277,31 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
       }
     } catch (err) {
       console.error('Mark complete error:', err);
+    }
+  };
+
+  const handleSaveRating = async (newRating) => {
+    if (!anime || !animeId) return;
+    const ratingStr = String(newRating);
+    const update = { id: animeId, rating: ratingStr, updatedAt: new Date().toISOString() };
+    
+    // Update local cache
+    upsertLocalAnime(update);
+    setAnime(prev => prev ? { ...prev, rating: ratingStr } : prev);
+    
+    // Update remote Firestore database
+    if (!isOffline && db && currentUser) {
+      try {
+        await updateDoc(doc(db, 'users', getUserId(), 'anime', animeId), {
+          rating: ratingStr,
+          updatedAt: new Date().toISOString()
+        });
+      } catch (err) {
+        console.error("Failed to save rating remotely:", err);
+        addToDirtyQueue({ type: 'SET_ANIME', dedupeKey: `SET_ANIME_${animeId}`, payload: update });
+      }
+    } else {
+      addToDirtyQueue({ type: 'SET_ANIME', dedupeKey: `SET_ANIME_${animeId}`, payload: update });
     }
   };
 
@@ -475,7 +518,9 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
         body: JSON.stringify({
           filePath: episode.filePath,
           customVlcPath: currentUser?.vlcPath || '',
-          resumeTime: episode.lastPositionSeconds || 0
+          resumeTime: episode.lastPositionSeconds || 0,
+          speed: playbackSpeed,
+          volume: playbackVolume
         })
       });
       const data = await res.json();
@@ -788,7 +833,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   };
 
   return (
-    <div className="min-h-screen text-white" style={{ background: anime?.coverGradient ? `linear-gradient(160deg, ${anime.coverGradient.replace('from-','').replace('to-','').split(' ').map(c => c.replace(/-\d+$/,'').replace('neonCyan','#00f0ff').replace('neonPurple','#bd00ff').replace('neonPink','#ff2d78')).join(', ')})` : undefined }}>
+    <div className="min-h-screen text-white bg-transparent">
       {/* Sticky Detail Header */}
       {anime && (
         <div className="sticky top-0 z-20 glass-panel border-b border-white/5 py-4 px-6 md:px-12">
@@ -1140,50 +1185,163 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
               </button>
             </div>
           ) : (
-            <div className="glass-panel p-6 rounded-2xl border border-white/5 text-gray-400 text-xs space-y-4">
-              <h3 className="font-bold text-white uppercase tracking-wider text-[10px] flex items-center gap-1.5 text-neonPurple">
-                <Film size={14} />
-                Desktop Playback Helper
-              </h3>
-              <p className="leading-relaxed">
-                Clicking the play button launches the episode in the native VLC media player on your machine.
-              </p>
-              <p className="leading-relaxed">
-                <strong>Progress Syncing:</strong> As you watch, playback status is queried in the background and stored locally. Closing VLC automatically pushes your resume position to Firestore.
-              </p>
-              <p className="leading-relaxed">
-                <strong>Auto-Complete:</strong> Once you watch past 90% of the video duration, the episode is marked as completed automatically.
-              </p>
+            <div className="glass-panel p-6 rounded-2xl border border-white/5 text-gray-400 text-xs space-y-3">
+              <button
+                onClick={() => setHelperExpanded(!helperExpanded)}
+                className="w-full flex items-center justify-between font-bold text-white uppercase tracking-wider text-[10px] text-left text-neonPurple hover:text-white transition cursor-pointer"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Film size={14} />
+                  Desktop Playback Helper
+                </span>
+                {helperExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+              {helperExpanded && (
+                <div className="space-y-3 pt-2 border-t border-white/5 leading-relaxed">
+                  <p>
+                    Clicking the play button launches the episode in the native VLC media player on your machine.
+                  </p>
+                  <p>
+                    <strong>Progress Syncing:</strong> As you watch, playback status is queried in the background and stored locally. Closing VLC automatically pushes your resume position to Firestore.
+                  </p>
+                  <p>
+                    <strong>Auto-Complete:</strong> Once you watch past 90% of the video duration, the episode is marked as completed automatically.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
           {/* Quick flags list */}
-          <div className="glass-panel p-6 rounded-2xl border border-white/5">
-            <h3 className="font-bold text-white uppercase tracking-wider text-[10px] mb-4 text-neonPink">
-              Available Flags Info
-            </h3>
-            <div className="flex flex-col gap-2.5">
-              {FLAG_TYPES.map(flag => {
-                const Icon = flag.icon;
-                return (
-                  <div key={flag.name} className="flex items-center gap-2 text-xs">
-                    <span className={`px-2 py-0.5 rounded border text-[9px] font-bold flex items-center gap-1 ${flag.color}`}>
-                      <Icon size={8} />
-                      {flag.name}
-                    </span>
-                    <span className="text-gray-500">
-                      {flag.name === 'Filler' && 'Skips in story'}
-                      {flag.name === 'Favorite' && 'Loved episodes'}
-                      {flag.name === 'Peak' && 'Amazing visual/hype'}
-                      {flag.name === 'Emotional' && 'Feels moment'}
-                      {flag.name === 'Rewatch' && 'Must watch again'}
-                      {flag.name === 'Skip' && 'For recap/op-ed'}
-                      {flag.name === 'Important' && 'Crucial plot points'}
-                    </span>
+          <div className="glass-panel p-6 rounded-2xl border border-white/5 space-y-3">
+            <button
+              onClick={() => setFlagsExpanded(!flagsExpanded)}
+              className="w-full flex items-center justify-between font-bold text-white uppercase tracking-wider text-[10px] text-left text-neonPink hover:text-white transition cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5">
+                <Bookmark size={14} />
+                Available Flags Info
+              </span>
+              {flagsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+            {flagsExpanded && (
+              <div className="flex flex-col gap-2.5 pt-2 border-t border-white/5">
+                {FLAG_TYPES.map(flag => {
+                  const Icon = flag.icon;
+                  return (
+                    <div key={flag.name} className="flex items-center gap-2 text-xs">
+                      <span className={`px-2 py-0.5 rounded border text-[9px] font-bold flex items-center gap-1 ${flag.color}`}>
+                        <Icon size={8} />
+                        {flag.name}
+                      </span>
+                      <span className="text-gray-500 text-[11px]">
+                        {flag.name === 'Filler' && 'Skips in story'}
+                        {flag.name === 'Favorite' && 'Loved episodes'}
+                        {flag.name === 'Peak' && 'Amazing visual/hype'}
+                        {flag.name === 'Emotional' && 'Feels moment'}
+                        {flag.name === 'Rewatch' && 'Must watch again'}
+                        {flag.name === 'Skip' && 'For recap/op-ed'}
+                        {flag.name === 'Important' && 'Crucial plot points'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* VLC Controls & Rating widget */}
+          <div className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+            <button
+              onClick={() => setRatingExpanded(!ratingExpanded)}
+              className="w-full flex items-center justify-between font-bold text-white uppercase tracking-wider text-[10px] text-left text-neonPurple hover:text-white transition cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5">
+                <Star size={14} className="text-neonPurple animate-pulse" />
+                VLC Controls & Rating
+              </span>
+              {ratingExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+
+            {ratingExpanded && (
+              <div className="space-y-4 pt-2 border-t border-white/5 text-xs text-gray-400">
+                {/* VLC Controls */}
+                <div className="space-y-3">
+                  <h4 className="font-semibold text-white text-[11px] uppercase tracking-wider">VLC Player Presets</h4>
+                  
+                  {/* Playback Speed */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span>Playback Speed</span>
+                      <span className="text-neonCyan font-bold">{playbackSpeed.toFixed(1)}x</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="5.0"
+                      step="0.1"
+                      value={playbackSpeed}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setPlaybackSpeed(val);
+                        localStorage.setItem('watchanime_vlc_speed', String(val));
+                      }}
+                      className="w-full accent-neonCyan h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
+                    />
                   </div>
-                );
-              })}
-            </div>
+
+                  {/* Playback Volume */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span>Initial Volume</span>
+                      <span className="text-neonPink font-bold">{playbackVolume}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="200"
+                      step="5"
+                      value={playbackVolume}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        setPlaybackVolume(val);
+                        localStorage.setItem('watchanime_vlc_volume', String(val));
+                      }}
+                      className="w-full accent-neonPink h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                {/* Rating */}
+                <div className="space-y-2 pt-2 border-t border-white/5">
+                  <h4 className="font-semibold text-white text-[11px] uppercase tracking-wider flex items-center justify-between">
+                    <span>Rate this Anime</span>
+                    <span className="text-amber-400 font-extrabold">
+                      {anime?.rating ? `${parseFloat(anime.rating).toFixed(1)} / 10` : 'Not Rated'}
+                    </span>
+                  </h4>
+                  <div className="space-y-2">
+                    <input
+                      type="range"
+                      min="1.0"
+                      max="10.0"
+                      step="0.1"
+                      value={anime?.rating ? parseFloat(anime.rating) : 8.0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        handleSaveRating(val);
+                      }}
+                      className="w-full accent-amber-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[8px] text-gray-500 font-bold uppercase tracking-wider">
+                      <span>1.0 min</span>
+                      <span>5.0 avg</span>
+                      <span>10.0 max</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

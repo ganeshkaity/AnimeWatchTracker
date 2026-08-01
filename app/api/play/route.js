@@ -22,7 +22,7 @@ function findVlcPath(customPath) {
 
 export async function POST(request) {
   try {
-    const { filePath, customVlcPath, resumeTime } = await request.json();
+    const { filePath, customVlcPath, resumeTime, speed, volume } = await request.json();
     if (!filePath) {
       return NextResponse.json({ success: false, error: 'filePath is required' }, { status: 400 });
     }
@@ -52,6 +52,15 @@ export async function POST(request) {
 
     if (resumeTime && resumeTime > 0) {
       args.push(`--start-time=${Math.floor(resumeTime)}`);
+    }
+
+    if (speed && speed !== 1) {
+      args.push(`--rate=${speed}`);
+    }
+
+    if (volume !== undefined && volume !== null) {
+      const vlcVol = Math.round((volume / 100) * 256);
+      args.push(`--volume=${vlcVol}`);
     }
 
     args.push(filePath);

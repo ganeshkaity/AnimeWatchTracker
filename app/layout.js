@@ -14,7 +14,6 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        <link rel="icon" href="/favicon.ico" sizes="any" />
       </head>
       <body className={`bg-bgDark text-white min-h-screen ${inter.className}`}>
         {/* Animated neon gradient background — fixed behind all pages */}
