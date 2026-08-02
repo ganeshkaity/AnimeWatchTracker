@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import AnimeDetail from '../../pages/AnimeDetail';
 import Player from '../../pages/Player';
 import ArtPlayerContainer from '../../pages/ArtPlayerContainer';
+import VideoJsContainer from '../../pages/VideoJsContainer';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 
@@ -40,7 +41,14 @@ export default function AnimePage() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.3, ease: 'easeInOut' }}
           >
-            {playerType === 'artplayer' ? (
+            {playerType === 'videojs' ? (
+              <VideoJsContainer
+                animeId={animeId}
+                episodeId={activeEpisodeId}
+                episodes={activeEpisodesList}
+                onBack={() => setActiveEpisodeId(null)}
+              />
+            ) : playerType === 'artplayer' ? (
               <ArtPlayerContainer
                 animeId={animeId}
                 episodeId={activeEpisodeId}

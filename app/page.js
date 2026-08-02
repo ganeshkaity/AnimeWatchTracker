@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import Dashboard from './pages/Dashboard';
 import AnimeDetail from './pages/AnimeDetail';
 import Player from './pages/Player';
-import ArtPlayerContainer from './pages/ArtPlayerContainer';
+import VideoJsContainer from './pages/VideoJsContainer';
 import { Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -38,7 +38,14 @@ export default function Home() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.3, ease: 'easeInOut' }}
           >
-            {playerType === 'artplayer' ? (
+            {playerType === 'videojs' ? (
+              <VideoJsContainer
+                animeId={activeAnimeId}
+                episodeId={activeEpisodeId}
+                episodes={activeEpisodesList}
+                onBack={() => setActiveEpisodeId(null)}
+              />
+            ) : playerType === 'artplayer' ? (
               <ArtPlayerContainer
                 animeId={activeAnimeId}
                 episodeId={activeEpisodeId}

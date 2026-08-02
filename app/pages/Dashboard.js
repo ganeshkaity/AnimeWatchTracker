@@ -127,6 +127,7 @@ export default function Dashboard({ onSelectAnime }) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [slideDirection, setSlideDirection] = useState(1);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -216,7 +217,7 @@ export default function Dashboard({ onSelectAnime }) {
     const timer = setInterval(() => {
       setSlideDirection(1);
       setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
-    }, 6000);
+    }, 11000);
     return () => clearInterval(timer);
   }, [heroSlides.length]);
 
@@ -829,7 +830,7 @@ export default function Dashboard({ onSelectAnime }) {
           {/* Interactive Connection Mode Toggle */}
           <button
             onClick={() => setManualOffline(!isManualOffline)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-bold uppercase tracking-wider transition cursor-pointer ${
+            className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-bold uppercase tracking-wider transition cursor-pointer ${
               isOffline
                 ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
                 : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
@@ -850,25 +851,108 @@ export default function Dashboard({ onSelectAnime }) {
             <Plus size={15} />
             <span>Add Folder</span>
           </button>
+
+          {/* Local Hotspot Stream Link */}
+          <Link
+            href="/stream"
+            className="hidden md:flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-gradient-to-r from-purple-600/80 to-indigo-600/80 hover:from-purple-600 hover:to-indigo-600 text-white border border-purple-500/30 transition shadow-lg shadow-purple-500/20 cursor-pointer"
+            title="Local Hotspot Stream"
+          >
+            <Wifi size={14} className="text-cyan-300 animate-pulse" />
+            <span>Stream</span>
+          </Link>
  
           {/* Settings Trigger */}
           <button
             onClick={() => setShowSettings(true)}
-            className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+            className="hidden md:flex p-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition cursor-pointer"
             title="Settings"
           >
             <Settings size={18} />
           </button>
+
+          {/* Quick Actions Dropdown Trigger for Mobile */}
+          <button
+            onClick={() => {
+              setQuickActionsOpen(!quickActionsOpen);
+              if (mobileMenuOpen) setMobileMenuOpen(false);
+            }}
+            className={`p-2 rounded-lg bg-white/5 text-gray-300 hover:text-white transition cursor-pointer md:hidden relative ${
+              quickActionsOpen ? 'text-[#7c5cff] bg-[#7c5cff]/10 border border-[#7c5cff]/30' : ''
+            }`}
+            title="Quick Actions"
+          >
+            {quickActionsOpen ? <X size={20} /> : <SlidersHorizontal size={20} />}
+          </button>
  
           {/* Hamburger Menu Trigger */}
           <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            onClick={() => {
+              setMobileMenuOpen(!mobileMenuOpen);
+              if (quickActionsOpen) setQuickActionsOpen(false);
+            }}
             className="p-2 rounded-lg bg-white/5 text-gray-300 hover:text-white transition cursor-pointer"
             title="Menu"
           >
             {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
         </div>
+
+        {/* Mobile Quick Actions Dropdown */}
+        <AnimatePresence>
+          {quickActionsOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="absolute top-16 right-4 z-50 w-52 glass-panel rounded-2xl p-4 shadow-xl border border-white/10 flex flex-col gap-3 md:hidden"
+            >
+              <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Quick Actions</span>
+              
+              {/* 1. Connection Toggle */}
+              <button
+                onClick={() => {
+                  setManualOffline(!isManualOffline);
+                  setQuickActionsOpen(false);
+                }}
+                className={`flex items-center justify-between w-full px-3 py-2 rounded-xl border text-[11px] font-bold uppercase tracking-wider transition ${
+                  isOffline
+                    ? 'bg-amber-500/10 border-amber-500/20 text-amber-400 hover:bg-amber-500/20'
+                    : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  {isOffline ? <WifiOff size={14} /> : <Wifi size={14} />}
+                  {isOffline ? 'Offline' : 'Online'}
+                </span>
+                <span className="text-[9px] opacity-60">Toggle</span>
+              </button>
+
+              {/* 2. Stream Page Link */}
+              <Link
+                href="/stream"
+                onClick={() => setQuickActionsOpen(false)}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-purple-600/80 to-indigo-600/80 hover:from-purple-600 hover:to-indigo-600 text-white border border-purple-500/30 transition shadow-md cursor-pointer"
+              >
+                <Wifi size={14} className="text-cyan-300 animate-pulse" />
+                <span>Local Stream</span>
+              </Link>
+
+              {/* 3. Settings Trigger */}
+              <button
+                onClick={() => {
+                  setShowSettings(true);
+                  setQuickActionsOpen(false);
+                }}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition cursor-pointer text-xs font-bold"
+              >
+                <Settings size={14} />
+                <span>Settings</span>
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </header>
  
       {/* Sliding Floating Menu from Top */}
@@ -881,7 +965,7 @@ export default function Dashboard({ onSelectAnime }) {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setMobileMenuOpen(false)}
-              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+              className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
             />
 
             {/* Floating Top Panel */}
@@ -1131,7 +1215,7 @@ export default function Dashboard({ onSelectAnime }) {
             >
               {/* Full Background Image - 20px Backdrop Blur */}
               <div
-                className="absolute inset-0 z-0 bg-cover bg-center filter blur-[15px]"
+                className="absolute inset-0 z-0 bg-cover bg-center filter blur-[12px]"
                 style={{ backgroundImage: `url(${currentHero.banner})` }}
               />
 
@@ -1139,7 +1223,7 @@ export default function Dashboard({ onSelectAnime }) {
               <div 
                 className="absolute inset-0 z-10 pointer-events-none" 
                 style={{
-                  background: 'linear-gradient(90deg, rgba(10,10,15,0.92) 0%, rgba(10,10,15,0.78) 45%, rgba(10,10,15,0.45) 100%)'
+                  background: 'linear-gradient(90deg, rgba(88, 88, 88, 0.52) 0%, rgba(39, 39, 39, 0.7) 45%, rgba(0, 0, 0, 0.59) 100%)'
                 }}
               />
 
@@ -2060,6 +2144,7 @@ export default function Dashboard({ onSelectAnime }) {
                     <option value="ask">Ask every time</option>
                     <option value="builtin">Built-in HTML5 Player</option>
                     <option value="artplayer">ArtPlayer (M3U8/Custom)</option>
+                    <option value="videojs">Video.js Player (Web)</option>
                     <option value="vlc">VLC Player (Local Desktop)</option>
                   </select>
                 </div>

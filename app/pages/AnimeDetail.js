@@ -14,7 +14,8 @@ import { sortEpisodes, getSubfolder, getSafeDocId, processScannedFiles } from '.
 import { 
   ArrowLeft, Play, CheckCircle2, Bookmark, StickyNote, Star, AlertTriangle, 
   Sparkles, History, RotateCcw, X, Heart, EyeOff, Film, Clock, Search,
-  ChevronDown, ChevronUp, Folder, Tv, ExternalLink, RefreshCw, Loader2, CheckCheck
+  ChevronDown, ChevronUp, Folder, Tv, ExternalLink, RefreshCw, Loader2, CheckCheck,
+  Wifi, Laptop, Smartphone, Settings2, QrCode
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -117,6 +118,31 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   const [rescanError, setRescanError] = useState('');
   const [rescanChanges, setRescanChanges] = useState({ added: [], removed: [] });
   const [scannedFilesCount, setScannedFilesCount] = useState(0);
+  const [actionsCollapsed, setActionsCollapsed] = useState(true);
+
+  // Stream Pairing & Playback Target state
+  const [streamPairing, setStreamPairing] = useState(null);
+  const [streamTarget, setStreamTarget] = useState('host'); // 'host' (Play on PC Host) or 'mobile' (Stream to Mobile)
+  const [streamPlayerModalEp, setStreamPlayerModalEp] = useState(null);
+
+  useEffect(() => {
+    const checkPairingState = async () => {
+      try {
+        const stored = localStorage.getItem('watchanime_stream_pairing');
+        if (stored) {
+          setStreamPairing(JSON.parse(stored));
+          setStreamTarget('mobile');
+          return;
+        }
+        const res = await fetch('/api/stream/host');
+        const data = await res.json();
+        if (data.success && data.session && data.session.pairedDevicesCount > 0) {
+          setStreamPairing({ hostUrl: data.session.baseUrl || `http://${data.session.hostIp}:${data.session.port}`, isHostPC: true, count: data.session.pairedDevicesCount });
+        }
+      } catch (e) {}
+    };
+    checkPairingState();
+  }, []);
 
   const handleRescan = async () => {
     if (!currentUser || !anime) return;
@@ -559,14 +585,30 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     }
   };
 
+  const playInVideoJs = async (episode) => {
+    setPromptPlayEp(null);
+    await saveDefaultPlayerIfChecked('videojs');
+    if (onPlayEpisode) {
+      onPlayEpisode(episode.id, episodes, 'videojs');
+    }
+  };
+
   // Trigger episode click options
   const handlePlayEpisode = async (episode) => {
+    if (streamPairing && streamTarget === 'mobile') {
+      // If "Stream to Mobile" is selected, open player selection window
+      setStreamPlayerModalEp(episode);
+      return;
+    }
+
     const defPlayer = currentUser?.defaultPlayer;
     if (defPlayer && defPlayer !== 'ask') {
       if (defPlayer === 'builtin') {
         playInBuiltin(episode);
       } else if (defPlayer === 'artplayer') {
         playInArtPlayer(episode);
+      } else if (defPlayer === 'videojs') {
+        playInVideoJs(episode);
       } else if (defPlayer === 'vlc') {
         playInVlc(episode);
       }
@@ -858,8 +900,8 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
               </div>
             </div>
 
-            {/* Resume button & progress */}
-            <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
+            {/* Desktop Resume button & progress */}
+            <div className="hidden md:flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
               <div className="text-right">
                 <div className="text-xs text-gray-400 mb-1">
                   Library Progress: <span className="font-semibold text-white">{Math.round(anime.progressPercent || 0)}%</span>
@@ -899,6 +941,67 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
               </button>
             </div>
 
+            {/* Mobile Collapsible Actions Block */}
+            <div className="flex md:hidden flex-col w-full gap-2 mt-2 bg-white/5 p-3.5 rounded-2xl border border-white/10 shadow-lg">
+              <div 
+                onClick={() => setActionsCollapsed(!actionsCollapsed)}
+                className="flex items-center justify-between cursor-pointer select-none"
+              >
+                <div className="flex-1">
+                  <div className="text-[11px] text-gray-400 mb-1 flex justify-between items-center pr-2">
+                    <span>Watch Progress</span>
+                    <span className="font-bold text-neonCyan">{Math.round(anime.progressPercent || 0)}%</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-white/15 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-neon-gradient shadow-purple-glow rounded-full"
+                      style={{ width: `${anime.progressPercent || 0}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="p-1 text-gray-400 hover:text-white ml-3 shrink-0 transition-transform duration-200">
+                  {actionsCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+                </div>
+              </div>
+
+              <AnimatePresence>
+                {!actionsCollapsed && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="flex flex-col gap-2 pt-2 border-t border-white/5 overflow-hidden"
+                  >
+                    <button
+                      onClick={handleResumeAnime}
+                      className="w-full py-2.5 rounded-xl bg-neon-gradient hover:brightness-110 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-purple-glow"
+                    >
+                      <Play size={14} fill="currentColor" />
+                      Resume Tracking
+                    </button>
+
+                    <button
+                      onClick={handleRescan}
+                      className="w-full py-2.5 rounded-xl bg-white/5 border border-white/10 hover:text-neonCyan text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <RefreshCw size={14} />
+                      Rescan Folder
+                    </button>
+
+                    {anime.progressPercent !== 100 && (
+                      <button
+                        onClick={() => setShowMarkCompleteConfirm(true)}
+                        className="w-full py-2.5 rounded-xl bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500 text-emerald-300 hover:text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <CheckCheck size={14} />
+                        Mark Complete
+                      </button>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
           </div>
         </div>
       )}
@@ -909,6 +1012,44 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
         {/* Left column: Episode list */}
         <div className="lg:col-span-3 space-y-4">
           
+          {/* Paired Playback Target Toggle (PC Host vs Mobile Stream) */}
+          {streamPairing && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 bg-white/5 border border-white/10 rounded-2xl shadow-lg">
+              <div className="flex items-center gap-2">
+                <Wifi size={16} className="text-neonCyan animate-pulse" />
+                <span className="text-xs font-bold text-white uppercase tracking-wider">
+                  Playback Target:
+                </span>
+                <span className="text-[11px] text-gray-400 font-mono">
+                  ({streamPairing.deviceName || 'Paired Local Hotspot'})
+                </span>
+              </div>
+
+              <div className="flex items-center p-1 bg-black/60 rounded-xl border border-white/10 text-xs w-full sm:w-auto">
+                <button
+                  onClick={() => setStreamTarget('host')}
+                  className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg font-bold transition ${
+                    streamTarget === 'host'
+                      ? 'bg-gradient-to-r from-[#7c5cff] to-[#a855f7] text-white shadow-md'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Laptop size={14} /> Play on PC Host (VLC)
+                </button>
+                <button
+                  onClick={() => setStreamTarget('mobile')}
+                  className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg font-bold transition ${
+                    streamTarget === 'mobile'
+                      ? 'bg-gradient-to-r from-[#7c5cff] to-[#a855f7] text-white shadow-md'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Smartphone size={14} /> Stream to Mobile
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Episode Filters & Search */}
           <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
             <div className="relative w-full sm:max-w-xs">
@@ -1495,7 +1636,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                 </label>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
                 {/* Built-in Player Card */}
                 <button
                   type="button"
@@ -1518,6 +1659,18 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                     <Film size={24} className="text-purple-400" />
                   </div>
                   <span className="text-[10px] font-black uppercase tracking-widest">ArtPlayer</span>
+                </button>
+
+                {/* Video.js Card */}
+                <button
+                  type="button"
+                  onClick={() => playInVideoJs(promptPlayEp)}
+                  className="p-5 rounded-2xl bg-indigo-500/5 border border-indigo-500/20 hover:border-indigo-400/50 text-indigo-300 hover:text-white hover:bg-indigo-500/10 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_20px_rgba(99,102,241,0.25)]"
+                >
+                  <div className="p-3 rounded-xl bg-indigo-500/10 group-hover:bg-indigo-500/20 transition-colors">
+                    <Play size={24} className="text-indigo-400" fill="currentColor" />
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-widest">Video.js</span>
                 </button>
 
                 {/* VLC Player Card */}
@@ -1716,6 +1869,79 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                   className="flex-1 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold uppercase tracking-wider cursor-pointer transition shadow-inner"
                 >
                   Yes, Mark All
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Mobile Stream Player Choice Modal ────────────────────────────── */}
+      <AnimatePresence>
+        {streamPlayerModalEp && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 15 }}
+              className="w-full max-w-sm glass-panel p-6 rounded-3xl border border-white/20 flex flex-col items-center gap-4 text-center relative shadow-2xl"
+            >
+              <button
+                onClick={() => setStreamPlayerModalEp(null)}
+                className="absolute top-4 right-4 p-2 rounded-full bg-white/10 text-gray-300 hover:text-white transition"
+              >
+                <X size={18} />
+              </button>
+
+              <div className="p-3.5 rounded-2xl bg-gradient-to-tr from-[#7c5cff] to-[#a855f7] text-white shadow-lg shadow-[#7c5cff]/30">
+                <Smartphone size={28} />
+              </div>
+
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-white">Stream Episode to Mobile</h3>
+                <p className="text-xs text-gray-400">
+                  {streamPlayerModalEp.fileName || `Episode ${streamPlayerModalEp.episodeNumber}`}
+                </p>
+                <p className="text-[11px] text-[#a855f7] font-semibold pt-1">
+                  Select player to begin mobile streaming:
+                </p>
+              </div>
+
+              <div className="w-full flex flex-col gap-3 pt-2">
+                <button
+                  onClick={() => {
+                    const ep = streamPlayerModalEp;
+                    setStreamPlayerModalEp(null);
+                    playInArtPlayer(ep);
+                  }}
+                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-purple-600/80 to-indigo-600/80 hover:from-purple-600 hover:to-indigo-600 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg cursor-pointer"
+                >
+                  <Sparkles size={16} className="text-cyan-300" />
+                  ArtPlayer (Modern Web Player)
+                </button>
+
+                <button
+                  onClick={() => {
+                    const ep = streamPlayerModalEp;
+                    setStreamPlayerModalEp(null);
+                    playInVideoJs(ep);
+                  }}
+                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-600/80 to-blue-600/80 hover:from-indigo-600 hover:to-blue-600 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg cursor-pointer"
+                >
+                  <Play size={16} fill="currentColor" className="text-indigo-200" />
+                  Video.js Player
+                </button>
+
+                <button
+                  onClick={() => {
+                    const ep = streamPlayerModalEp;
+                    setStreamPlayerModalEp(null);
+                    playInBuiltin(ep);
+                  }}
+                  className="w-full py-3 rounded-2xl bg-white/10 border border-white/15 hover:bg-white/20 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer"
+                >
+                  <Tv size={16} className="text-emerald-400" />
+                  Native HTML5 Video Player
                 </button>
               </div>
             </motion.div>
