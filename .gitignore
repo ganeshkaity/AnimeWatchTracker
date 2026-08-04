@@ -55,3 +55,9 @@ public/fallback-*.js
 
 #Other files
 /test_images
+
+#videos
+*.mp4
+*.mkv
+*.mov
+*.avi

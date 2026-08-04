@@ -32,58 +32,19 @@ export default function AnimePage() {
 
   return (
     <div className="min-h-screen text-white">
-      <AnimatePresence mode="wait">
-        {activeEpisodeId ? (
-          <motion.div
-            key="player"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-          >
-            {playerType === 'videojs' ? (
-              <VideoJsContainer
-                animeId={animeId}
-                episodeId={activeEpisodeId}
-                episodes={activeEpisodesList}
-                onBack={() => setActiveEpisodeId(null)}
-              />
-            ) : playerType === 'artplayer' ? (
-              <ArtPlayerContainer
-                animeId={animeId}
-                episodeId={activeEpisodeId}
-                episodes={activeEpisodesList}
-                onBack={() => setActiveEpisodeId(null)}
-              />
-            ) : (
-              <Player
-                animeId={animeId}
-                episodeId={activeEpisodeId}
-                episodes={activeEpisodesList}
-                onBack={() => setActiveEpisodeId(null)}
-              />
-            )}
-          </motion.div>
-        ) : (
-          <motion.div
-            key="detail"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-          >
-            <AnimeDetail
-              animeId={animeId}
-              onBack={() => router.push('/')}
-              onPlayEpisode={(epId, epList, type = 'builtin') => {
-                setActiveEpisodeId(epId);
-                setActiveEpisodesList(epList);
-                setPlayerType(type);
-              }}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <AnimeDetail
+        animeId={animeId}
+        onBack={() => router.push('/')}
+        onPlayEpisode={(epId, epList, type = 'builtin', extraOpts = {}) => {
+          const speed = extraOpts.speed || 1;
+          const volume = Math.round((extraOpts.volume ?? 1) * 100);
+          const quality = extraOpts.quality || '';
+          let query = `?ep=${encodeURIComponent(epId)}&speed=${speed}&volume=${volume}`;
+          if (quality) query += `&quality=${encodeURIComponent(quality)}`;
+
+          router.push(`/player/${type}/${animeId}${query}`);
+        }}
+      />
     </div>
   );
 }

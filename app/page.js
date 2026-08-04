@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard';
 import AnimeDetail from './pages/AnimeDetail';
 import Player from './pages/Player';
 import VideoJsContainer from './pages/VideoJsContainer';
+import ArtPlayerContainer from './pages/ArtPlayerContainer';
+import YoutubePlayerContainer from './pages/YoutubePlayerContainer';
 import { Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -47,6 +49,13 @@ export default function Home() {
               />
             ) : playerType === 'artplayer' ? (
               <ArtPlayerContainer
+                animeId={activeAnimeId}
+                episodeId={activeEpisodeId}
+                episodes={activeEpisodesList}
+                onBack={() => setActiveEpisodeId(null)}
+              />
+            ) : playerType === 'youtube' ? (
+              <YoutubePlayerContainer
                 animeId={activeAnimeId}
                 episodeId={activeEpisodeId}
                 episodes={activeEpisodesList}

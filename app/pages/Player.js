@@ -38,7 +38,7 @@ function parseVTT(vttText) {
 }
 
 // ─── Main Player Component ──────────────────────────────────────────────────────
-export default function Player({ animeId, episodeId, episodes, onBack }) {
+export default function Player({ animeId, episodeId, episodes, onBack, initialSpeed = 1, initialVolume = 1 }) {
   const { currentUser } = useAuth();
 
   // ── Episode navigation ────────────────────────────────────────────────────
@@ -72,9 +72,9 @@ export default function Player({ animeId, episodeId, episodes, onBack }) {
   const [isPlaying,      setIsPlaying]      = useState(false);
   const [currentTime,    setCurrentTime]    = useState(0);
   const [duration,       setDuration]       = useState(0);
-  const [volume,         setVolume]         = useState(1);
+  const [volume,         setVolume]         = useState(initialVolume);
   const [isMuted,        setIsMuted]        = useState(false);
-  const [playbackSpeed,  setPlaybackSpeed]  = useState(1);
+  const [playbackSpeed,  setPlaybackSpeed]  = useState(initialSpeed);
   const [isFullscreen,   setIsFullscreen]   = useState(false);
   const [showControls,   setShowControls]   = useState(true);
   const [errorMsg,       setErrorMsg]       = useState('');
@@ -95,8 +95,29 @@ export default function Player({ animeId, episodeId, episodes, onBack }) {
   const [hoverX,      setHoverX]      = useState(0);
   // During remux scrubbing we preview the position without changing the stream:
   const scrubDisplayTimeRef = useRef(null); // holds the abs-time the user dragged to
+  const sessionIdRef = useRef('');
+
+  useEffect(() => {
+    sessionIdRef.current = `yt_session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const session = sessionIdRef.current;
+    return () => {
+      if (session) {
+        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+          navigator.sendBeacon('/api/youtube/close-stream', JSON.stringify({ sessionId: session }));
+        } else {
+          fetch(`/api/youtube/close-stream?sessionId=${session}`, { keepalive: true }).catch(() => {});
+        }
+      }
+    };
+  }, [episode?.id]);
 
   const buildVideoStreamUrl = useCallback(() => {
+    if (!episode) return '';
+    if (episode.isYouTube || episode?.filePath?.startsWith('youtube://')) {
+      const vId = episode.youtubeId || episode.filePath.replace('youtube://', '');
+      const quality = episode.selectedQuality || 'best';
+      return `/api/youtube/stream?videoId=${encodeURIComponent(vId)}&quality=${encodeURIComponent(quality)}&sessionId=${sessionIdRef.current}`;
+    }
     if (!episode?.filePath) return '';
     let url = `/api/video/stream?path=${encodeURIComponent(episode.filePath)}`;
     if (selectedAudio !== null) url += `&audioIndex=${selectedAudio}`;
@@ -105,7 +126,7 @@ export default function Player({ animeId, episodeId, episodes, onBack }) {
       url += `&ss=${(streamStartOffset + 0.1).toFixed(3)}`;
     }
     return url;
-  }, [episode?.filePath, selectedAudio, isRemuxing, streamStartOffset]);
+  }, [episode, selectedAudio, isRemuxing, streamStartOffset]);
 
   // ── 1. Fetch metadata when episode changes ────────────────────────────────
   useEffect(() => {
@@ -116,9 +137,13 @@ export default function Player({ animeId, episodeId, episodes, onBack }) {
     setCurrentSubtitleText('');
     setErrorMsg('');
     setCurrentTime(0);
-    setDuration(0);
+    setDuration(episode?.durationSeconds || 0);
     setStreamStartOffset(0);
     pendingSeekAfterLoad.current = null;
+
+    if (episode.isYouTube || episode.filePath.startsWith('youtube://')) {
+      return;
+    }
 
     const run = async () => {
       try {

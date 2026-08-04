@@ -15,7 +15,8 @@ import {
   Trash2, SlidersHorizontal, FileVideo, CheckCircle2, ImagePlus,
   StickyNote, Download, Wifi, WifiOff, RefreshCw, ChevronLeft, ChevronRight,
   Star, Flame, TrendingUp, Clock, Sparkles, Film, Bookmark, Bell, Menu, X,
-  Tv, Eye, ShieldCheck, Heart, User, Filter, Compass, Calendar, AlertTriangle
+  Tv, Eye, ShieldCheck, Heart, User, Filter, Compass, Calendar, AlertTriangle,
+  Youtube, Video, CheckSquare, Square
 } from 'lucide-react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -27,6 +28,13 @@ const GRADIENTS = [
   "from-emerald-500 to-teal-700",
   "from-cyan-600 to-blue-700",
 ];
+
+const YoutubeLogo = ({ size = 16, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z" fill="#FF0000"/>
+    <path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#FFFFFF"/>
+  </svg>
+);
 
 const slugify = (text) => {
   return text
@@ -87,7 +95,7 @@ const getHeroSlides = (animesList) => {
     const validGenres = genres.filter(g => GENRES_LIST.includes(g) && g !== 'All');
     return {
       id: anime.id,
-      title: anime.title.toUpperCase(),
+      title: (anime?.title || 'UNTITLED ANIME').toString().toUpperCase(),
       japaneseTitle: anime.japaneseTitle || 'LOCAL LIBRARY',
       banner: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop',
       rating: getDeterministicRating(anime.id, anime.rating),
@@ -148,6 +156,17 @@ export default function Dashboard({ onSelectAnime }) {
   const [uploadingCover, setUploadingCover] = useState(false);
   const [addGenres, setAddGenres] = useState([]);
 
+  // YouTube Playlist tab state
+  const [addModalTab, setAddModalTab] = useState('local'); // 'local' | 'youtube'
+  const [ytPlaylistUrl, setYtPlaylistUrl] = useState('');
+  const [ytFetching, setYtFetching] = useState(false);
+  const [ytPlaylistData, setYtPlaylistData] = useState(null);
+  const [ytSelectedVideoIds, setYtSelectedVideoIds] = useState(new Set());
+  const [ytQualitiesFetching, setYtQualitiesFetching] = useState(false);
+  const [ytAvailableQualities, setYtAvailableQualities] = useState([]);
+  const [ytSelectedQuality, setYtSelectedQuality] = useState('best');
+  const [ytError, setYtError] = useState('');
+
   // Edit Anime Modal State
   const [editingAnime, setEditingAnime] = useState(null);
   const [editTitle, setEditTitle] = useState('');
@@ -165,7 +184,7 @@ export default function Dashboard({ onSelectAnime }) {
   const trendingShows = animes.slice(0, 6).map((anime, idx) => ({
     id: anime.id,
     rank: String(idx + 1).padStart(2, '0'),
-    title: anime.title,
+    title: anime.title || 'Untitled Anime',
     episode: anime.lastWatchedEpisode ? `Ep ${anime.lastWatchedEpisode}` : 'EP 0',
     rating: getDeterministicRating(anime.id, anime.rating),
     image: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop',
@@ -178,11 +197,12 @@ export default function Dashboard({ onSelectAnime }) {
     .slice(0, 6)
     .map(anime => ({
       id: anime.id,
-      title: anime.title,
+      title: anime.title || 'Untitled Anime',
       episode: anime.lastWatchedEpisode ? `Ep ${anime.lastWatchedEpisode}` : 'EP 0',
       rating: getDeterministicRating(anime.id, anime.rating),
       image: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop',
-      quality: anime.quality || 'HD'
+      quality: anime.quality || 'HD',
+      isYouTube: !!(anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://'))
     }));
 
   const popularThisWeek = [...animes]
@@ -190,7 +210,7 @@ export default function Dashboard({ onSelectAnime }) {
     .slice(0, 4)
     .map(anime => ({
       id: anime.id,
-      title: anime.title,
+      title: anime.title || 'Untitled Anime',
       studio: anime.studio || 'Local',
       rating: getDeterministicRating(anime.id, anime.rating),
       episodes: `${anime.episodeCount || 0} EP`,
@@ -202,7 +222,7 @@ export default function Dashboard({ onSelectAnime }) {
     .slice(0, 5)
     .map(anime => ({
       id: anime.id,
-      title: anime.title,
+      title: anime.title || 'Untitled Anime',
       rating: getDeterministicRating(anime.id, anime.rating),
       episode: anime.lastWatchedEpisode ? `Ep ${anime.lastWatchedEpisode}` : 'EP 0',
       image: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop',
@@ -266,6 +286,159 @@ export default function Dashboard({ onSelectAnime }) {
 
     return unsubscribe;
   }, [currentUser, isOffline]);
+
+  // YouTube Playlist Handlers
+  const handleFetchYouTubePlaylist = async () => {
+    if (!ytPlaylistUrl || !ytPlaylistUrl.trim()) {
+      setYtError('Please enter a YouTube Playlist URL.');
+      return;
+    }
+    setYtError('');
+    setYtFetching(true);
+    setYtPlaylistData(null);
+    try {
+      const res = await fetch('/api/youtube/playlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: ytPlaylistUrl.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to fetch playlist');
+      }
+      setYtPlaylistData(data.playlist);
+      const allIds = new Set(data.playlist.videos.map(v => v.id));
+      setYtSelectedVideoIds(allIds);
+
+      if (data.playlist.videos.length > 0) {
+        fetchYouTubeQualities(data.playlist.videos[0].id);
+      }
+    } catch (err) {
+      setYtError(err.message || 'Error fetching YouTube playlist');
+    } finally {
+      setYtFetching(false);
+    }
+  };
+
+  const fetchYouTubeQualities = async (sampleVideoId) => {
+    setYtQualitiesFetching(true);
+    try {
+      const res = await fetch('/api/youtube/qualities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId: sampleVideoId }),
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.qualities)) {
+        setYtAvailableQualities(data.qualities);
+        if (!ytSelectedQuality && data.qualities.length > 0) {
+          setYtSelectedQuality(data.qualities[0].id);
+        }
+      }
+    } catch (err) {
+      console.error('[fetchQualities error]', err);
+    } finally {
+      setYtQualitiesFetching(false);
+    }
+  };
+
+  const toggleSelectAllYt = () => {
+    if (!ytPlaylistData) return;
+    if (ytSelectedVideoIds.size === ytPlaylistData.videos.length) {
+      setYtSelectedVideoIds(new Set());
+    } else {
+      setYtSelectedVideoIds(new Set(ytPlaylistData.videos.map(v => v.id)));
+    }
+  };
+
+  const toggleVideoSelection = (vId) => {
+    const updated = new Set(ytSelectedVideoIds);
+    if (updated.has(vId)) {
+      updated.delete(vId);
+    } else {
+      updated.add(vId);
+    }
+    setYtSelectedVideoIds(updated);
+  };
+
+  const handleImportYouTubePlaylist = async () => {
+    if (!ytPlaylistData || ytSelectedVideoIds.size === 0) {
+      setYtError('Please select at least one video to import.');
+      return;
+    }
+    setScanning(true);
+    try {
+      const selectedVideos = ytPlaylistData.videos.filter(v => ytSelectedVideoIds.has(v.id));
+      const animeId = slugify(ytPlaylistData.title) || `yt_${ytPlaylistData.id}_${Date.now()}`;
+      const randomGradient = GRADIENTS[Math.floor(Math.random() * GRADIENTS.length)];
+
+      const animeData = {
+        title: ytPlaylistData.title,
+        folderPath: ytPlaylistUrl.trim(),
+        isYouTube: true,
+        playlistId: ytPlaylistData.id,
+        episodeCount: selectedVideos.length,
+        progressPercent: 0,
+        coverGradient: randomGradient,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastWatchedEpisode: '',
+        lastOpenedAt: new Date().toISOString(),
+        userId: getUserId(),
+        thumbnailBase64: ytPlaylistData.thumbnail || '',
+        thumbnailPath: '',
+        genres: ['YouTube', 'Playlist'],
+        description: `Imported YouTube Playlist (${selectedVideos.length} videos)`
+      };
+
+      const parsedEps = selectedVideos.map((v, idx) => ({
+        episodeNumber: idx + 1,
+        fileName: v.title,
+        filePath: `youtube://${v.id}`,
+        youtubeId: v.id,
+        selectedQuality: ytSelectedQuality || 'best',
+        durationSeconds: v.durationSeconds || 0,
+        durationFormatted: v.durationFormatted || '0:00',
+        thumbnailUrl: v.thumbnail,
+        isYouTube: true,
+        createdAt: Date.now(),
+        watchedSeconds: 0,
+        lastPositionSeconds: 0,
+        isWatched: false,
+        isFlagged: false,
+        flags: [],
+        note: '',
+        updatedAt: new Date().toISOString(),
+        docId: `ep_yt_${v.id}`
+      }));
+
+      upsertLocalAnime({ id: animeId, ...animeData });
+      const epObjs = parsedEps.map(({ docId, ...rest }) => ({ id: docId, ...rest }));
+      setLocalEpisodes(animeId, epObjs);
+
+      if (!isOffline && db) {
+        const batch = writeBatch(db);
+        const animeDocRef = doc(db, 'users', getUserId(), 'anime', animeId);
+        batch.set(animeDocRef, animeData);
+        parsedEps.forEach(({ docId, ...dbData }) => {
+          const epDocRef = doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', docId);
+          batch.set(epDocRef, dbData);
+        });
+        await batch.commit();
+      }
+
+      setShowAddModal(false);
+      setYtPlaylistUrl('');
+      setYtPlaylistData(null);
+      setYtSelectedVideoIds(new Set());
+      setYtError('');
+    } catch (err) {
+      console.error(err);
+      setYtError('Failed to import YouTube Playlist');
+    } finally {
+      setScanning(false);
+    }
+  };
 
   // Browse Directory using API
   const handleBrowseFolder = async () => {
@@ -629,7 +802,7 @@ export default function Dashboard({ onSelectAnime }) {
       const animeSnap = await getDocs(collection(db, 'users', currentUser.uid, 'anime'));
       const animeDocs = [];
       animeSnap.forEach(d => animeDocs.push({ id: d.id, ...d.data() }));
-      animeDocs.sort((a, b) => a.title.localeCompare(b.title));
+      animeDocs.sort((a, b) => (a?.title || '').localeCompare(b?.title || ''));
       const dateStr = new Date().toISOString().slice(0, 10);
 
       if (exportFormat === 'json') {
@@ -1243,14 +1416,14 @@ export default function Dashboard({ onSelectAnime }) {
 
               {/* Hero Content Overlay */}
               <div className="relative z-20 p-6 md:p-14 w-full md:max-w-2xl space-y-5">
-                {/* Spotlight Tag */}
-                <span className="text-pink-400 font-extrabold text-sm uppercase tracking-wider block">
+                {/* Spotlight Tag
+                <span className="text-amber-400 font-extrabold text-sm uppercase tracking-wider block">
                   #{currentSlide + 1} Spotlight
-                </span>
+                </span> */}
 
                 {/* Title */}
                 <div>
-                  <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold uppercase tracking-tight text-white leading-tight drop-shadow-lg">
+                  <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold uppercase tracking-tight text-amber-300 leading-tight drop-shadow-lg">
                     {currentHero.title}
                   </h1>
                   {/* Genres Tag Pills */}
@@ -1258,7 +1431,7 @@ export default function Dashboard({ onSelectAnime }) {
                     {currentHero.genres && currentHero.genres.slice(0, 2).map((genre, idx) => (
                       <span 
                         key={idx} 
-                        className="px-2.5 py-0.5 rounded-full bg-[#7c5cff]/10 border border-[#7c5cff]/20 text-[#a855f7] text-[10px] font-black uppercase tracking-wider"
+                        className="px-2.5 py-0.5 rounded-full bg-cyan-400/20 border border-cyan-400 text-cyan text-[10px] font-black uppercase tracking-wider"
                       >
                         {genre}
                       </span>
@@ -1412,10 +1585,10 @@ export default function Dashboard({ onSelectAnime }) {
 
                     {/* Rating & Quality */}
                     <div className="absolute top-3 right-3 flex flex-col gap-1 items-end">
-                      <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-[10px] flex items-center gap-1">
-                        <Star size={10} className="fill-amber-400" /> {show.rating}
-                      </span>
-                      <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 text-[9px] font-extrabold uppercase">
+                      <span className="px-2 py-0.5 rounded-lg bg-green-500/20 border border-green-500/50 text-green-400 font-bold text-[10px] flex items-center gap-1 backdrop-blur-md">
+                        <Star size={10} className="fill-green-400" /> {show.rating}
+                      </span>1
+                      <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 text-[9px] font-extrabold uppercase backdrop-blur-md">
                         {show.quality}
                       </span>
                     </div>
@@ -1535,9 +1708,15 @@ export default function Dashboard({ onSelectAnime }) {
                     <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/70 text-gray-300 font-bold text-[9px]">
                       {show.episode}
                     </div>
-                    <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-[#7c5cff]/80 text-white font-extrabold text-[8px]">
-                      {show.quality || 'HD'}
-                    </div>
+                    {show.isYouTube ? (
+                      <div className="absolute top-2 right-2 p-1 bg-black/60 rounded-lg shadow-lg border border-red-500/40 backdrop-blur-md flex items-center justify-center">
+                        <YoutubeLogo size={16} />
+                      </div>
+                    ) : (
+                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-[#7c5cff]/80 text-white font-extrabold text-[8px]">
+                        {show.quality || 'HD'}
+                      </div>
+                    )}
                   </div>
                   <div className="p-3">
                     <h4 className="font-bold text-xs text-white line-clamp-1 group-hover:text-[#7c5cff] transition-colors">
@@ -1784,6 +1963,13 @@ export default function Dashboard({ onSelectAnime }) {
                       </div>
                     )}
 
+                    {/* Red YouTube Logo Badge if YouTube folder */}
+                    {!!(anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://')) && (
+                      <div className="absolute top-2.5 right-2.5 z-10 p-1 bg-black/60 rounded-xl flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md">
+                        <YoutubeLogo size={18} />
+                      </div>
+                    )}
+
                     {/* Actions Hover Overlay */}
                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2 transition-opacity duration-300">
                       <button
@@ -1929,174 +2115,351 @@ export default function Dashboard({ onSelectAnime }) {
             >
               <div className="flex justify-between items-center border-b border-white/10 pb-3">
                 <h2 className="text-lg font-extrabold flex items-center gap-2 text-white">
-                  <FolderOpen className="text-[#7c5cff]" size={20} />
-                  Track Local Anime Folder
+                  {addModalTab === 'youtube' ? (
+                    <Youtube className="text-red-500" size={20} />
+                  ) : (
+                    <FolderOpen className="text-[#7c5cff]" size={20} />
+                  )}
+                  {addModalTab === 'youtube' ? 'Add YouTube Playlist' : 'Track Local Anime Folder'}
                 </h2>
                 <button onClick={() => setShowAddModal(false)} className="p-1 rounded-lg text-gray-400 hover:text-white">
                   <X size={18} />
                 </button>
               </div>
 
-              <form onSubmit={handleAddAnime} className="space-y-4">
-                <div>
-                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Select Folder Directory *</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="Browse your PC or paste local directory path..."
-                      className="flex-grow px-3 py-2 rounded-xl glass-input text-xs text-white"
-                      value={folderPath}
-                      onChange={(e) => setFolderPath(e.target.value)}
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={handleBrowseFolder}
-                      className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl text-xs font-semibold cursor-pointer text-white flex items-center gap-1.5 transition"
-                    >
-                      Browse
-                    </button>
-                    {folderPath && (
+              {/* Mode Switcher Tabs */}
+              <div className="flex border-b border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setAddModalTab('local')}
+                  className={`flex-1 py-2 text-xs font-bold flex items-center justify-center gap-2 border-b-2 transition cursor-pointer ${
+                    addModalTab === 'local'
+                      ? 'border-[#7c5cff] text-white bg-white/5 rounded-t-xl'
+                      : 'border-transparent text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <FolderOpen size={15} /> Local Folder
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAddModalTab('youtube')}
+                  className={`flex-1 py-2 text-xs font-bold flex items-center justify-center gap-2 border-b-2 transition cursor-pointer ${
+                    addModalTab === 'youtube'
+                      ? 'border-red-500 text-white bg-white/5 rounded-t-xl'
+                      : 'border-transparent text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Youtube size={15} className="text-red-500" /> Add YouTube Playlist
+                </button>
+              </div>
+
+              {addModalTab === 'local' ? (
+                <form onSubmit={handleAddAnime} className="space-y-4">
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Select Folder Directory *</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Browse your PC or paste local directory path..."
+                        className="flex-grow px-3 py-2 rounded-xl glass-input text-xs text-white"
+                        value={folderPath}
+                        onChange={(e) => setFolderPath(e.target.value)}
+                        required
+                      />
                       <button
                         type="button"
-                        onClick={handleScan}
-                        className="px-4 py-2 bg-[#7c5cff]/20 border border-[#7c5cff]/40 text-[#7c5cff] hover:bg-[#7c5cff] hover:text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                        onClick={handleBrowseFolder}
+                        className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl text-xs font-semibold cursor-pointer text-white flex items-center gap-1.5 transition"
                       >
-                        Scan Folder
+                        Browse
                       </button>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Naming Pattern</label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1">
-                    {NAMING_PATTERNS.map((pat) => (
-                      <button
-                        key={pat.id}
-                        type="button"
-                        onClick={() => setNamingPattern(pat.id)}
-                        className={`px-3 py-2 rounded-xl text-left text-[11px] border transition cursor-pointer ${namingPattern === pat.id ? 'bg-[#7c5cff]/20 border-[#7c5cff] text-white' : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'}`}
-                      >
-                        <span className="font-bold block">{pat.label}</span>
-                        <span className="text-[9px] opacity-60 block truncate">{pat.example}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Anime Display Title *</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Bleach TYBW"
-                    className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
-                    value={animeTitle}
-                    onChange={(e) => setAnimeTitle(e.target.value)}
-                    required
-                    disabled={!folderPath}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Cover Image (Optional)</label>
-                  <div className="flex flex-col gap-3">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleNewCoverUpload}
-                      className="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-white/10 file:text-white hover:file:bg-white/20 file:cursor-pointer"
-                    />
-                    {uploadingCover && (
-                      <div className="flex items-center gap-2 text-xs text-[#7c5cff]">
-                        <Loader2 className="animate-spin" size={14} />
-                        Uploading to ImgBB...
-                      </div>
-                    )}
-                    {coverUrl && (
-                      <div className="relative w-28 h-40 rounded-xl overflow-hidden border border-white/15 bg-black/25 flex items-center justify-center">
-                        <img src={coverUrl} alt="Cover Preview" className="w-full h-full object-cover" />
+                      {folderPath && (
                         <button
                           type="button"
-                          onClick={() => setCoverUrl('')}
-                          className="absolute top-1 right-1 p-1 rounded-full bg-red-600 hover:bg-red-700 text-white transition cursor-pointer"
-                          title="Remove Cover Image"
+                          onClick={handleScan}
+                          className="px-4 py-2 bg-[#7c5cff]/20 border border-[#7c5cff]/40 text-[#7c5cff] hover:bg-[#7c5cff] hover:text-white rounded-xl text-xs font-bold transition cursor-pointer"
                         >
-                          <X size={10} />
+                          Scan Folder
                         </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Select Categories / Genres (Max 5)</label>
-                  <div className="flex flex-wrap gap-2 mt-1 p-1 border border-white/5 rounded-xl bg-black/20">
-                    {GENRES_LIST.map((genre) => {
-                      if (genre === 'All') return null;
-                      const isSelected = addGenres.includes(genre);
-                      return (
-                        <button
-                          key={genre}
-                          type="button"
-                          onClick={() => {
-                            setAddGenres(prev => {
-                              const alreadySelected = prev.includes(genre);
-                              if (alreadySelected) return prev.filter(g => g !== genre);
-                              if (prev.length >= 5) {
-                                setAlertMessage("You can select a maximum of 5 genres.");
-                                return prev;
-                              }
-                              return [...prev, genre];
-                            });
-                          }}
-                          className={`px-3 py-1.5 rounded-full text-[10px] font-semibold transition cursor-pointer ${
-                            isSelected 
-                              ? 'bg-[#7c5cff] text-white' 
-                              : 'bg-white/5 border border-white/5 text-gray-400 hover:text-white'
-                          }`}
-                        >
-                          {genre}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {folderPath && (
-                  <div className="p-4 rounded-2xl bg-black/40 border border-white/10 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-400">Scan Status:</span>
-                      {scanning ? (
-                        <span className="text-[#7c5cff] flex items-center gap-1">
-                          <Loader2 className="animate-spin" size={14} /> Scanning files...
-                        </span>
-                      ) : parsedEpsCount > 0 ? (
-                        <span className="text-emerald-400 font-bold">Detected {parsedEpsCount} episode files</span>
-                      ) : (
-                        <span className="text-amber-400 font-bold">No episodes parsed yet</span>
                       )}
                     </div>
                   </div>
-                )}
 
-                <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddModal(false)}
-                    className="px-4 py-2 text-xs text-gray-400 hover:text-white"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={scanning || parsedEpsCount === 0}
-                    className="px-5 py-2.5 rounded-xl btn-accent text-xs font-bold uppercase tracking-wider disabled:opacity-50 cursor-pointer"
-                  >
-                    {scanning ? 'Processing...' : 'Track Anime'}
-                  </button>
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Naming Pattern</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1">
+                      {NAMING_PATTERNS.map((pat) => (
+                        <button
+                          key={pat.id}
+                          type="button"
+                          onClick={() => setNamingPattern(pat.id)}
+                          className={`px-3 py-2 rounded-xl text-left text-[11px] border transition cursor-pointer ${namingPattern === pat.id ? 'bg-[#7c5cff]/20 border-[#7c5cff] text-white' : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'}`}
+                        >
+                          <span className="font-bold block">{pat.label}</span>
+                          <span className="text-[9px] opacity-60 block truncate">{pat.example}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Anime Display Title *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Bleach TYBW"
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={animeTitle}
+                      onChange={(e) => setAnimeTitle(e.target.value)}
+                      required
+                      disabled={!folderPath}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Cover Image (Optional)</label>
+                    <div className="flex flex-col gap-3">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleNewCoverUpload}
+                        className="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-white/10 file:text-white hover:file:bg-white/20 file:cursor-pointer"
+                      />
+                      {uploadingCover && (
+                        <div className="flex items-center gap-2 text-xs text-[#7c5cff]">
+                          <Loader2 className="animate-spin" size={14} />
+                          Uploading to ImgBB...
+                        </div>
+                      )}
+                      {coverUrl && (
+                        <div className="relative w-28 h-40 rounded-xl overflow-hidden border border-white/15 bg-black/25 flex items-center justify-center">
+                          <img src={coverUrl} alt="Cover Preview" className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => setCoverUrl('')}
+                            className="absolute top-1 right-1 p-1 rounded-full bg-red-600 hover:bg-red-700 text-white transition cursor-pointer"
+                            title="Remove Cover Image"
+                          >
+                            <X size={10} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Select Categories / Genres (Max 5)</label>
+                    <div className="flex flex-wrap gap-2 mt-1 p-1 border border-white/5 rounded-xl bg-black/20">
+                      {GENRES_LIST.map((genre) => {
+                        if (genre === 'All') return null;
+                        const isSelected = addGenres.includes(genre);
+                        return (
+                          <button
+                            key={genre}
+                            type="button"
+                            onClick={() => {
+                              setAddGenres(prev => {
+                                const alreadySelected = prev.includes(genre);
+                                if (alreadySelected) return prev.filter(g => g !== genre);
+                                if (prev.length >= 5) {
+                                  setAlertMessage("You can select a maximum of 5 genres.");
+                                  return prev;
+                                }
+                                return [...prev, genre];
+                              });
+                            }}
+                            className={`px-3 py-1.5 rounded-full text-[10px] font-semibold transition cursor-pointer ${
+                              isSelected 
+                                ? 'bg-[#7c5cff] text-white' 
+                                : 'bg-white/5 border border-white/5 text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            {genre}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {folderPath && (
+                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 text-xs">
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-400">Scan Status:</span>
+                        {scanning ? (
+                          <span className="text-[#7c5cff] flex items-center gap-1">
+                            <Loader2 className="animate-spin" size={14} /> Scanning files...
+                          </span>
+                        ) : parsedEpsCount > 0 ? (
+                          <span className="text-emerald-400 font-bold">Detected {parsedEpsCount} episode files</span>
+                        ) : (
+                          <span className="text-amber-400 font-bold">No episodes parsed yet</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddModal(false)}
+                      className="px-4 py-2 text-xs text-gray-400 hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={scanning || parsedEpsCount === 0}
+                      className="px-5 py-2.5 rounded-xl btn-accent text-xs font-bold uppercase tracking-wider disabled:opacity-50 cursor-pointer"
+                    >
+                      {scanning ? 'Processing...' : 'Track Anime'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                /* YouTube Playlist Tab Content */
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">YouTube Playlist URL *</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="url"
+                        placeholder="https://www.youtube.com/playlist?list=..."
+                        className="flex-grow px-3 py-2 rounded-xl glass-input text-xs text-white"
+                        value={ytPlaylistUrl}
+                        onChange={(e) => setYtPlaylistUrl(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleFetchYouTubePlaylist}
+                        disabled={ytFetching || !ytPlaylistUrl.trim()}
+                        className="px-4 py-2 bg-red-600/20 border border-red-500/40 text-red-400 hover:bg-red-600 hover:text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                      >
+                        {ytFetching ? <Loader2 className="animate-spin" size={14} /> : <Youtube size={14} />}
+                        Fetch Playlist
+                      </button>
+                    </div>
+                    {ytError && <p className="text-xs text-red-400 mt-1.5 font-medium">{ytError}</p>}
+                  </div>
+
+                  {ytPlaylistData && (
+                    <div className="space-y-4 border-t border-white/10 pt-3">
+                      {/* Playlist Header Summary */}
+                      <div className="flex items-center gap-3 bg-white/5 p-3 rounded-2xl border border-white/10">
+                        {ytPlaylistData.thumbnail && (
+                          <img src={ytPlaylistData.thumbnail} alt={ytPlaylistData.title} className="w-16 h-16 object-cover rounded-xl border border-white/10 shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-extrabold text-sm text-white truncate">{ytPlaylistData.title}</h3>
+                          <p className="text-xs text-gray-400 flex items-center gap-2 mt-0.5">
+                            <span className="bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full font-semibold text-[10px]">YouTube Playlist</span>
+                            <span>{ytPlaylistData.totalVideos} Videos Total</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Quality Options Control */}
+                      <div className="bg-black/30 p-3 rounded-2xl border border-white/10 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs font-bold text-gray-300">Default Playback Quality:</label>
+                          {ytQualitiesFetching ? (
+                            <span className="text-xs text-[#7c5cff] flex items-center gap-1">
+                              <Loader2 className="animate-spin" size={12} /> Fetching options...
+                            </span>
+                          ) : (
+                            <select
+                              value={ytSelectedQuality}
+                              onChange={(e) => setYtSelectedQuality(e.target.value)}
+                              className="bg-white/10 border border-white/15 text-xs text-white rounded-xl px-2.5 py-1 font-semibold focus:outline-none focus:border-[#7c5cff]"
+                            >
+                              {ytAvailableQualities.map((q) => (
+                                <option key={q.id} value={q.id} className="bg-gray-900 text-white">
+                                  {q.label}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => ytPlaylistData.videos.length > 0 && fetchYouTubeQualities(ytPlaylistData.videos[0].id)}
+                          className="text-[11px] text-[#7c5cff] hover:underline font-semibold flex items-center gap-1 cursor-pointer"
+                        >
+                          <RefreshCw size={12} /> Refresh Quality Options
+                        </button>
+                      </div>
+
+                      {/* Video Selection List */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-xs font-bold uppercase tracking-wider text-gray-400">
+                            Select Videos ({ytSelectedVideoIds.size} / {ytPlaylistData.videos.length})
+                          </label>
+                          <button
+                            type="button"
+                            onClick={toggleSelectAllYt}
+                            className="text-[11px] text-gray-300 hover:text-white font-semibold flex items-center gap-1 cursor-pointer"
+                          >
+                            {ytSelectedVideoIds.size === ytPlaylistData.videos.length ? <CheckSquare size={14} className="text-[#7c5cff]" /> : <Square size={14} />}
+                            {ytSelectedVideoIds.size === ytPlaylistData.videos.length ? 'Deselect All' : 'Select All'}
+                          </button>
+                        </div>
+
+                        <div className="max-h-60 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                          {ytPlaylistData.videos.map((vid) => {
+                            const isChecked = ytSelectedVideoIds.has(vid.id);
+                            return (
+                              <div
+                                key={vid.id}
+                                onClick={() => toggleVideoSelection(vid.id)}
+                                className={`flex items-center gap-3 p-2 rounded-xl border transition cursor-pointer ${
+                                  isChecked ? 'bg-[#7c5cff]/10 border-[#7c5cff]/40' : 'bg-white/5 border-white/5 opacity-60 hover:opacity-100'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {}}
+                                  className="rounded border-white/20 text-[#7c5cff] focus:ring-0 cursor-pointer"
+                                />
+                                {vid.thumbnail ? (
+                                  <img src={vid.thumbnail} alt={vid.title} className="w-14 h-9 object-cover rounded-lg shrink-0 border border-white/10" />
+                                ) : (
+                                  <div className="w-14 h-9 bg-black/40 rounded-lg shrink-0 flex items-center justify-center">
+                                    <Video size={16} className="text-gray-500" />
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="text-xs font-bold text-white truncate">{vid.title}</h4>
+                                  <span className="text-[10px] text-gray-400 font-mono">{vid.durationFormatted}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Import Button */}
+                      <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddModal(false)}
+                          className="px-4 py-2 text-xs text-gray-400 hover:text-white"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleImportYouTubePlaylist}
+                          disabled={scanning || ytSelectedVideoIds.size === 0}
+                          className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold uppercase tracking-wider disabled:opacity-50 cursor-pointer transition flex items-center gap-1.5"
+                        >
+                          {scanning ? <Loader2 className="animate-spin" size={14} /> : <Youtube size={14} />}
+                          {scanning ? 'Importing...' : `Import ${ytSelectedVideoIds.size} Videos`}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </form>
+              )}
             </motion.div>
           </div>
         )}

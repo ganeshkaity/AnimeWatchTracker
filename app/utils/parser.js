@@ -5,171 +5,173 @@
 
 // Available naming patterns for the UI
 export const NAMING_PATTERNS = [
-  { id: 'auto',    label: 'Auto Detect',         example: 'Tries all patterns automatically' },
-  { id: 'bracket', label: '[EP-x] / [EP_x]',     example: '[EP-366] Bleach [Dual].mkv' },
-  { id: 'ep_dash', label: 'EP-x / ep-x',         example: 'Bleach EP-12 [720p].mkv' },
-  { id: 'ep_bare', label: 'EPx / epx',            example: 'Bleach EP12 [720p].mkv' },
-  { id: 'sxxexx',  label: 'S01E04 / s1e04',       example: 'Breaking.Bad.S01E04.720p.mkv' },
-  { id: 'bare',    label: 'x (bare number)',       example: 'Bleach - 366 [720p].mkv' },
-  { id: 'episode', label: 'Episode x',            example: 'Bleach Episode 12 [Dual].mkv' },
-  { id: 'anything', label: 'Anything',            example: 'List all files as random/ordered' },
+  { id: 'auto',       label: 'Auto Detect',         example: 'Tries all patterns automatically' },
+  { id: 'bracket',    label: '[EP-x] / [EP_x]',     example: '[EP-366] Bleach [Dual].mkv' },
+  { id: 'ep_dash',    label: 'EP-x / ep-x',         example: 'Bleach EP-12 [720p].mkv' },
+  { id: 'ep_bare',    label: 'EPx / epx',            example: 'Bleach EP12 [720p].mkv' },
+  { id: 'sxxexx',     label: 'S01E04 / s1e04',       example: 'Breaking.Bad.S01E04.720p.mkv' },
+  { id: 'bare',       label: 'x (bare number)',       example: 'Bleach - 366 [720p].mkv' },
+  { id: 'episode',    label: 'Episode x',            example: 'Bleach Episode 12 [Dual].mkv' },
+  { id: 'anything',   label: 'Anything',            example: 'List all files as random/ordered' },
 ];
+
+/**
+ * Normalize pattern ID to internal canonical key
+ */
+function normalizePatternId(patternId) {
+  if (!patternId) return 'auto';
+  const p = String(patternId).toLowerCase().trim();
+  if (p === 's01e01' || p === 'sxxexx') return 'sxxexx';
+  if (p === 'episode 01' || p === 'episode') return 'episode';
+  if (p === '01 - title' || p === 'numeric' || p === 'bare') return 'bare';
+  if (p === 'auto') return 'auto';
+  return p;
+}
 
 /**
  * Extract episode number using a specific pattern
  */
-function extractByPattern(fileName, patternId) {
-  if (patternId === 'anything') return null;
-  switch (patternId) {
+function extractByPattern(fileName = '', patternId = 'auto') {
+  const safeName = String(fileName || '');
+  const pId = normalizePatternId(patternId);
+
+  if (pId === 'anything') return null;
+  switch (pId) {
     case 'bracket': {
-      // [EP-xxx] or [EP_xxx] or [ep-xxx] or [EPxxx]
-      const m = fileName.match(/\[[Ee][Pp][-_]?(\d+)\]/);
+      const m = safeName.match(/\[[Ee][Pp][-_]?(\d+)\]/);
       return m ? parseInt(m[1], 10) : null;
     }
     case 'ep_dash': {
-      // EP-x or ep-x (with dash/underscore, not inside brackets)
-      const m = fileName.match(/(?:^|[^[\w])[Ee][Pp][-_](\d+)(?:\b|[_\]\s.])/);
+      const m = safeName.match(/(?:^|[^[\w])[Ee][Pp][-_](\d+)(?:\b|[_\]\s.])/);
       return m ? parseInt(m[1], 10) : null;
     }
     case 'ep_bare': {
-      // EPx or epx (directly attached number, not inside brackets)
-      const m = fileName.match(/(?:^|[^[\w])[Ee][Pp](\d+)(?:\b|[_\]\s.])/);
+      const m = safeName.match(/(?:^|[^[\w])[Ee][Pp](\d+)(?:\b|[_\]\s.])/);
       return m ? parseInt(m[1], 10) : null;
     }
     case 'sxxexx': {
-      // S01E04, s1e04, S1E4, etc.
-      const m = fileName.match(/[Ss](\d{1,2})[Ee](\d{2,4})/); // Wait, S01E04, s1e04
+      const m = safeName.match(/[Ss](\d{1,2})[Ee](\d{2,4})/);
       return m ? parseInt(m[2], 10) : null;
     }
     case 'bare': {
-      // Standalone number: strip all bracket content, then find first number
-      const noBrackets = fileName.replace(/\[[^\]]+\]/g, '');
-      // Remove file extension first
+      const noBrackets = safeName.replace(/\[[^\]]+\]/g, '');
       const noExt = noBrackets.replace(/\.[a-zA-Z0-9]+$/, '');
-      // Find numbers separated by common delimiters (space, dash, underscore, dot)
       const m = noExt.match(/(?:^|[\s\-_.])\s*(\d+)\s*(?:[\s\-_.]|$)/);
       return m ? parseInt(m[1], 10) : null;
     }
     case 'episode': {
-      // Episode x, episode x
-      const m = fileName.match(/[Ee][Pp][Ii][Ss][Oo][Dd][Ee]\s*[-_]?\s*(\d+)/);
+      const m = safeName.match(/[Ee][Pp][Ii][Ss][Oo][Dd][Ee]\s*[-_]?\s*(\d+)/);
       return m ? parseInt(m[1], 10) : null;
     }
     default:
-      return null;
+      return extractAuto(safeName);
   }
 }
 
 /**
  * Auto-detect: try all patterns in priority order
  */
-function extractAuto(fileName) {
-  // Priority: bracket > sxxexx > ep_dash > ep_bare > episode > bare
+function extractAuto(fileName = '') {
+  const safeName = String(fileName || '');
   const order = ['bracket', 'sxxexx', 'ep_dash', 'ep_bare', 'episode', 'bare'];
   for (const pid of order) {
-    const num = extractByPattern(fileName, pid);
+    const num = extractByPattern(safeName, pid);
     if (num !== null) return num;
   }
   return null;
 }
 
-export function parseEpisode(fileName, index = 0, patternId = 'auto') {
-  if (patternId === 'anything') {
+export function parseEpisode(fileName = '', index = 0, patternId = 'auto') {
+  const safeName = String(fileName || '');
+  const pId = normalizePatternId(patternId);
+
+  if (pId === 'anything') {
     return {
       episodeNumber: index + 1,
-      animeTitle: fileName.replace(/\.[a-zA-Z0-9]+$/, '').trim(),
-      fileName: fileName
+      animeTitle: safeName.replace(/\.[a-zA-Z0-9]+$/, '').trim(),
+      fileName: safeName
     };
   }
 
   let episodeNumber = null;
 
-  if (patternId === 'auto') {
-    episodeNumber = extractAuto(fileName);
+  if (pId === 'auto') {
+    episodeNumber = extractAuto(safeName);
   } else {
-    episodeNumber = extractByPattern(fileName, patternId);
+    episodeNumber = extractByPattern(safeName, pId);
   }
 
-  // Ultimate fallback: use file index
   if (episodeNumber === null) {
     episodeNumber = index + 1;
   }
 
   // --- Extract Anime Title ---
-  // Strip the [EP-xxx] tag
-  let cleaned = fileName.replace(/\[[Ee][Pp][-_]?(\d+)\]/, '');
-  
-  // Strip all other [...] brackets
+  let cleaned = safeName.replace(/\[[Ee][Pp][-_]?(\d+)\]/, '');
   cleaned = cleaned.replace(/\[[^\]]+\]/g, '');
-  
-  // Strip SxxExx patterns
   cleaned = cleaned.replace(/[Ss]\d{1,2}[Ee]\d{1,4}/g, '');
   
-  // Strip the parsed episode number and its common prefixes
   if (episodeNumber !== null) {
     const epNumPattern = new RegExp(`(?:\\b|_)(?:[Ee][Pp][Ii][Ss][Oo][Dd][Ee]|[Ee][Pp])?\\s*[-_]?\\s*${episodeNumber}(?:\\b|_)`, 'g');
     cleaned = cleaned.replace(epNumPattern, ' ');
   }
 
-  // Strip file extension
   cleaned = cleaned.replace(/\.[a-zA-Z0-9]+$/, '');
-  
-  // Strip common internet tags
   cleaned = cleaned.replace(/@\w+/g, '');
   cleaned = cleaned.replace(/-\s*Dual\s*Audio/gi, '');
   cleaned = cleaned.replace(/_|-/g, ' ');
-  
-  // Normalize whitespace
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
-  // If title ends up empty, fallback
   if (!cleaned) {
-    cleaned = fileName.replace(/\.[a-zA-Z0-9]+$/, '').trim();
+    cleaned = safeName.replace(/\.[a-zA-Z0-9]+$/, '').trim();
   }
 
   return {
     episodeNumber,
     animeTitle: cleaned,
-    fileName: fileName
+    fileName: safeName
   };
 }
 
 /**
  * Sorts an array of episodes numerically by episodeNumber, placing off-pattern files at the top
  */
-export function sortEpisodes(episodes) {
+export function sortEpisodes(episodes = []) {
+  if (!Array.isArray(episodes)) return [];
   return [...episodes].sort((a, b) => {
-    const aOff = !!a.isOffPattern;
-    const bOff = !!b.isOffPattern;
+    const aOff = !!a?.isOffPattern;
+    const bOff = !!b?.isOffPattern;
 
     if (aOff && !bOff) return -1;
     if (!aOff && bOff) return 1;
     if (aOff && bOff) {
-      // Both are off-pattern, sort alphabetically by fileName
-      return a.fileName.localeCompare(b.fileName, undefined, { numeric: true, sensitivity: 'base' });
+      const aName = String(a?.fileName || '');
+      const bName = String(b?.fileName || '');
+      return aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' });
     }
-    // Both are patterned, sort numerically by episodeNumber
-    return a.episodeNumber - b.episodeNumber;
+    const aNum = Number(a?.episodeNumber || 0);
+    const bNum = Number(b?.episodeNumber || 0);
+    return aNum - bNum;
   });
 }
 
 export const getSubfolder = (filePath, rootPath) => {
   if (!filePath || !rootPath) return '';
-  const normFile = filePath.replace(/\\/g, '/');
-  const normRoot = rootPath.replace(/\\/g, '/');
+  const normFile = String(filePath).replace(/\\/g, '/');
+  const normRoot = String(rootPath).replace(/\\/g, '/');
   if (normFile.startsWith(normRoot)) {
     const rel = normFile.slice(normRoot.length).replace(/^\//, '');
     const parts = rel.split('/');
     if (parts.length > 1) {
-      return parts[0]; // Top-level subfolder
+      return parts[0];
     }
   }
-  return ''; // Root
+  return '';
 };
 
 export const getRelativePath = (filePath, rootPath) => {
-  const normFile = filePath.replace(/\\/g, '/');
-  const normRoot = rootPath.replace(/\\/g, '/');
+  if (!filePath) return '';
+  const normFile = String(filePath).replace(/\\/g, '/');
+  const normRoot = rootPath ? String(rootPath).replace(/\\/g, '/') : '';
   let rel = normFile;
   if (normFile.startsWith(normRoot)) {
     rel = normFile.slice(normRoot.length).replace(/^\//, '');
@@ -178,15 +180,20 @@ export const getRelativePath = (filePath, rootPath) => {
 };
 
 export const getSafeDocId = (filePath, rootPath) => {
+  if (!filePath) return 'ep_' + Math.random().toString(36).substr(2, 9);
   const rel = getRelativePath(filePath, rootPath);
-  return 'ep_' + rel.replace(/[^a-zA-Z0-9]/g, '_');
+  return 'ep_' + String(rel).replace(/[^a-zA-Z0-9]/g, '_');
 };
 
-export function processScannedFiles(scanResult, rootPath, namingPattern) {
+export function processScannedFiles(scanResult = [], rootPath = '', namingPattern = 'auto') {
+  if (!Array.isArray(scanResult)) return [];
+  
   // Group files by subfolder
   const groups = {};
   scanResult.forEach(ep => {
-    const folder = getSubfolder(ep.path || ep.filePath, rootPath);
+    if (!ep) return;
+    const pathVal = ep.path || ep.filePath || ep.name || '';
+    const folder = getSubfolder(pathVal, rootPath);
     if (!groups[folder]) {
       groups[folder] = [];
     }
@@ -199,16 +206,17 @@ export function processScannedFiles(scanResult, rootPath, namingPattern) {
   Object.keys(groups).forEach(folder => {
     const files = groups[folder];
 
-    // Determine which are off-pattern and which are patterned
     const offPatternFiles = [];
     const patternedFiles = [];
 
     files.forEach(file => {
+      if (!file) return;
+      const fileName = String(file.name || file.fileName || '');
       let isOff = false;
-      if (namingPattern !== 'anything') {
-        const num = (namingPattern === 'auto')
-          ? extractAuto(file.name)
-          : extractByPattern(file.name, namingPattern);
+      if (normalizePatternId(namingPattern) !== 'anything') {
+        const num = (normalizePatternId(namingPattern) === 'auto')
+          ? extractAuto(fileName)
+          : extractByPattern(fileName, namingPattern);
         if (num === null) {
           isOff = true;
         }
@@ -220,24 +228,22 @@ export function processScannedFiles(scanResult, rootPath, namingPattern) {
       }
     });
 
-    // Sort off-pattern files alphabetically by name
-    offPatternFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    offPatternFiles.sort((a, b) => String(a.name || a.fileName || '').localeCompare(String(b.name || b.fileName || ''), undefined, { numeric: true, sensitivity: 'base' }));
+    patternedFiles.sort((a, b) => String(a.name || a.fileName || '').localeCompare(String(b.name || b.fileName || ''), undefined, { numeric: true, sensitivity: 'base' }));
 
-    // Sort patterned files alphabetically by name first
-    patternedFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-
-    // Now concatenate them: off-pattern first, then patterned
     const combinedFiles = [...offPatternFiles, ...patternedFiles];
 
     combinedFiles.forEach((ep, folderIdx) => {
+      const fileName = String(ep.name || ep.fileName || '');
+      const filePath = String(ep.path || ep.filePath || '');
       const isOff = offPatternFiles.includes(ep);
-      const parsed = parseEpisode(ep.name, folderIdx, namingPattern);
+      const parsed = parseEpisode(fileName, folderIdx, namingPattern);
       allProcessed.push({
         episodeNumber: parsed.episodeNumber,
-        fileName: ep.name,
-        filePath: ep.path || ep.filePath,
+        fileName: fileName,
+        filePath: filePath,
         createdAt: ep.createdAt || Date.now(),
-        docId: getSafeDocId(ep.path || ep.filePath, rootPath),
+        docId: getSafeDocId(filePath, rootPath),
         isOffPattern: isOff
       });
     });

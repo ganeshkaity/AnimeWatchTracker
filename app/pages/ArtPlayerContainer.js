@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import Artplayer from 'artplayer';
-import { X } from 'lucide-react';
+import { X, RotateCcw, RotateCw } from 'lucide-react';
 import { doc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
@@ -57,7 +58,7 @@ const patchPrototype = () => {
 if (typeof window !== 'undefined') patchPrototype();
 
 
-export default function ArtPlayerContainer({ animeId, episodeId, episodes, onBack }) {
+export default function ArtPlayerContainer({ animeId, episodeId, episodes, onBack, initialSpeed = 1, initialVolume = 1 }) {
   const { currentUser } = useAuth();
   const [currentEpisodeId, setCurrentEpisodeId] = useState(episodeId);
   const [episode, setEpisode] = useState(null);
@@ -70,6 +71,15 @@ export default function ArtPlayerContainer({ animeId, episodeId, episodes, onBac
   const [selectedSubtitle, setSelectedSubtitle] = useState(null);
   const [showTopBar, setShowTopBar] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [portalTarget, setPortalTarget] = useState(null);
+  const [seekToast, setSeekToast] = useState('');
+  const toastTimeoutRef = useRef(null);
+
+  const triggerToast = useCallback((msg) => {
+    setSeekToast(msg);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => setSeekToast(''), 1000);
+  }, []);
 
   const containerRef = useRef(null);
   const playerRef = useRef(null);
@@ -92,11 +102,32 @@ export default function ArtPlayerContainer({ animeId, episodeId, episodes, onBac
     setEpisode(episodes.find(e => e.id === currentEpisodeId) ?? null);
   }, [currentEpisodeId, episodes]);
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-  const buildStreamUrl = useCallback((filePath, audioIndex, startOffset) => {
+  const artSessionIdRef = useRef('');
+
+  useEffect(() => {
+    artSessionIdRef.current = `yt_art_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const session = artSessionIdRef.current;
+    return () => {
+      if (session) {
+        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+          navigator.sendBeacon('/api/youtube/close-stream', JSON.stringify({ sessionId: session }));
+        } else {
+          fetch(`/api/youtube/close-stream?sessionId=${session}`, { keepalive: true }).catch(() => {});
+        }
+      }
+    };
+  }, [currentEpisodeId]);
+
+  const buildStreamUrl = useCallback((filePath, audioIndex, startOffset, epObj) => {
+    if (epObj?.isYouTube || filePath?.startsWith('youtube://')) {
+      const vId = epObj?.youtubeId || filePath?.replace('youtube://', '');
+      const quality = epObj?.selectedQuality || 'best';
+      return `/api/youtube/stream?videoId=${encodeURIComponent(vId)}&quality=${encodeURIComponent(quality)}&sessionId=${artSessionIdRef.current}`;
+    }
+    if (!filePath) return '';
     let url = `/api/video/stream?path=${encodeURIComponent(filePath)}`;
     if (audioIndex !== null && audioIndex !== undefined) url += `&audioIndex=${audioIndex}`;
-    const isMkv = filePath.toLowerCase().endsWith('.mkv');
+    const isMkv = (filePath || '').toLowerCase().endsWith('.mkv');
     const remuxing = !!(isMkv || audioIndex !== null);
     if (remuxing && startOffset > 0) url += `&ss=${(startOffset + 0.1).toFixed(3)}`;
     return url;
@@ -264,10 +295,15 @@ export default function ArtPlayerContainer({ animeId, episodeId, episodes, onBac
 
     const init = async () => {
       const s = stateRef.current;
-      let metaDuration = 0;
+      let metaDuration = episode?.durationSeconds || 0;
       let metaAudioTracks = [];
       let metaSubtitleTracks = [];
       let resumeOffset = 0;
+
+      if (metaDuration > 0) {
+        setDuration(metaDuration);
+        s.duration = metaDuration;
+      }
 
       // 1. Fetch metadata
       try {
@@ -314,7 +350,7 @@ export default function ArtPlayerContainer({ animeId, episodeId, episodes, onBac
       s.isRemuxing = !!(isMkv || s.selectedAudio !== null);
 
       // 3. Build initial URL
-      const videoSrc = buildStreamUrl(episode.filePath, s.selectedAudio, resumeOffset);
+      const videoSrc = buildStreamUrl(episode.filePath, s.selectedAudio, resumeOffset, episode);
 
       if (!containerRef.current) return;
 
@@ -322,7 +358,8 @@ export default function ArtPlayerContainer({ animeId, episodeId, episodes, onBac
       art = new Artplayer({
         container: containerRef.current,
         url: videoSrc,
-        volume: 1.0,
+        volume: Math.min(1, Math.max(0, initialVolume)),
+        playbackRate: true,
         muted: false,
         autoplay: true,
         pip: true,
@@ -391,9 +428,51 @@ export default function ArtPlayerContainer({ animeId, episodeId, episodes, onBac
             },
           }] : []),
         ],
+        controls: [
+          {
+            name: 'rewind-10',
+            position: 'left',
+            index: 10,
+            html: `
+              <div style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 6px;font-size:12px;font-weight:bold;color:#fff;opacity:0.9;" title="Rewind 10s (Left Arrow)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 19 2 12 11 5 11 19"/><polygon points="22 19 13 12 22 5 22 19"/></svg>
+              </div>
+            `,
+            click: function () {
+              if (playerRef.current && performSeekRef.current) {
+                const cur = playerRef.current.video ? playerRef.current.video.currentTime : 0;
+                performSeekRef.current(cur - 10);
+                triggerToast('-10s');
+              }
+            },
+          },
+          {
+            name: 'forward-10',
+            position: 'left',
+            index: 11,
+            html: `
+              <div style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 6px;font-size:12px;font-weight:bold;color:#fff;opacity:0.9;" title="Forward 10s (Right Arrow)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/></svg>
+              </div>
+            `,
+            click: function () {
+              if (playerRef.current && performSeekRef.current) {
+                const cur = playerRef.current.video ? playerRef.current.video.currentTime : 0;
+                performSeekRef.current(cur + 10);
+                triggerToast('+10s');
+              }
+            },
+          },
+        ],
       });
 
       playerRef.current = art;
+      if (initialSpeed && initialSpeed !== 1) {
+        art.playbackRate = initialSpeed;
+      }
+      if (art.template?.$player) {
+        setPortalTarget(art.template.$player);
+      }
 
       // 5. Patch the video element
       if (art.video) {
@@ -444,6 +523,7 @@ export default function ArtPlayerContainer({ animeId, episodeId, episodes, onBac
 
     return () => {
       cancelled = true;
+      setPortalTarget(null);
       if (art?.destroy) art.destroy(true);
       playerRef.current = null;
     };
@@ -478,14 +558,57 @@ export default function ArtPlayerContainer({ animeId, episodeId, episodes, onBac
     } catch (e) { console.warn('[subtitle switch]', e); }
   }, [selectedSubtitle, episode?.filePath]);
 
-  // ── Keyboard ───────────────────────────────────────────────────────────────
+  // ── Keyboard Shortcuts ─────────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape') { forceSaveProgress(); onBack(); }
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+      const art = playerRef.current;
+
+      if (e.key === 'Escape') {
+        forceSaveProgress();
+        onBack();
+      } else if (e.key === 'ArrowRight' || e.key === 'l' || e.key === 'L') {
+        e.preventDefault();
+        if (art?.video && performSeekRef.current) {
+          const target = art.video.currentTime + 10;
+          performSeekRef.current(target);
+          triggerToast('+10s');
+        }
+      } else if (e.key === 'ArrowLeft' || e.key === 'j' || e.key === 'J') {
+        e.preventDefault();
+        if (art?.video && performSeekRef.current) {
+          const target = art.video.currentTime - 10;
+          performSeekRef.current(target);
+          triggerToast('-10s');
+        }
+      } else if (e.key === ' ' || e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        if (art) {
+          art.toggle();
+          triggerToast(art.playing ? 'Pause' : 'Play');
+        }
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        if (art) {
+          art.fullscreen = !art.fullscreen;
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (art) {
+          art.volume = Math.min(1, Math.round((art.volume + 0.1) * 10) / 10);
+          triggerToast(`Vol: ${Math.round(art.volume * 100)}%`);
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (art) {
+          art.volume = Math.max(0, Math.round((art.volume - 0.1) * 10) / 10);
+          triggerToast(`Vol: ${Math.round(art.volume * 100)}%`);
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [forceSaveProgress, onBack]);
+  }, [forceSaveProgress, onBack, triggerToast]);
 
   // ── Duration sync to video element ─────────────────────────────────────────
   useEffect(() => {
@@ -505,6 +628,36 @@ export default function ArtPlayerContainer({ animeId, episodeId, episodes, onBac
 
   return (
     <div className="fixed inset-0 z-50 bg-[#020208] flex items-center justify-center overflow-hidden select-none">
+      {/* Custom CSS overrides for modern Artplayer controls */}
+      <style>{`
+        .art-video-player .art-bottom {
+          bottom: 18px !important;
+          padding: 0 24px !important;
+          z-index: 25 !important;
+        }
+        .art-video-player .art-controls {
+          height: 48px !important;
+        }
+        .art-video-player .art-control {
+          font-size: 16px !important;
+          margin-right: 8px !important;
+        }
+        .art-video-player .art-control-time {
+          font-size: 13px !important;
+          font-weight: 600 !important;
+          color: #f1f5f9 !important;
+          letter-spacing: 0.5px !important;
+        }
+        .art-video-player .art-progress {
+          height: 6px !important;
+          margin-bottom: 10px !important;
+          border-radius: 4px !important;
+        }
+        .art-video-player .art-progress:hover {
+          height: 8px !important;
+        }
+      `}</style>
+
       {/* Loading overlay */}
       {loading && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-[#020208]">
@@ -520,62 +673,86 @@ export default function ArtPlayerContainer({ animeId, episodeId, episodes, onBac
         style={{ visibility: loading ? 'hidden' : 'visible' }}
       />
 
-      {/* Top overlay bar */}
-      {!loading && (
-        <div
-          className={`absolute top-0 left-0 right-0 z-20 pointer-events-none transition-opacity duration-300 ${
-            showTopBar ? 'opacity-100' : 'opacity-0'
-          }`}
-        >
+      {/* Portal Top Bar & Vignette Overlays directly inside ArtPlayer Fullscreen Element */}
+      {portalTarget && createPortal(
+        <>
+          {/* Top Dark Vignette Gradient */}
           <div
-            className="pointer-events-auto flex items-center justify-between px-5 py-4"
-            style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.85), transparent)' }}
+            className={`absolute top-0 inset-x-0 h-36 bg-gradient-to-b from-black/90 via-black/50 to-transparent pointer-events-none transition-opacity duration-300 z-20 ${
+              showTopBar ? 'opacity-100' : 'opacity-0'
+            }`}
+          />
+
+          {/* Bottom Dark Vignette Gradient */}
+          <div
+            className={`absolute bottom-0 inset-x-0 h-44 bg-gradient-to-t from-black/95 via-black/60 to-transparent pointer-events-none transition-opacity duration-300 z-10 ${
+              showTopBar ? 'opacity-100' : 'opacity-0'
+            }`}
+          />
+
+          {/* Top Bar (Fullscreen & Windowed) */}
+          <div
+            className={`absolute top-0 left-0 right-0 z-30 pointer-events-none transition-opacity duration-300 ${
+              showTopBar ? 'opacity-100' : 'opacity-0'
+            }`}
           >
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => { forceSaveProgress(); onBack(); }}
-                className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:text-cyan-400 hover:bg-white/10 transition cursor-pointer"
-                title="Back (Esc)"
-              >
-                <X size={18} />
-              </button>
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded">
-                  Episode {episode?.episodeNumber}
-                </span>
-                <h2 className="text-sm font-bold text-white mt-1 max-w-lg truncate" title={episode?.fileName}>
-                  {episode?.fileName}
-                </h2>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div className="flex gap-2">
+            <div className="pointer-events-auto flex items-center justify-between px-6 py-4">
+              <div className="flex items-center gap-3">
                 <button
-                  disabled={!hasPrev}
-                  onClick={() => navigateToEpisode(currentEpIndex - 1)}
-                  className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] uppercase font-bold text-gray-300 hover:text-cyan-400 hover:bg-white/10 transition cursor-pointer disabled:opacity-20 disabled:pointer-events-none"
+                  onClick={() => { forceSaveProgress(); onBack(); }}
+                  className="p-2.5 rounded-xl bg-black/40 border border-white/15 hover:text-cyan-400 hover:bg-white/20 transition cursor-pointer backdrop-blur-md"
+                  title="Back (Esc)"
                 >
-                  ◀ Prev
+                  <X size={18} />
                 </button>
-                <button
-                  disabled={!hasNext}
-                  onClick={() => navigateToEpisode(currentEpIndex + 1)}
-                  className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] uppercase font-bold text-gray-300 hover:text-cyan-400 hover:bg-white/10 transition cursor-pointer disabled:opacity-20 disabled:pointer-events-none"
-                >
-                  Next ▶
-                </button>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-purple-400 bg-purple-500/20 border border-purple-500/30 px-2 py-0.5 rounded backdrop-blur-md">
+                    Episode {episode?.episodeNumber}
+                  </span>
+                  <h2 className="text-sm font-bold text-white mt-1 max-w-lg truncate drop-shadow-md" title={episode?.fileName}>
+                    {episode?.fileName}
+                  </h2>
+                </div>
               </div>
 
-              <div className="text-right hidden sm:block">
-                <div className="text-[10px] text-gray-500 uppercase tracking-wider">Watched</div>
-                <div className="text-xs font-bold text-cyan-400">
-                  {Math.round(duration ? (currentTime / duration) * 100 : 0)}%
+              <div className="flex items-center gap-4">
+                <div className="flex gap-2">
+                  <button
+                    disabled={!hasPrev}
+                    onClick={() => navigateToEpisode(currentEpIndex - 1)}
+                    className="px-3 py-1.5 rounded-lg bg-black/40 border border-white/15 text-[10px] uppercase font-bold text-gray-200 hover:text-cyan-400 hover:bg-white/20 transition cursor-pointer disabled:opacity-20 disabled:pointer-events-none backdrop-blur-md"
+                  >
+                    ◀ Prev
+                  </button>
+                  <button
+                    disabled={!hasNext}
+                    onClick={() => navigateToEpisode(currentEpIndex + 1)}
+                    className="px-3 py-1.5 rounded-lg bg-black/40 border border-white/15 text-[10px] uppercase font-bold text-gray-200 hover:text-cyan-400 hover:bg-white/20 transition cursor-pointer disabled:opacity-20 disabled:pointer-events-none backdrop-blur-md"
+                  >
+                    Next ▶
+                  </button>
+                </div>
+
+                <div className="text-right hidden sm:block">
+                  <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Watched</div>
+                  <div className="text-xs font-bold text-cyan-400 drop-shadow">
+                    {Math.round(duration ? (currentTime / duration) * 100 : 0)}%
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+
+          {/* On-screen Seek & Action Toast Notification */}
+          {seekToast && (
+            <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
+              <div className="px-5 py-3 rounded-2xl bg-black/80 text-cyan-400 font-extrabold text-base border border-cyan-500/40 shadow-[0_0_30px_rgba(0,240,255,0.3)] backdrop-blur-md animate-bounce">
+                {seekToast}
+              </div>
+            </div>
+          )}
+        </>,
+        portalTarget
       )}
     </div>
   );

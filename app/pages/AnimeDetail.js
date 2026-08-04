@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { collection, query, onSnapshot, doc, updateDoc, getDocs, writeBatch, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
@@ -15,7 +15,8 @@ import {
   ArrowLeft, Play, CheckCircle2, Bookmark, StickyNote, Star, AlertTriangle, 
   Sparkles, History, RotateCcw, X, Heart, EyeOff, Film, Clock, Search,
   ChevronDown, ChevronUp, Folder, Tv, ExternalLink, RefreshCw, Loader2, CheckCheck,
-  Wifi, Laptop, Smartphone, Settings2, QrCode
+  Wifi, Laptop, Smartphone, Settings2, QrCode, Youtube, FolderPlus, Trash2, Edit3,
+  Move, Upload, FolderTree, FileVideo, HardDrive, FilePlus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -66,7 +67,7 @@ const VLCIcon = ({ className }) => (
 );
 
 export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
-  const { currentUser } = useAuth();
+  const { currentUser, updateDefaultPlayer } = useAuth();
   const { isOffline } = useOffline();
   const [anime, setAnime] = useState(null);
   const [episodes, setEpisodes] = useState([]);
@@ -85,6 +86,109 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   // Play Option Modal state
   const [promptPlayEp, setPromptPlayEp] = useState(null);
   const [makeDefault, setMakeDefault] = useState(false);
+  const [fetchingDuration, setFetchingDuration] = useState(false);
+  // Bulk duration refetch state
+  const [refetchDurationProgress, setRefetchDurationProgress] = useState(null); // null | { done, total, current }
+
+  const DEFAULT_HARDCODED_QUALITIES = [
+    { id: 'best', label: 'Best Available (Auto)' },
+    { id: '1080p', label: '1080p HD' },
+    { id: '720p', label: '720p HD' },
+    { id: '480p', label: '480p SD' },
+    { id: '360p', label: '360p SD' },
+    { id: '240p', label: '240p SD' },
+    { id: '144p', label: '144p SD' },
+    { id: 'audio-only', label: 'Audio Only' },
+  ];
+
+  // Dynamic YouTube Quality State — Default hardcoded options
+  const [ytModalQualities, setYtModalQualities] = useState(DEFAULT_HARDCODED_QUALITIES);
+  const [ytModalSelectedQuality, setYtModalSelectedQuality] = useState('best');
+  const [ytModalLoadingQualities, setYtModalLoadingQualities] = useState(false);
+
+  const [ytWidgetQualities, setYtWidgetQualities] = useState(DEFAULT_HARDCODED_QUALITIES);
+  const [ytWidgetSelectedQuality, setYtWidgetSelectedQuality] = useState('best');
+  const [ytWidgetLoadingQualities, setYtWidgetLoadingQualities] = useState(false);
+
+  // Rescan & Naming Pattern State
+  const [showRescanModal, setShowRescanModal] = useState(false);
+  const [rescanStatus, setRescanStatus] = useState('idle'); // 'idle' | 'scanning' | 'completed' | 'error'
+  const [rescanMessage, setRescanMessage] = useState('');
+  const [selectedNamingPattern, setSelectedNamingPattern] = useState('Auto');
+  const [manageFolderExpanded, setManageFolderExpanded] = useState(true);
+
+  // File Manager Modal State
+  const [showFileManagerModal, setShowFileManagerModal] = useState(false);
+  const [fmTree, setFmTree] = useState(null);
+  const [fmLoading, setFmLoading] = useState(false);
+  const [fmCurrentPath, setFmCurrentPath] = useState('');
+  const [fmNewFolderName, setFmNewFolderName] = useState('');
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
+  const [fmNewFileName, setFmNewFileName] = useState('');
+  const [showNewFileInput, setShowNewFileInput] = useState(false);
+  const [fmRenameTarget, setFmRenameTarget] = useState(null);
+  const [fmNewName, setFmNewName] = useState('');
+  const [fmMoveTarget, setFmMoveTarget] = useState(null);
+  const [fmDestPath, setFmDestPath] = useState('');
+
+  // Manual fetch YouTube qualities for player selection modal
+  const handleFetchYtModalQualities = useCallback(() => {
+    if (!promptPlayEp) return;
+    const vId = promptPlayEp.youtubeId || promptPlayEp.filePath?.replace('youtube://', '');
+    if (!vId) return;
+    setYtModalLoadingQualities(true);
+    fetch('/api/youtube/qualities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoId: vId })
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.qualities)) {
+          setYtModalQualities(data.qualities);
+          if (data.duration && (!promptPlayEp.durationSeconds || promptPlayEp.durationSeconds === 0)) {
+            const updatedEp = { 
+              ...promptPlayEp, 
+              durationSeconds: data.duration,
+              updatedAt: new Date().toISOString()
+            };
+            upsertLocalEpisode(animeId, updatedEp);
+            setEpisodes(prev => prev.map(e => e.id === updatedEp.id ? { ...e, ...updatedEp } : e));
+          }
+        }
+      })
+      .catch(err => console.error(err))
+      .finally(() => setYtModalLoadingQualities(false));
+  }, [promptPlayEp, animeId]);
+
+  // Manual fetch YouTube qualities for Media Controls widget
+  const handleFetchYtWidgetQualities = useCallback(() => {
+    if (!episodes || episodes.length === 0) return;
+    const sampleEp = episodes[0];
+    const vId = sampleEp.youtubeId || sampleEp.filePath?.replace('youtube://', '');
+    if (!vId) return;
+    setYtWidgetLoadingQualities(true);
+    fetch('/api/youtube/qualities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoId: vId })
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.qualities)) {
+          setYtWidgetQualities(data.qualities);
+        }
+      })
+      .catch(err => console.error(err))
+      .finally(() => setYtWidgetLoadingQualities(false));
+  }, [episodes]);
+
+  // Reset modal selected quality when promptPlayEp opens
+  useEffect(() => {
+    if (promptPlayEp) {
+      setYtModalSelectedQuality(promptPlayEp.selectedQuality || 'best');
+    }
+  }, [promptPlayEp]);
 
   
   // Search / Filters
@@ -112,12 +216,6 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     return 100;
   });
 
-  // Rescan Modal state
-  const [showRescanModal, setShowRescanModal] = useState(false);
-  const [rescanStatus, setRescanStatus] = useState('idle'); // idle, scanning, comparing, syncing, completed, error
-  const [rescanError, setRescanError] = useState('');
-  const [rescanChanges, setRescanChanges] = useState({ added: [], removed: [] });
-  const [scannedFilesCount, setScannedFilesCount] = useState(0);
   const [actionsCollapsed, setActionsCollapsed] = useState(true);
 
   // Stream Pairing & Playback Target state
@@ -144,126 +242,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     checkPairingState();
   }, []);
 
-  const handleRescan = async () => {
-    if (!currentUser || !anime) return;
-    setShowRescanModal(true);
-    setRescanStatus('scanning');
-    setRescanError('');
-    setRescanChanges({ added: [], removed: [] });
-    setScannedFilesCount(0);
 
-    const targetUserId = getUserId();
-
-    try {
-      // 1. Fetch latest scan from local path
-      const res = await fetch('/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folderPath: anime.folderPath })
-      });
-      const scanData = await res.json();
-
-      if (!scanData.success) {
-        throw new Error(scanData.error || "Failed to scan folder");
-      }
-
-      const scannedFiles = scanData.episodes;
-      setScannedFilesCount(scannedFiles.length);
-      setRescanStatus('comparing');
-
-      // 2. Fetch existing episodes from Firestore
-      const episodesRef = collection(db, 'users', targetUserId, 'anime', anime.id, 'episodes');
-      const snap = await getDocs(episodesRef);
-      const dbEpisodes = [];
-      snap.forEach((d) => {
-        dbEpisodes.push({ id: d.id, ...d.data() });
-      });
-
-      // Match scanned files with database episodes by filePath
-      const existingPaths = new Set(dbEpisodes.map(ep => ep.filePath.replace(/\\/g, '/')));
-      const scannedPaths = new Set(scannedFiles.map(f => f.path.replace(/\\/g, '/')));
-
-      const newFiles = scannedFiles.filter(f => !existingPaths.has(f.path.replace(/\\/g, '/')));
-      const removedEpisodes = dbEpisodes.filter(ep => !scannedPaths.has(ep.filePath.replace(/\\/g, '/')));
-
-      setRescanChanges({
-        added: newFiles,
-        removed: removedEpisodes
-      });
-
-      if (newFiles.length === 0 && removedEpisodes.length === 0) {
-        setRescanStatus('completed');
-        return;
-      }
-
-      setRescanStatus('syncing');
-
-      // 3. Process scanned files per-folder using processScannedFiles
-      const processedScanned = processScannedFiles(scannedFiles, anime.folderPath, anime.namingPattern || 'auto');
-
-      const batch = writeBatch(db);
-
-      // Add new files
-      newFiles.forEach(f => {
-        const processed = processedScanned.find(p => p.filePath === f.path);
-        const epNum = processed ? processed.episodeNumber : 1;
-        const docId = processed ? processed.docId : getSafeDocId(f.path, anime.folderPath);
-        const isOff = processed ? !!processed.isOffPattern : false;
-
-        const newEpData = {
-          episodeNumber: epNum,
-          fileName: f.name,
-          filePath: f.path,
-          createdAt: f.createdAt || Date.now(),
-          watchedSeconds: 0,
-          durationSeconds: 0,
-          lastPositionSeconds: 0,
-          isWatched: false,
-          isFlagged: false,
-          flags: [],
-          note: '',
-          updatedAt: new Date().toISOString(),
-          isOffPattern: isOff
-        };
-
-        const epDocRef = doc(db, 'users', targetUserId, 'anime', anime.id, 'episodes', docId);
-        batch.set(epDocRef, newEpData);
-      });
-
-      // Delete removed episodes
-      removedEpisodes.forEach(ep => {
-        const epDocRef = doc(db, 'users', targetUserId, 'anime', anime.id, 'episodes', ep.id);
-        batch.delete(epDocRef);
-      });
-
-      // Commit batch
-      await batch.commit();
-
-      // 4. Update parent anime metadata
-      const finalEpsCount = scannedFiles.length;
-      let finalWatchedCount = 0;
-      dbEpisodes.forEach(ep => {
-        const isRemoved = removedEpisodes.some(r => r.id === ep.id);
-        if (!isRemoved && ep.isWatched) {
-          finalWatchedCount++;
-        }
-      });
-      const nextProgressPercent = finalEpsCount > 0 ? (finalWatchedCount / finalEpsCount) * 100 : 0;
-
-      const animeRef = doc(db, 'users', targetUserId, 'anime', anime.id);
-      await updateDoc(animeRef, {
-        episodeCount: finalEpsCount,
-        progressPercent: nextProgressPercent,
-        updatedAt: new Date().toISOString()
-      });
-
-      setRescanStatus('completed');
-    } catch (err) {
-      console.error("Rescanning error:", err);
-      setRescanStatus('error');
-      setRescanError(err.message || "An error occurred during rescanning.");
-    }
-  };
 
   const handleMarkAllWatched = async () => {
     if (!currentUser || !animeId) return;
@@ -513,11 +492,9 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   };
 
   const saveDefaultPlayerIfChecked = async (playerType) => {
-    if (makeDefault && currentUser) {
+    if (makeDefault && updateDefaultPlayer) {
       try {
-        await updateDoc(doc(db, 'users', getUserId()), {
-          defaultPlayer: playerType
-        });
+        await updateDefaultPlayer(playerType);
       } catch (err) {
         console.error("Failed to save default player:", err);
       }
@@ -572,52 +549,442 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   const playInBuiltin = async (episode) => {
     setPromptPlayEp(null);
     await saveDefaultPlayerIfChecked('builtin');
+    const quality = ytModalSelectedQuality || episode.selectedQuality || ytWidgetSelectedQuality || 'best';
     if (onPlayEpisode) {
-      onPlayEpisode(episode.id, episodes);
+      onPlayEpisode(episode.id, episodes, 'builtin', {
+        speed: playbackSpeed,
+        volume: playbackVolume,
+        quality
+      });
     }
   };
 
   const playInArtPlayer = async (episode) => {
     setPromptPlayEp(null);
     await saveDefaultPlayerIfChecked('artplayer');
+    const quality = ytModalSelectedQuality || episode.selectedQuality || ytWidgetSelectedQuality || 'best';
     if (onPlayEpisode) {
-      onPlayEpisode(episode.id, episodes, 'artplayer');
+      onPlayEpisode(episode.id, episodes, 'artplayer', {
+        speed: playbackSpeed,
+        volume: playbackVolume,
+        quality
+      });
     }
   };
 
   const playInVideoJs = async (episode) => {
     setPromptPlayEp(null);
     await saveDefaultPlayerIfChecked('videojs');
+    const quality = ytModalSelectedQuality || episode.selectedQuality || ytWidgetSelectedQuality || 'best';
     if (onPlayEpisode) {
-      onPlayEpisode(episode.id, episodes, 'videojs');
+      onPlayEpisode(episode.id, episodes, 'videojs', {
+        speed: playbackSpeed,
+        volume: playbackVolume,
+        quality
+      });
     }
+  };
+
+  const playInYoutube = async (episode) => {
+    setPromptPlayEp(null);
+    await saveDefaultPlayerIfChecked('youtube');
+    if (onPlayEpisode) {
+      onPlayEpisode(episode.id, episodes, 'youtube', {
+        speed: playbackSpeed,
+        volume: playbackVolume,
+        quality: 'best' // Embed ignores our quality fetch, but we pass it anyway
+      });
+    }
+  };
+
+  // Fetch YouTube video duration if not already stored
+  const ensureYtDuration = async (episode) => {
+    if (episode.durationSeconds && episode.durationSeconds > 0) return episode;
+    const isYt = episode.isYouTube || episode.filePath?.startsWith('youtube://');
+    if (!isYt) return episode;
+
+    const vId = episode.youtubeId || episode.filePath?.replace('youtube://', '');
+    if (!vId) return episode;
+
+    setFetchingDuration(true);
+    try {
+      const res = await fetch('/api/youtube/duration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId: vId })
+      });
+      const data = await res.json();
+      if (data.success && data.duration > 0) {
+        const updatedEp = { ...episode, durationSeconds: data.duration };
+        // Persist to Firestore
+        if (currentUser) {
+          try {
+            const epRef = doc(db, 'users', currentUser.uid, 'anime', animeId, 'episodes', episode.id);
+            await updateDoc(epRef, { durationSeconds: data.duration });
+          } catch (e) { console.error('[duration save]', e); }
+        }
+        // Update local state
+        upsertLocalEpisode(animeId, updatedEp);
+        setEpisodes(prev => prev.map(e => e.id === episode.id ? { ...e, durationSeconds: data.duration } : e));
+        setFetchingDuration(false);
+        return updatedEp;
+      }
+    } catch (err) {
+      console.error('[ensureYtDuration]', err);
+    }
+    setFetchingDuration(false);
+    return episode;
+  };
+
+  // Bulk refetch durations for ALL YouTube episodes (force-refetch, ignores existing)
+  const handleRefetchAllDurations = async () => {
+    const ytEpisodes = episodes.filter(e => e.isYouTube || e.filePath?.startsWith('youtube://'));
+    if (ytEpisodes.length === 0) return;
+
+    setRefetchDurationProgress({ done: 0, total: ytEpisodes.length, current: '' });
+
+    for (let i = 0; i < ytEpisodes.length; i++) {
+      const ep = ytEpisodes[i];
+      const vId = ep.youtubeId || ep.filePath?.replace('youtube://', '');
+      if (!vId) {
+        setRefetchDurationProgress(p => ({ ...p, done: i + 1, current: ep.fileName || `Episode ${ep.episodeNumber}` }));
+        continue;
+      }
+
+      setRefetchDurationProgress(p => ({
+        ...p,
+        done: i,
+        current: ep.fileName || `Episode ${ep.episodeNumber}`
+      }));
+
+      try {
+        const res = await fetch('/api/youtube/duration', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoId: vId })
+        });
+        const data = await res.json();
+        if (data.success && data.duration > 0) {
+          // Save to Firestore
+          if (currentUser) {
+            try {
+              const epRef = doc(db, 'users', currentUser.uid, 'anime', animeId, 'episodes', ep.id);
+              await updateDoc(epRef, { durationSeconds: data.duration });
+            } catch (e) { console.error('[bulk duration save]', e); }
+          }
+          // Update local state
+          setEpisodes(prev => prev.map(e => e.id === ep.id ? { ...e, durationSeconds: data.duration } : e));
+        }
+      } catch (err) {
+        console.error('[bulk duration refetch]', ep.id, err);
+      }
+
+      setRefetchDurationProgress(p => ({ ...p, done: i + 1 }));
+    }
+
+    setRefetchDurationProgress(null);
   };
 
   // Trigger episode click options
   const handlePlayEpisode = async (episode) => {
     if (streamPairing && streamTarget === 'mobile') {
-      // If "Stream to Mobile" is selected, open player selection window
       setStreamPlayerModalEp(episode);
       return;
     }
 
     const defPlayer = currentUser?.defaultPlayer;
+    const isYt = episode.isYouTube || episode.filePath?.startsWith('youtube://');
+
+    // Pre-fetch YouTube duration before launching any player
+    const ep = isYt ? await ensureYtDuration(episode) : episode;
+
     if (defPlayer && defPlayer !== 'ask') {
       if (defPlayer === 'builtin') {
-        playInBuiltin(episode);
+        playInBuiltin(ep);
       } else if (defPlayer === 'artplayer') {
-        playInArtPlayer(episode);
+        playInArtPlayer(ep);
       } else if (defPlayer === 'videojs') {
-        playInVideoJs(episode);
+        playInVideoJs(ep);
+      } else if (defPlayer === 'youtube') {
+        if (isYt) playInYoutube(ep);
+        else playInBuiltin(ep);
       } else if (defPlayer === 'vlc') {
-        playInVlc(episode);
+        if (isYt) {
+          setMakeDefault(false);
+          setPromptPlayEp(ep);
+        } else {
+          playInVlc(ep);
+        }
       }
     } else {
       setMakeDefault(false);
-      setPromptPlayEp(episode);
+      setPromptPlayEp(ep);
     }
   };
 
+  // Handle folder / playlist rescan
+  const handleRescan = async (patternOverride) => {
+    if (!anime) return;
+    const pattern = patternOverride || selectedNamingPattern || anime.namingPattern || 'Auto';
+    setRescanStatus('scanning');
+    setRescanMessage('Scanning folder / playlist for changes...');
+    setShowRescanModal(true);
+
+    try {
+      const isYt = anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://');
+      
+      if (isYt) {
+        setRescanMessage('Fetching YouTube playlist video list...');
+        const res = await fetch('/api/youtube/playlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: anime.folderPath })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          throw new Error(data.error || 'Failed to fetch YouTube playlist');
+        }
+
+        const ytVideos = data.playlist?.videos || [];
+        const existingEpMap = new Map(episodes.map(e => [e.id, e]));
+
+        const updatedEps = ytVideos.map((v, idx) => {
+          const epId = getSafeDocId(`yt_${v.id}`);
+          const existing = existingEpMap.get(epId);
+          return {
+            id: epId,
+            animeId: animeId,
+            episodeNumber: idx + 1,
+            fileName: v.title || `Episode ${idx + 1}`,
+            filePath: `youtube://${v.id}`,
+            youtubeId: v.id,
+            thumbnailUrl: v.thumbnail || '',
+            durationSeconds: v.durationSeconds || 0,
+            durationString: v.durationString || '',
+            isYouTube: true,
+            isWatched: existing ? existing.isWatched : false,
+            watchedSeconds: existing ? existing.watchedSeconds : 0,
+            lastPositionSeconds: existing ? existing.lastPositionSeconds : 0,
+            flags: existing ? existing.flags : [],
+            note: existing ? existing.note : '',
+            updatedAt: new Date().toISOString()
+          };
+        });
+
+        // Save locally
+        setEpisodes(sortEpisodes(updatedEps));
+        setLocalEpisodes(animeId, updatedEps);
+        upsertLocalAnime({ ...anime, episodeCount: updatedEps.length, updatedAt: new Date().toISOString() });
+
+        // Save to Firestore if online
+        if (!isOffline && db && currentUser) {
+          const batch = writeBatch(db);
+          updatedEps.forEach(ep => {
+            const epRef = doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id);
+            batch.set(epRef, ep, { merge: true });
+          });
+          const animeRef = doc(db, 'users', getUserId(), 'anime', animeId);
+          batch.update(animeRef, { episodeCount: updatedEps.length, updatedAt: new Date().toISOString() });
+          await batch.commit();
+        }
+
+        setRescanStatus('completed');
+        setRescanMessage(`Rescan complete! Found ${updatedEps.length} videos in YouTube playlist.`);
+      } else {
+        // Local Folder Scan
+        setRescanMessage(`Scanning local folder with pattern: ${pattern}...`);
+        const res = await fetch('/api/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folderPath: anime.folderPath, namingPattern: pattern })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          throw new Error(data.error || 'Failed to scan folder');
+        }
+
+        const scannedFiles = data.episodes || data.files || [];
+        const processed = processScannedFiles(scannedFiles, anime.folderPath, pattern);
+        const existingEpMap = new Map(episodes.map(e => [e.id, e]));
+
+        const updatedEps = processed.map((pEp) => {
+          const epId = pEp.id || pEp.docId || getSafeDocId(pEp.filePath || pEp.fileName, anime.folderPath);
+          const existing = existingEpMap.get(epId);
+          return {
+            ...pEp,
+            id: epId,
+            animeId: animeId,
+            isWatched: existing ? existing.isWatched : (pEp.isWatched || false),
+            watchedSeconds: existing ? existing.watchedSeconds : (pEp.watchedSeconds || 0),
+            lastPositionSeconds: existing ? existing.lastPositionSeconds : (pEp.lastPositionSeconds || 0),
+            flags: existing ? existing.flags : (pEp.flags || []),
+            note: existing ? existing.note : (pEp.note || ''),
+            updatedAt: new Date().toISOString()
+          };
+        });
+
+        // Save locally
+        setEpisodes(sortEpisodes(updatedEps));
+        setLocalEpisodes(animeId, updatedEps);
+        upsertLocalAnime({ ...anime, namingPattern: pattern, episodeCount: updatedEps.length, updatedAt: new Date().toISOString() });
+
+        // Save to Firestore if online
+        if (!isOffline && db && currentUser) {
+          const batch = writeBatch(db);
+          updatedEps.forEach(ep => {
+            const epRef = doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id);
+            batch.set(epRef, ep, { merge: true });
+          });
+          const animeRef = doc(db, 'users', getUserId(), 'anime', animeId);
+          batch.update(animeRef, { namingPattern: pattern, episodeCount: updatedEps.length, updatedAt: new Date().toISOString() });
+          await batch.commit();
+        }
+
+        setRescanStatus('completed');
+        setRescanMessage(`Rescan complete! Found ${updatedEps.length} episodes.`);
+      }
+    } catch (err) {
+      console.error('Error during rescan:', err);
+      setRescanStatus('error');
+      setRescanMessage(err.message || 'Error occurred while rescanning');
+    }
+  };
+
+  // Load File Manager directory contents
+  const loadFileManagerTree = async (targetPath) => {
+    const queryPath = targetPath || anime?.folderPath;
+    if (!queryPath) return;
+    setFmLoading(true);
+    try {
+      const res = await fetch(`/api/manage-folder?path=${encodeURIComponent(queryPath)}`);
+      const data = await res.json();
+      if (data.success) {
+        setFmTree(data.tree);
+        setFmCurrentPath(data.tree.path);
+      } else {
+        alert("Failed to load directory: " + data.error);
+      }
+    } catch (err) {
+      console.error("File manager load error:", err);
+      alert("Error loading directory: " + err.message);
+    } finally {
+      setFmLoading(false);
+    }
+  };
+
+  const openFileManagerModal = () => {
+    setShowFileManagerModal(true);
+    loadFileManagerTree(anime?.folderPath);
+  };
+
+  const handleCreateSubfolder = async () => {
+    if (!fmNewFolderName.trim() || !fmCurrentPath) return;
+    try {
+      const res = await fetch('/api/manage-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'createFolder', parentPath: fmCurrentPath, folderName: fmNewFolderName.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFmNewFolderName('');
+        setShowNewFolderInput(false);
+        loadFileManagerTree(fmCurrentPath);
+      } else {
+        alert(data.error);
+      }
+    } catch (err) {
+      alert("Error creating folder: " + err.message);
+    }
+  };
+
+  const handleCheckFile = async () => {
+    if (!fmNewFileName.trim() || !fmCurrentPath) return;
+    try {
+      const res = await fetch('/api/manage-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'checkFile', parentPath: fmCurrentPath, fileName: fmNewFileName.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message);
+        setFmNewFileName('');
+        setShowNewFileInput(false);
+        loadFileManagerTree(fmCurrentPath);
+      } else {
+        alert(data.error);
+      }
+    } catch (err) {
+      alert("Error checking file: " + err.message);
+    }
+  };
+
+  const handleRenameItem = async () => {
+    if (!fmRenameTarget || !fmNewName.trim()) return;
+    try {
+      const res = await fetch('/api/manage-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rename', oldPath: fmRenameTarget.path, newName: fmNewName.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFmRenameTarget(null);
+        setFmNewName('');
+        loadFileManagerTree(fmCurrentPath);
+      } else {
+        alert(data.error);
+      }
+    } catch (err) {
+      alert("Error renaming item: " + err.message);
+    }
+  };
+
+  const handleDeleteItem = async (item) => {
+    if (!confirm(`Are you sure you want to delete "${item.name}"? This action cannot be undone.`)) return;
+    try {
+      const res = await fetch('/api/manage-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', targetPath: item.path })
+      });
+      const data = await res.json();
+      if (data.success) {
+        loadFileManagerTree(fmCurrentPath);
+      } else {
+        alert(data.error);
+      }
+    } catch (err) {
+      alert("Error deleting item: " + err.message);
+    }
+  };
+
+  const handleMoveItem = async () => {
+    if (!fmMoveTarget || !fmDestPath) return;
+    try {
+      const res = await fetch('/api/manage-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'move', sourcePath: fmMoveTarget.path, destFolderPath: fmDestPath })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFmMoveTarget(null);
+        setFmDestPath('');
+        loadFileManagerTree(fmCurrentPath);
+      } else {
+        alert(data.error);
+      }
+    } catch (err) {
+      alert("Error moving item: " + err.message);
+    }
+  };
+
+  const handleSaveAndRescanFileManager = async () => {
+    setShowFileManagerModal(false);
+    await handleRescan();
+  };
 
   // Poll Next.js proxy API endpoint to check VLC status
   const startPollingVlc = (episode) => {
@@ -892,6 +1259,11 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
               <div>
                 <h1 className="text-xl font-bold tracking-wide flex items-center gap-2">
                   {anime.title}
+                  {anime.isYouTube && (
+                    <span className="bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                      YouTube
+                    </span>
+                  )}
                   <span className="text-xs text-gray-500 font-normal hidden sm:inline">({anime.episodeCount} Episodes)</span>
                 </h1>
                 <p className="text-[10px] text-gray-500 line-clamp-1 max-w-md">
@@ -1399,7 +1771,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
             >
               <span className="flex items-center gap-1.5">
                 <Star size={14} className="text-neonPurple animate-pulse" />
-                VLC Controls & Rating
+                Media Controls & Rating
               </span>
               {ratingExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </button>
@@ -1408,7 +1780,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
               <div className="space-y-4 pt-2 border-t border-white/5 text-xs text-gray-400">
                 {/* VLC Controls */}
                 <div className="space-y-3">
-                  <h4 className="font-semibold text-white text-[11px] uppercase tracking-wider">VLC Player Presets</h4>
+                  <h4 className="font-semibold text-white text-[11px] uppercase tracking-wider">Media PLayer Setting</h4>
                   
                   {/* Playback Speed */}
                   <div className="space-y-1.5">
@@ -1451,6 +1823,58 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                       className="w-full accent-neonPink h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
                     />
                   </div>
+
+                  {/* Default Media Player Selector */}
+                  <div className="space-y-1.5 pt-2 border-t border-white/5">
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span className="flex items-center gap-1 font-semibold text-white">
+                        <Tv size={12} className="text-neonCyan" /> Default Media Player
+                      </span>
+                    </div>
+                    <select
+                      value={currentUser?.defaultPlayer || 'ask'}
+                      onChange={(e) => updateDefaultPlayer && updateDefaultPlayer(e.target.value)}
+                      className="w-full bg-white/10 border border-white/15 text-xs text-white rounded-xl p-2 font-semibold focus:outline-none focus:border-neonCyan cursor-pointer"
+                    >
+                      <option value="ask" className="bg-gray-900 text-white">Ask Every Time (Modal)</option>
+                      <option value="builtin" className="bg-gray-900 text-white">Built-in HTML5 Player</option>
+                      <option value="artplayer" className="bg-gray-900 text-white">ArtPlayer Container</option>
+                      <option value="videojs" className="bg-gray-900 text-white">Video.js Container</option>
+                      <option value="youtube" className="bg-gray-900 text-white">YouTube Embed</option>
+                      <option value="vlc" className="bg-gray-900 text-white">VLC Player (Desktop Host)</option>
+                    </select>
+                  </div>
+                  
+                  {/* YouTube Quality Selector */}
+                  {(anime?.isYouTube || episodes.some(e => e.isYouTube || e.filePath?.startsWith('youtube://'))) && (
+                    <div className="space-y-1.5 pt-2 border-t border-white/5">
+                      <div className="flex justify-between items-center text-[10px]">
+                        <span className="flex items-center gap-1 font-semibold text-red-400">
+                          <Youtube size={12} /> YouTube Streaming Quality
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleFetchYtWidgetQualities}
+                          disabled={ytWidgetLoadingQualities}
+                          className="px-2 py-0.5 text-[9px] font-bold bg-white/10 hover:bg-white/20 border border-white/10 text-white rounded-lg transition cursor-pointer flex items-center gap-1"
+                        >
+                          <RefreshCw size={10} className={ytWidgetLoadingQualities ? 'animate-spin' : ''} />
+                          {ytWidgetLoadingQualities ? 'Detecting...' : 'Fetch Formats'}
+                        </button>
+                      </div>
+                      <select
+                        value={ytWidgetSelectedQuality}
+                        onChange={(e) => setYtWidgetSelectedQuality(e.target.value)}
+                        className="w-full bg-white/10 border border-white/15 text-xs text-white rounded-xl p-2 font-semibold focus:outline-none focus:border-neonCyan cursor-pointer"
+                      >
+                        {ytWidgetQualities.map((q) => (
+                          <option key={q.id} value={q.id} className="bg-gray-900 text-white">
+                            {q.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 {/* Rating */}
@@ -1481,6 +1905,99 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* Manage Folder Section */}
+          <div className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+            <button
+              onClick={() => setManageFolderExpanded(!manageFolderExpanded)}
+              className="w-full flex items-center justify-between font-bold text-white uppercase tracking-wider text-[10px] text-left text-neonCyan hover:text-white transition cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5">
+                <FolderTree size={14} className="text-neonCyan animate-pulse" />
+                Manage Folder
+              </span>
+              {manageFolderExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+
+            {manageFolderExpanded && (
+              <div className="space-y-4 pt-2 border-t border-white/5 text-xs text-gray-400">
+                {/* 1. Manage Folder Button */}
+                {!(anime?.isYouTube || anime?.folderPath?.startsWith('http')) && (
+                  <button
+                    onClick={openFileManagerModal}
+                    className="w-full py-2.5 px-4 rounded-xl bg-neonCyan/10 border border-neonCyan/30 hover:bg-neonCyan/20 text-neonCyan hover:text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
+                  >
+                    <FolderPlus size={16} />
+                    Manage Folder Files & Subfolders
+                  </button>
+                )}
+
+                {/* 2. Rescan Folder with different Naming Pattern */}
+                <div className="space-y-2 pt-2 border-t border-white/5">
+                  <h4 className="font-semibold text-white text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                    <RefreshCw size={12} className="text-neonPurple" />
+                    Rescan with Naming Pattern
+                  </h4>
+                  <div className="space-y-2">
+                    <select
+                      value={selectedNamingPattern}
+                      onChange={(e) => setSelectedNamingPattern(e.target.value)}
+                      className="w-full bg-white/10 border border-white/15 text-xs text-white rounded-xl p-2 font-semibold focus:outline-none focus:border-neonCyan cursor-pointer"
+                    >
+                      <option value="Auto" className="bg-gray-900 text-white">Auto-Detect Pattern (Recommended)</option>
+                      <option value="S01E01" className="bg-gray-900 text-white">Season / Episode (S01E01, S1E1)</option>
+                      <option value="Episode 01" className="bg-gray-900 text-white">Episode Tag (Episode 01, Ep 01)</option>
+                      <option value="01 - Title" className="bg-gray-900 text-white">Prefix Number (01 - Title, 01.Title)</option>
+                      <option value="Numeric" className="bg-gray-900 text-white">Pure Numeric (1, 2, 3)</option>
+                    </select>
+
+                    <button
+                      onClick={() => handleRescan(selectedNamingPattern)}
+                      className="w-full py-2 px-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition"
+                    >
+                      <RefreshCw size={14} />
+                      Rescan Folder
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. Refetch Duration for YouTube playlists */}
+                {(anime?.isYouTube || episodes.some(e => e.isYouTube || e.filePath?.startsWith('youtube://'))) && (
+                  <div className="space-y-2 pt-2 border-t border-white/5">
+                    <h4 className="font-semibold text-white text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                      <Clock size={12} className="text-yellow-400" />
+                      YouTube Duration
+                    </h4>
+                    {refetchDurationProgress ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-[10px] text-gray-400">
+                          <span>Fetching {refetchDurationProgress.done}/{refetchDurationProgress.total}</span>
+                          <span className="text-yellow-400 font-bold">{Math.round((refetchDurationProgress.done / refetchDurationProgress.total) * 100)}%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-yellow-500 to-orange-400 rounded-full transition-all duration-300"
+                            style={{ width: `${(refetchDurationProgress.done / refetchDurationProgress.total) * 100}%` }}
+                          />
+                        </div>
+                        {refetchDurationProgress.current && (
+                          <p className="text-[10px] text-gray-500 truncate">{refetchDurationProgress.current}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleRefetchAllDurations}
+                        className="w-full py-2 px-3 rounded-xl bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 hover:text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition"
+                      >
+                        <Clock size={14} />
+                        Refetch Duration of All Videos
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1602,6 +2119,26 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
         )}
       </AnimatePresence>
 
+      {/* Fetching YouTube Duration Modal */}
+      <AnimatePresence>
+        {fetchingDuration && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="glass-panel p-8 rounded-2xl border border-white/20 max-w-sm w-full text-center space-y-4"
+            >
+              <div className="mx-auto w-12 h-12 rounded-full border-4 border-cyan-500/20 border-t-cyan-400 animate-spin" />
+              <h3 className="text-white font-bold text-sm">Fetching Video Duration</h3>
+              <p className="text-gray-400 text-xs">
+                Getting the total duration for this YouTube video so the player shows accurate progress. This is a one-time fetch.
+              </p>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Play Options Selector Modal */}
       <AnimatePresence>
         {promptPlayEp && (
@@ -1619,9 +2156,41 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
               <span className="text-[10px] text-neonPurple font-extrabold uppercase tracking-widest bg-neonPurple/10 px-2 py-0.5 rounded border border-neonPurple/20">
                 Episode {promptPlayEp.episodeNumber}
               </span>
-              <p className="text-xs text-gray-400 truncate mt-3 mb-6 bg-white/5 p-2 rounded border border-white/5" title={promptPlayEp.fileName}>
+              <p className="text-xs text-gray-400 truncate mt-3 mb-4 bg-white/5 p-2 rounded border border-white/5" title={promptPlayEp.fileName}>
                 {promptPlayEp.fileName}
               </p>
+
+              {/* Dynamic YouTube Quality Selector inside Player Selection Window */}
+              {(promptPlayEp.isYouTube || promptPlayEp.filePath?.startsWith('youtube://')) && (
+                <div className="bg-black/40 p-3 rounded-xl border border-white/10 text-left space-y-1.5 mb-4">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-red-400 flex items-center gap-1.5">
+                      <Youtube size={14} /> YouTube Streaming Quality
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleFetchYtModalQualities}
+                      disabled={ytModalLoadingQualities}
+                      className="px-2 py-0.5 text-[10px] font-bold bg-white/10 hover:bg-white/20 border border-white/10 text-white rounded-lg transition cursor-pointer flex items-center gap-1"
+                    >
+                      <RefreshCw size={10} className={ytModalLoadingQualities ? 'animate-spin' : ''} />
+                      {ytModalLoadingQualities ? 'Detecting...' : 'Fetch Server Formats'}
+                    </button>
+                  </div>
+
+                  <select
+                    value={ytModalSelectedQuality}
+                    onChange={(e) => setYtModalSelectedQuality(e.target.value)}
+                    className="w-full bg-white/10 border border-white/15 text-xs text-white rounded-xl p-2 font-semibold focus:outline-none focus:border-neonCyan cursor-pointer"
+                  >
+                    {ytModalQualities.map((q) => (
+                      <option key={q.id} value={q.id} className="bg-gray-900 text-white">
+                        {q.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="flex items-center gap-2.5 mb-6 px-1">
                 <input
@@ -1636,7 +2205,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                 </label>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+              <div className={`grid gap-4 mb-6 ${promptPlayEp.isYouTube || promptPlayEp.filePath?.startsWith('youtube://') ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-4'}`}>
                 {/* Built-in Player Card */}
                 <button
                   type="button"
@@ -1673,17 +2242,33 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                   <span className="text-[10px] font-black uppercase tracking-widest">Video.js</span>
                 </button>
 
-                {/* VLC Player Card */}
-                <button
-                  type="button"
-                  onClick={() => playInVlc(promptPlayEp)}
-                  className="p-5 rounded-2xl bg-orange-500/5 border border-orange-500/20 hover:border-orange-400/50 text-orange-300 hover:text-white hover:bg-orange-500/10 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_20px_rgba(249,115,22,0.25)]"
-                >
-                  <div className="p-3 rounded-xl bg-orange-500/10 group-hover:bg-orange-500/20 transition-colors">
-                    <VLCIcon className="w-6 h-6" />
-                  </div>
-                  <span className="text-[10px] font-black uppercase tracking-widest">VLC Player</span>
-                </button>
+                {/* VLC Player Card (Excluded for YouTube Videos) */}
+                {!(promptPlayEp.isYouTube || promptPlayEp.filePath?.startsWith('youtube://')) && (
+                  <button
+                    type="button"
+                    onClick={() => playInVlc(promptPlayEp)}
+                    className="p-5 rounded-2xl bg-orange-500/5 border border-orange-500/20 hover:border-orange-400/50 text-orange-300 hover:text-white hover:bg-orange-500/10 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_20px_rgba(249,115,22,0.25)]"
+                  >
+                    <div className="p-3 rounded-xl bg-orange-500/10 group-hover:bg-orange-500/20 transition-colors">
+                      <VLCIcon className="w-6 h-6" />
+                    </div>
+                    <span className="text-[10px] font-black uppercase tracking-widest">VLC Player</span>
+                  </button>
+                )}
+
+                {/* Youtube Player Card (Included for YouTube Videos) */}
+                {(promptPlayEp.isYouTube || promptPlayEp.filePath?.startsWith('youtube://')) && (
+                  <button
+                    type="button"
+                    onClick={() => playInYoutube(promptPlayEp)}
+                    className="p-5 rounded-2xl bg-red-500/5 border border-red-500/20 hover:border-red-400/50 text-red-300 hover:text-white hover:bg-red-500/10 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_20px_rgba(239,68,68,0.25)]"
+                  >
+                    <div className="p-3 rounded-xl bg-red-500/10 group-hover:bg-red-500/20 transition-colors">
+                      <Youtube size={24} className="text-red-400" />
+                    </div>
+                    <span className="text-[10px] font-black uppercase tracking-widest">YouTube Embed</span>
+                  </button>
+                )}
               </div>
 
               <div className="flex justify-end pt-6 mt-6 border-t border-white/5">
@@ -1700,7 +2285,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
         )}
       </AnimatePresence>
 
-      {/* Folder Rescan Modal */}
+      {/* Folder Rescan Status Modal */}
       <AnimatePresence>
         {showRescanModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
@@ -1708,14 +2293,14 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-lg glass-panel p-6 rounded-2xl border border-white/10 shadow-neon-border text-left"
+              className="w-full max-w-lg glass-panel p-6 rounded-2xl border border-white/10 shadow-neon-border text-left space-y-4"
             >
-              <div className="flex justify-between items-start mb-4">
-                <h2 className="text-lg font-bold flex items-center gap-2 text-white">
-                  <RefreshCw className={`text-neonCyan ${rescanStatus === 'scanning' || rescanStatus === 'comparing' || rescanStatus === 'syncing' ? 'animate-spin' : ''}`} size={18} />
-                  Rescan Local Folder
+              <div className="flex justify-between items-start border-b border-white/10 pb-3">
+                <h2 className="text-base font-bold flex items-center gap-2 text-white">
+                  <RefreshCw className={`text-neonCyan ${rescanStatus === 'scanning' ? 'animate-spin' : ''}`} size={18} />
+                  Rescan Folder & Playlist
                 </h2>
-                {rescanStatus !== 'scanning' && rescanStatus !== 'syncing' && rescanStatus !== 'comparing' && (
+                {rescanStatus !== 'scanning' && (
                   <button
                     onClick={() => setShowRescanModal(false)}
                     className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
@@ -1725,10 +2310,9 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                 )}
               </div>
 
-              <div className="bg-black/20 border border-white/5 rounded-xl p-4 space-y-4 text-xs">
-                {/* Status indicator */}
+              <div className="bg-black/40 border border-white/10 rounded-xl p-4 space-y-3 text-xs">
                 <div className="flex items-center gap-2">
-                  {(rescanStatus === 'scanning' || rescanStatus === 'comparing' || rescanStatus === 'syncing') ? (
+                  {rescanStatus === 'scanning' ? (
                     <Loader2 className="animate-spin text-neonCyan" size={16} />
                   ) : rescanStatus === 'completed' ? (
                     <CheckCircle2 className="text-emerald-400" size={16} />
@@ -1736,70 +2320,23 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                     <AlertTriangle className="text-red-400" size={16} />
                   ) : null}
                   <span className="font-semibold text-gray-200">
-                    {rescanStatus === 'scanning' && 'Scanning directory...'}
-                    {rescanStatus === 'comparing' && `Comparing files... (${scannedFilesCount} detected)`}
-                    {rescanStatus === 'syncing' && 'Syncing database...'}
-                    {rescanStatus === 'completed' && 'Scan & sync completed successfully!'}
-                    {rescanStatus === 'error' && 'Scanning failed'}
+                    {rescanStatus === 'scanning' && 'Scanning directory/playlist...'}
+                    {rescanStatus === 'completed' && 'Rescan completed successfully!'}
+                    {rescanStatus === 'error' && 'Rescan failed'}
                   </span>
                 </div>
 
-                {/* Progress Logs */}
-                <div className="max-h-48 overflow-y-auto border border-white/5 rounded bg-black/40 p-3 font-mono text-[10px] text-gray-400 space-y-2">
-                  <div>[INFO] Target folder: {anime.folderPath}</div>
-                  
-                  {rescanStatus === 'scanning' && (
-                    <div className="text-neonCyan animate-pulse">&gt; Reading filesystem entries...</div>
-                  )}
-
-                  {(rescanStatus !== 'scanning' && rescanStatus !== 'idle') && (
-                    <div>[INFO] Filesystem scan completed. Found {scannedFilesCount} matching files.</div>
-                  )}
-
-                  {(rescanStatus === 'comparing' || rescanStatus === 'syncing' || rescanStatus === 'completed') && (
-                    <>
-                      <div>[INFO] Comparing with Firestore database...</div>
-                      <div className="text-emerald-400">+ Detected {rescanChanges.added.length} new files.</div>
-                      <div className="text-rose-400">- Detected {rescanChanges.removed.length} removed files.</div>
-                      
-                      {rescanChanges.added.length > 0 && (
-                        <div className="pl-3 border-l border-emerald-500/30 text-gray-500 max-h-24 overflow-y-auto space-y-0.5">
-                          {rescanChanges.added.map(f => (
-                            <div key={f.path} className="truncate">+ {f.name}</div>
-                          ))}
-                        </div>
-                      )}
-
-                      {rescanChanges.removed.length > 0 && (
-                        <div className="pl-3 border-l border-rose-500/30 text-gray-500 max-h-24 overflow-y-auto space-y-0.5">
-                          {rescanChanges.removed.map(f => (
-                            <div key={f.id} className="truncate">- {f.fileName}</div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {rescanStatus === 'syncing' && (
-                    <div className="text-neonPurple animate-pulse">&gt; Writing batch operations to Firestore...</div>
-                  )}
-
-                  {rescanStatus === 'completed' && (
-                    <div className="text-emerald-400 font-semibold">[SUCCESS] Library has been updated.</div>
-                  )}
-
-                  {rescanStatus === 'error' && (
-                    <div className="text-red-400 font-semibold">[ERROR] {rescanError}</div>
-                  )}
+                <div className="p-3 bg-black/60 rounded-lg border border-white/5 font-mono text-[11px] text-gray-300">
+                  {rescanMessage}
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 mt-4 border-t border-white/5">
-                {(rescanStatus === 'completed' || rescanStatus === 'error') ? (
+              <div className="flex justify-end pt-2">
+                {rescanStatus !== 'scanning' ? (
                   <button
                     type="button"
                     onClick={() => setShowRescanModal(false)}
-                    className="px-5 py-2 rounded-lg bg-neon-gradient text-white text-xs font-bold uppercase tracking-wider hover:brightness-110 shadow-purple-glow cursor-pointer"
+                    className="px-5 py-2 rounded-xl bg-neon-gradient text-white text-xs font-bold uppercase tracking-wider hover:brightness-110 shadow-purple-glow cursor-pointer"
                   >
                     Close
                   </button>
@@ -1807,7 +2344,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                   <button
                     type="button"
                     disabled
-                    className="px-5 py-2 rounded-lg bg-white/5 text-gray-500 text-xs font-bold uppercase tracking-wider border border-white/5"
+                    className="px-5 py-2 rounded-xl bg-white/5 text-gray-500 text-xs font-bold uppercase tracking-wider border border-white/5"
                   >
                     Processing...
                   </button>
@@ -1816,7 +2353,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
             </motion.div>
           </div>
         )}
-        </AnimatePresence>
+      </AnimatePresence>
       {/* ── Mark All Complete Confirmation Modal ──────────────────────── */}
       <AnimatePresence>
         {showMarkCompleteConfirm && (
@@ -1943,8 +2480,270 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                   <Tv size={16} className="text-emerald-400" />
                   Native HTML5 Video Player
                 </button>
+
+                {(streamPlayerModalEp.isYouTube || streamPlayerModalEp.filePath?.startsWith('youtube://')) && (
+                  <button
+                    onClick={() => {
+                      const ep = streamPlayerModalEp;
+                      setStreamPlayerModalEp(null);
+                      playInYoutube(ep);
+                    }}
+                    className="w-full py-3 rounded-2xl bg-red-600/20 border border-red-500/30 hover:bg-red-600/40 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer"
+                  >
+                    <Youtube size={16} className="text-red-400" />
+                    YouTube Embed Player
+                  </button>
+                )}
               </div>
             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* File Manager Modal */}
+      <AnimatePresence>
+        {showFileManagerModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/85 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-4xl max-h-[85vh] overflow-y-auto glass-panel p-6 rounded-2xl border border-white/15 shadow-neon-border flex flex-col space-y-4"
+            >
+              {/* Header */}
+              <div className="flex justify-between items-center border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-neonCyan/10 border border-neonCyan/20">
+                    <FolderTree className="text-neonCyan" size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-white flex items-center gap-2">
+                      Manage Folder & Files — {anime?.title}
+                    </h2>
+                    <p className="text-[11px] text-gray-400 font-mono line-clamp-1" title={fmCurrentPath}>
+                      {fmCurrentPath}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowFileManagerModal(false)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Action Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-black/40 p-3 rounded-xl border border-white/10">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => loadFileManagerTree(anime?.folderPath)}
+                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 border border-white/10 cursor-pointer"
+                    title="Root Folder"
+                  >
+                    <HardDrive size={14} className="text-neonCyan" /> Root
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowNewFolderInput(false);
+                      setShowNewFileInput(!showNewFileInput);
+                    }}
+                    className="px-3 py-1.5 bg-neonPink/10 hover:bg-neonPink/20 text-neonPink rounded-lg text-xs font-semibold flex items-center gap-1.5 border border-neonPink/30 cursor-pointer"
+                  >
+                    <FilePlus size={14} /> Add File
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowNewFileInput(false);
+                      setShowNewFolderInput(!showNewFolderInput);
+                    }}
+                    className="px-3 py-1.5 bg-neonCyan/10 hover:bg-neonCyan/20 text-neonCyan rounded-lg text-xs font-semibold flex items-center gap-1.5 border border-neonCyan/30 cursor-pointer"
+                  >
+                    <FolderPlus size={14} /> New Sub-folder
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => loadFileManagerTree(fmCurrentPath)}
+                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-semibold text-gray-300 hover:text-white flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RefreshCw size={14} className={fmLoading ? 'animate-spin' : ''} /> Refresh
+                  </button>
+                </div>
+              </div>
+
+              {/* New Folder Form */}
+              {showNewFolderInput && (
+                <div className="flex items-center gap-2 bg-white/5 p-3 rounded-xl border border-white/10">
+                  <input
+                    type="text"
+                    placeholder="Enter new sub-folder name..."
+                    value={fmNewFolderName}
+                    onChange={(e) => setFmNewFolderName(e.target.value)}
+                    className="flex-1 bg-black/60 border border-white/15 text-xs text-white rounded-lg px-3 py-1.5 focus:outline-none focus:border-neonCyan"
+                  />
+                  <button
+                    onClick={handleCreateSubfolder}
+                    className="px-3 py-1.5 bg-neonCyan text-black font-bold text-xs rounded-lg cursor-pointer hover:brightness-110"
+                  >
+                    Create
+                  </button>
+                  <button
+                    onClick={() => setShowNewFolderInput(false)}
+                    className="px-3 py-1.5 bg-white/5 text-gray-400 hover:text-white text-xs rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+              {/* New File Form */}
+              {showNewFileInput && (
+                <div className="flex items-center gap-2 bg-white/5 p-3 rounded-xl border border-white/10 mt-2">
+                  <input
+                    type="text"
+                    placeholder="Enter full filename with extension (e.g. video.mp4)..."
+                    value={fmNewFileName}
+                    onChange={(e) => setFmNewFileName(e.target.value)}
+                    className="flex-1 bg-black/60 border border-white/15 text-xs text-white rounded-lg px-3 py-1.5 focus:outline-none focus:border-neonPink"
+                  />
+                  <button
+                    onClick={handleCheckFile}
+                    className="px-3 py-1.5 bg-neonPink text-white font-bold text-xs rounded-lg cursor-pointer hover:brightness-110"
+                  >
+                    Verify & Add
+                  </button>
+                  <button
+                    onClick={() => setShowNewFileInput(false)}
+                    className="px-3 py-1.5 bg-white/5 text-gray-400 hover:text-white text-xs rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+
+              {/* Items Table */}
+              <div className="flex-1 overflow-y-auto min-h-[300px] max-h-[450px] border border-white/10 rounded-xl bg-black/30 p-2 space-y-1">
+                {fmLoading ? (
+                  <div className="h-full flex items-center justify-center gap-2 text-xs text-[#7c5cff] py-12">
+                    <Loader2 className="animate-spin" size={20} /> Loading directory tree...
+                  </div>
+                ) : !fmTree || !fmTree.children || fmTree.children.length === 0 ? (
+                  <div className="text-center py-12 text-xs text-gray-500">
+                    No files or sub-folders found in this directory.
+                  </div>
+                ) : (
+                  fmTree.children.map((item) => (
+                    <div
+                      key={item.path}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-xs transition"
+                    >
+                      <div className="flex items-center gap-3 flex-1 min-w-0 pr-4">
+                        {item.isDirectory ? (
+                          <Folder className="text-amber-400 shrink-0" size={18} />
+                        ) : (
+                          <FileVideo className="text-neonCyan shrink-0" size={18} />
+                        )}
+
+                        <div className="flex-1 min-w-0">
+                          {item.isDirectory ? (
+                            <button
+                              onClick={() => loadFileManagerTree(item.path)}
+                              className="font-bold text-white hover:text-neonCyan text-left truncate block cursor-pointer"
+                            >
+                              {item.name}
+                            </button>
+                          ) : (
+                            <span className="text-gray-200 truncate block font-medium">
+                              {item.name}
+                            </span>
+                          )}
+                          <span className="text-[10px] text-gray-500 font-mono block">
+                            {item.isDirectory ? 'Sub-folder' : `${(item.size / (1024 * 1024)).toFixed(1)} MB`}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => {
+                            setFmRenameTarget(item);
+                            setFmNewName(item.name);
+                          }}
+                          className="p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition cursor-pointer"
+                          title="Rename"
+                        >
+                          <Edit3 size={14} />
+                        </button>
+
+                        <button
+                          onClick={() => handleDeleteItem(item)}
+                          className="p-1.5 hover:bg-red-500/20 rounded-lg text-gray-400 hover:text-red-400 transition cursor-pointer"
+                          title="Delete"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="flex items-center justify-between border-t border-white/10 pt-4">
+                <span className="text-xs text-gray-400">
+                  Save your folder changes and rescan anime episodes
+                </span>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowFileManagerModal(false)}
+                    className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold text-white cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveAndRescanFileManager}
+                    className="px-5 py-2 bg-neon-gradient hover:brightness-110 rounded-xl text-xs font-bold text-white cursor-pointer shadow-purple-glow flex items-center gap-2"
+                  >
+                    <RefreshCw size={14} /> Save & Rescan Folder
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Rename Prompt Sub-modal */}
+      <AnimatePresence>
+        {fmRenameTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <div className="w-full max-w-md glass-panel p-5 rounded-2xl border border-white/10 space-y-4">
+              <h3 className="text-sm font-bold text-white">Rename Item</h3>
+              <input
+                type="text"
+                value={fmNewName}
+                onChange={(e) => setFmNewName(e.target.value)}
+                className="w-full bg-black/60 border border-white/15 text-xs text-white rounded-xl p-2.5 focus:outline-none focus:border-neonCyan"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setFmRenameTarget(null)}
+                  className="px-3 py-1.5 bg-white/5 rounded-lg text-xs font-bold text-gray-300 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleRenameItem}
+                  className="px-4 py-1.5 bg-neonCyan text-black font-bold text-xs rounded-lg cursor-pointer"
+                >
+                  Save Rename
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </AnimatePresence>
