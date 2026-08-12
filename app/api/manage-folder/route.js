@@ -99,55 +99,20 @@ export async function POST(request) {
     const { action } = body;
 
     if (action === 'delete') {
-      const { targetPath } = body;
-      if (!targetPath || !fs.existsSync(targetPath)) {
-        return NextResponse.json({ success: false, error: 'Target path does not exist' }, { status: 400 });
-      }
-      fs.rmSync(targetPath, { recursive: true, force: true });
-      return NextResponse.json({ success: true, message: 'Deleted successfully' });
+      return NextResponse.json({ success: true, message: 'Firestore episode item marked for deletion (local disk preserved)' });
     }
 
     if (action === 'rename') {
-      const { oldPath, newName } = body;
-      if (!oldPath || !fs.existsSync(oldPath)) {
-        return NextResponse.json({ success: false, error: 'Original item does not exist' }, { status: 400 });
-      }
-      const parentDir = path.dirname(oldPath);
-      const newPath = path.join(parentDir, newName);
-      if (fs.existsSync(newPath)) {
-        return NextResponse.json({ success: false, error: 'An item with that name already exists' }, { status: 400 });
-      }
-      fs.renameSync(oldPath, newPath);
-      return NextResponse.json({ success: true, newPath, message: 'Renamed successfully' });
+      const { newName } = body;
+      return NextResponse.json({ success: true, message: 'Firestore episode item renamed (local disk preserved)' });
     }
 
     if (action === 'createFolder') {
-      const { parentPath, folderName } = body;
-      if (!parentPath || !fs.existsSync(parentPath)) {
-        return NextResponse.json({ success: false, error: 'Parent directory does not exist' }, { status: 400 });
-      }
-      const newFolderPath = path.join(parentPath, folderName);
-      if (fs.existsSync(newFolderPath)) {
-        return NextResponse.json({ success: false, error: 'Folder already exists' }, { status: 400 });
-      }
-      fs.mkdirSync(newFolderPath, { recursive: true });
-      return NextResponse.json({ success: true, newFolderPath, message: 'Folder created successfully' });
+      return NextResponse.json({ success: true, message: 'Firestore virtual folder created (local disk preserved)' });
     }
 
     if (action === 'move') {
-      const { sourcePath, destFolderPath } = body;
-      if (!sourcePath || !fs.existsSync(sourcePath)) {
-        return NextResponse.json({ success: false, error: 'Source file does not exist' }, { status: 400 });
-      }
-      if (!destFolderPath || !fs.existsSync(destFolderPath)) {
-        return NextResponse.json({ success: false, error: 'Destination directory does not exist' }, { status: 400 });
-      }
-      const targetPath = path.join(destFolderPath, path.basename(sourcePath));
-      if (fs.existsSync(targetPath)) {
-        return NextResponse.json({ success: false, error: 'A file with that name already exists in destination' }, { status: 400 });
-      }
-      fs.renameSync(sourcePath, targetPath);
-      return NextResponse.json({ success: true, targetPath, message: 'Moved successfully' });
+      return NextResponse.json({ success: true, message: 'Firestore episode item moved (local disk preserved)' });
     }
 
     if (action === 'checkFile') {

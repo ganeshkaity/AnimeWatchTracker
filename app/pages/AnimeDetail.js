@@ -1,13 +1,13 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { collection, query, onSnapshot, doc, updateDoc, getDocs, writeBatch, setDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, getDocs, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { useOffline } from '../context/OfflineContext';
 import {
   getLocalAnime, upsertLocalAnime,
-  getLocalEpisodes, upsertLocalEpisode, setLocalEpisodes,
+  getLocalEpisodes, upsertLocalEpisode, setLocalEpisodes, deleteLocalEpisode,
   addToDirtyQueue, getUserId
 } from '../utils/localStore';
 import { sortEpisodes, getSubfolder, getSafeDocId, processScannedFiles } from '../utils/parser';
@@ -112,10 +112,11 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
 
   // Rescan & Naming Pattern State
   const [showRescanModal, setShowRescanModal] = useState(false);
-  const [rescanStatus, setRescanStatus] = useState('idle'); // 'idle' | 'scanning' | 'completed' | 'error'
+  const [rescanStatus, setRescanStatus] = useState('idle'); // 'idle' | 'scanning' | 'preview' | 'applying' | 'completed' | 'error'
   const [rescanMessage, setRescanMessage] = useState('');
   const [selectedNamingPattern, setSelectedNamingPattern] = useState('Auto');
   const [manageFolderExpanded, setManageFolderExpanded] = useState(true);
+  const [rescanDiff, setRescanDiff] = useState(null);
 
   // File Manager Modal State
   const [showFileManagerModal, setShowFileManagerModal] = useState(false);
@@ -522,8 +523,8 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
           filePath: episode.filePath,
           customVlcPath: currentUser?.vlcPath || '',
           resumeTime: episode.lastPositionSeconds || 0,
-          speed: playbackSpeed,
-          volume: playbackVolume
+          speed: typeof playbackSpeed === 'number' ? playbackSpeed : parseFloat(localStorage.getItem('watchanime_vlc_speed') || '1.0'),
+          volume: typeof playbackVolume === 'number' ? playbackVolume : parseInt(localStorage.getItem('watchanime_vlc_volume') || '100', 10)
         })
       });
       const data = await res.json();
@@ -722,17 +723,21 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     }
   };
 
-  // Handle folder / playlist rescan
+  // Handle folder / playlist rescan (computes diff for preview & consent)
   const handleRescan = async (patternOverride) => {
     if (!anime) return;
-    const pattern = patternOverride || selectedNamingPattern || anime.namingPattern || 'Auto';
+    const pattern = (typeof patternOverride === 'string' && patternOverride.trim())
+      ? patternOverride.trim()
+      : (selectedNamingPattern || anime.namingPattern || 'Auto');
+
     setRescanStatus('scanning');
     setRescanMessage('Scanning folder / playlist for changes...');
     setShowRescanModal(true);
 
     try {
       const isYt = anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://');
-      
+      let scannedCandidateEps = [];
+
       if (isYt) {
         setRescanMessage('Fetching YouTube playlist video list...');
         const res = await fetch('/api/youtube/playlist', {
@@ -748,7 +753,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
         const ytVideos = data.playlist?.videos || [];
         const existingEpMap = new Map(episodes.map(e => [e.id, e]));
 
-        const updatedEps = ytVideos.map((v, idx) => {
+        scannedCandidateEps = ytVideos.map((v, idx) => {
           const epId = getSafeDocId(`yt_${v.id}`);
           const existing = existingEpMap.get(epId);
           return {
@@ -770,79 +775,80 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
             updatedAt: new Date().toISOString()
           };
         });
-
-        // Save locally
-        setEpisodes(sortEpisodes(updatedEps));
-        setLocalEpisodes(animeId, updatedEps);
-        upsertLocalAnime({ ...anime, episodeCount: updatedEps.length, updatedAt: new Date().toISOString() });
-
-        // Save to Firestore if online
-        if (!isOffline && db && currentUser) {
-          const batch = writeBatch(db);
-          updatedEps.forEach(ep => {
-            const epRef = doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id);
-            batch.set(epRef, ep, { merge: true });
-          });
-          const animeRef = doc(db, 'users', getUserId(), 'anime', animeId);
-          batch.update(animeRef, { episodeCount: updatedEps.length, updatedAt: new Date().toISOString() });
-          await batch.commit();
-        }
-
-        setRescanStatus('completed');
-        setRescanMessage(`Rescan complete! Found ${updatedEps.length} videos in YouTube playlist.`);
       } else {
-        // Local Folder Scan
-        setRescanMessage(`Scanning local folder with pattern: ${pattern}...`);
-        const res = await fetch('/api/scan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ folderPath: anime.folderPath, namingPattern: pattern })
-        });
-        const data = await res.json();
-        if (!data.success) {
-          throw new Error(data.error || 'Failed to scan folder');
-        }
-
-        const scannedFiles = data.episodes || data.files || [];
-        const processed = processScannedFiles(scannedFiles, anime.folderPath, pattern);
-        const existingEpMap = new Map(episodes.map(e => [e.id, e]));
-
-        const updatedEps = processed.map((pEp) => {
-          const epId = pEp.id || pEp.docId || getSafeDocId(pEp.filePath || pEp.fileName, anime.folderPath);
-          const existing = existingEpMap.get(epId);
-          return {
-            ...pEp,
-            id: epId,
-            animeId: animeId,
-            isWatched: existing ? existing.isWatched : (pEp.isWatched || false),
-            watchedSeconds: existing ? existing.watchedSeconds : (pEp.watchedSeconds || 0),
-            lastPositionSeconds: existing ? existing.lastPositionSeconds : (pEp.lastPositionSeconds || 0),
-            flags: existing ? existing.flags : (pEp.flags || []),
-            note: existing ? existing.note : (pEp.note || ''),
-            updatedAt: new Date().toISOString()
-          };
-        });
-
-        // Save locally
-        setEpisodes(sortEpisodes(updatedEps));
-        setLocalEpisodes(animeId, updatedEps);
-        upsertLocalAnime({ ...anime, namingPattern: pattern, episodeCount: updatedEps.length, updatedAt: new Date().toISOString() });
-
-        // Save to Firestore if online
-        if (!isOffline && db && currentUser) {
-          const batch = writeBatch(db);
-          updatedEps.forEach(ep => {
-            const epRef = doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id);
-            batch.set(epRef, ep, { merge: true });
+        setRescanMessage(`Scanning folder with pattern: ${pattern}...`);
+        let scannedFiles = [];
+        try {
+          const res = await fetch('/api/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folderPath: anime.folderPath, namingPattern: pattern })
           });
-          const animeRef = doc(db, 'users', getUserId(), 'anime', animeId);
-          batch.update(animeRef, { namingPattern: pattern, episodeCount: updatedEps.length, updatedAt: new Date().toISOString() });
-          await batch.commit();
+          const data = await res.json();
+          if (data.success) {
+            scannedFiles = data.episodes || data.files || [];
+          }
+        } catch (err) {
+          console.warn("Local scan API failed or directory not on disk:", err);
         }
 
-        setRescanStatus('completed');
-        setRescanMessage(`Rescan complete! Found ${updatedEps.length} episodes.`);
+        if (scannedFiles.length > 0) {
+          const processed = processScannedFiles(scannedFiles, anime.folderPath, pattern);
+          const existingEpMap = new Map(episodes.map(e => [e.id, e]));
+
+          scannedCandidateEps = processed.map((pEp) => {
+            const epId = pEp.id || pEp.docId || getSafeDocId(pEp.filePath || pEp.fileName, anime.folderPath);
+            const existing = existingEpMap.get(epId);
+            return {
+              ...pEp,
+              id: epId,
+              animeId: animeId,
+              isWatched: existing ? existing.isWatched : (pEp.isWatched || false),
+              watchedSeconds: existing ? existing.watchedSeconds : (pEp.watchedSeconds || 0),
+              lastPositionSeconds: existing ? existing.lastPositionSeconds : (pEp.lastPositionSeconds || 0),
+              flags: existing ? existing.flags : (pEp.flags || []),
+              note: existing ? existing.note : (pEp.note || ''),
+              updatedAt: new Date().toISOString()
+            };
+          });
+        } else {
+          scannedCandidateEps = episodes.map(ep => ({ ...ep, updatedAt: new Date().toISOString() }));
+        }
       }
+
+      // Calculate Diff against current episodes
+      const existingEpMap = new Map(episodes.map(e => [e.id, e]));
+      const newEpisodes = scannedCandidateEps.filter(ep => !existingEpMap.has(ep.id));
+      const retainedEpisodes = scannedCandidateEps.filter(ep => existingEpMap.has(ep.id));
+
+      const scannedIds = new Set(scannedCandidateEps.map(e => e.id));
+      const removedEpisodes = episodes.filter(ep => !scannedIds.has(ep.id));
+
+      // Folder Diff
+      const oldFolders = new Set(episodes.map(e => getSubfolder(e.filePath, anime?.folderPath || '')));
+      const newFolders = new Set(scannedCandidateEps.map(e => getSubfolder(e.filePath, anime?.folderPath || '')));
+
+      const addedFoldersList = Array.from(newFolders).filter(f => f && f !== '' && !oldFolders.has(f));
+      const removedFoldersList = Array.from(oldFolders).filter(f => f && f !== '' && !newFolders.has(f));
+
+      const mergedList = sortEpisodes([
+        ...episodes.filter(e => scannedIds.has(e.id)),
+        ...newEpisodes
+      ]);
+
+      const diff = {
+        newEpisodes,
+        retainedEpisodes,
+        removedEpisodes,
+        addedFolders: addedFoldersList,
+        removedFolders: removedFoldersList,
+        pattern,
+        allMergedEpisodes: mergedList,
+        scannedCount: scannedCandidateEps.length
+      };
+
+      setRescanDiff(diff);
+      setRescanStatus('preview');
     } catch (err) {
       console.error('Error during rescan:', err);
       setRescanStatus('error');
@@ -850,27 +856,160 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     }
   };
 
-  // Load File Manager directory contents
-  const loadFileManagerTree = async (targetPath) => {
-    const queryPath = targetPath || anime?.folderPath;
-    if (!queryPath) return;
+  // Apply Rescan Changes Handler (only uploads newly found episodes to Firestore!)
+  const handleApplyRescanChanges = async () => {
+    if (!rescanDiff || !anime) return;
+    setRescanStatus('applying');
+    setRescanMessage('Uploading new episodes to Firestore and updating library...');
+
+    try {
+      const { newEpisodes, removedEpisodes, allMergedEpisodes, pattern } = rescanDiff;
+
+      // 1. Upload ONLY NEW episodes to Firestore if online
+      if (!isOffline && db && currentUser) {
+        const batch = writeBatch(db);
+
+        // Upload ONLY newly found episodes!
+        newEpisodes.forEach(ep => {
+          const epRef = doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id);
+          batch.set(epRef, ep, { merge: true });
+        });
+
+        // Delete removed episodes if any
+        removedEpisodes.forEach(ep => {
+          const epRef = doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id);
+          batch.delete(epRef);
+        });
+
+        // Update anime metadata
+        const animeRef = doc(db, 'users', getUserId(), 'anime', animeId);
+        batch.update(animeRef, {
+          namingPattern: pattern,
+          episodeCount: allMergedEpisodes.length,
+          updatedAt: new Date().toISOString()
+        });
+
+        await batch.commit();
+      } else {
+        // Queue dirty ops for offline sync
+        newEpisodes.forEach(ep => {
+          addToDirtyQueue({ type: 'SET_EPISODE', dedupeKey: `SET_EPISODE_${animeId}_${ep.id}`, payload: { animeId, ...ep } });
+        });
+        removedEpisodes.forEach(ep => {
+          addToDirtyQueue({ type: 'DELETE_EPISODE', dedupeKey: `DELETE_EPISODE_${animeId}_${ep.id}`, payload: { animeId, id: ep.id, episodeId: ep.id } });
+        });
+      }
+
+      // Save locally
+      newEpisodes.forEach(ep => upsertLocalEpisode(animeId, ep));
+      removedEpisodes.forEach(ep => deleteLocalEpisode(animeId, ep.id));
+
+      setEpisodes(allMergedEpisodes);
+      setLocalEpisodes(animeId, allMergedEpisodes);
+      upsertLocalAnime({
+        ...anime,
+        namingPattern: pattern,
+        episodeCount: allMergedEpisodes.length,
+        updatedAt: new Date().toISOString()
+      });
+
+      setRescanStatus('completed');
+      setRescanMessage(`Rescan complete! Uploaded ${newEpisodes.length} newly found episodes to Firestore.`);
+    } catch (err) {
+      console.error("Error applying rescan changes:", err);
+      setRescanStatus('error');
+      setRescanMessage(err.message || 'Failed to apply rescan changes');
+    }
+  };
+
+  // In-memory File Manager Tree Builder (built from Firestore episodes data)
+  const buildTreeFromEpisodes = useCallback((epList, rootFolder, currentPath) => {
+    const root = (rootFolder || 'Root').replace(/\\/g, '/').replace(/\/$/, '');
+    const current = (currentPath || root).replace(/\\/g, '/').replace(/\/$/, '');
+
+    const children = [];
+    const folderSet = new Map();
+
+    epList.forEach((ep) => {
+      const rawPath = (ep.filePath || ep.fileName || ep.name || ep.title || '').replace(/\\/g, '/');
+      let relPath = rawPath;
+
+      if (current && rawPath.startsWith(current)) {
+        relPath = rawPath.slice(current.length).replace(/^\//, '');
+      } else if (root && rawPath.startsWith(root)) {
+        relPath = rawPath.slice(root.length).replace(/^\//, '');
+      }
+
+      const parts = relPath.split('/').filter(Boolean);
+      if (parts.length === 0) return;
+
+      if (parts.length === 1) {
+        if (parts[0] === '.keep' || parts[0] === '.folder_placeholder') return;
+        children.push({
+          name: ep.fileName || ep.name || ep.title || parts[0],
+          isDirectory: false,
+          path: ep.filePath || `${current}/${parts[0]}`,
+          relativePath: parts[0],
+          id: ep.id,
+          size: ep.sizeBytes || 0,
+          episode: ep
+        });
+      } else {
+        const subFolderName = parts[0];
+        const subFolderPath = `${current}/${subFolderName}`;
+        if (!folderSet.has(subFolderName)) {
+          folderSet.set(subFolderName, subFolderPath);
+        }
+      }
+    });
+
+    folderSet.forEach((fPath, fName) => {
+      children.push({
+        name: fName,
+        isDirectory: true,
+        path: fPath,
+        relativePath: fName,
+        children: []
+      });
+    });
+
+    children.sort((a, b) => {
+      if (a.isDirectory && !b.isDirectory) return -1;
+      if (!a.isDirectory && b.isDirectory) return 1;
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    return {
+      name: current.split('/').pop() || 'Root',
+      isDirectory: true,
+      path: current,
+      children
+    };
+  }, []);
+
+  // Load File Manager directory contents from Firestore state
+  const loadFileManagerTree = useCallback((targetPath) => {
+    const queryPath = targetPath || anime?.folderPath || 'Root';
     setFmLoading(true);
     try {
-      const res = await fetch(`/api/manage-folder?path=${encodeURIComponent(queryPath)}`);
-      const data = await res.json();
-      if (data.success) {
-        setFmTree(data.tree);
-        setFmCurrentPath(data.tree.path);
-      } else {
-        alert("Failed to load directory: " + data.error);
-      }
+      const tree = buildTreeFromEpisodes(episodes, anime?.folderPath, queryPath);
+      setFmTree(tree);
+      setFmCurrentPath(tree.path);
     } catch (err) {
-      console.error("File manager load error:", err);
-      alert("Error loading directory: " + err.message);
+      console.error("File manager tree build error:", err);
     } finally {
       setFmLoading(false);
     }
-  };
+  }, [anime, episodes, buildTreeFromEpisodes]);
+
+  // Auto refresh tree when episodes or path changes in modal
+  useEffect(() => {
+    if (showFileManagerModal) {
+      const queryPath = fmCurrentPath || anime?.folderPath || 'Root';
+      const tree = buildTreeFromEpisodes(episodes, anime?.folderPath, queryPath);
+      setFmTree(tree);
+    }
+  }, [episodes, fmCurrentPath, anime, showFileManagerModal, buildTreeFromEpisodes]);
 
   const openFileManagerModal = () => {
     setShowFileManagerModal(true);
@@ -879,105 +1018,251 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
 
   const handleCreateSubfolder = async () => {
     if (!fmNewFolderName.trim() || !fmCurrentPath) return;
+    const folderName = fmNewFolderName.trim();
+    const cleanCurrent = fmCurrentPath.replace(/\\/g, '/').replace(/\/$/, '');
+    const newFolderPath = `${cleanCurrent}/${folderName}`;
     try {
-      const res = await fetch('/api/manage-folder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'createFolder', parentPath: fmCurrentPath, folderName: fmNewFolderName.trim() })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setFmNewFolderName('');
-        setShowNewFolderInput(false);
-        loadFileManagerTree(fmCurrentPath);
+      setFmLoading(true);
+      const placeholderId = getSafeDocId(`${folderName}_placeholder`, newFolderPath);
+      const placeholderEp = {
+        id: placeholderId,
+        name: '.keep',
+        fileName: '.keep',
+        title: '.keep',
+        filePath: `${newFolderPath}/.keep`,
+        isWatched: false,
+        durationSeconds: 0,
+        watchedSeconds: 0,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (!isOffline && db && currentUser) {
+        await setDoc(doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', placeholderId), placeholderEp);
       } else {
-        alert(data.error);
+        addToDirtyQueue({ type: 'SET_EPISODE', dedupeKey: `SET_EPISODE_${animeId}_${placeholderId}`, payload: { animeId, ...placeholderEp } });
       }
+      upsertLocalEpisode(animeId, placeholderEp);
+      setEpisodes(prev => sortEpisodes([...prev, placeholderEp]));
+
+      setFmNewFolderName('');
+      setShowNewFolderInput(false);
     } catch (err) {
+      console.error("Error creating folder in Firestore:", err);
       alert("Error creating folder: " + err.message);
+    } finally {
+      setFmLoading(false);
     }
   };
 
   const handleCheckFile = async () => {
     if (!fmNewFileName.trim() || !fmCurrentPath) return;
+    const fileName = fmNewFileName.trim();
+    const cleanCurrent = fmCurrentPath.replace(/\\/g, '/').replace(/\/$/, '');
+    const newFilePath = `${cleanCurrent}/${fileName}`;
     try {
-      const res = await fetch('/api/manage-folder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'checkFile', parentPath: fmCurrentPath, fileName: fmNewFileName.trim() })
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert(data.message);
-        setFmNewFileName('');
-        setShowNewFileInput(false);
-        loadFileManagerTree(fmCurrentPath);
+      setFmLoading(true);
+      const newEpId = getSafeDocId(fileName, cleanCurrent);
+      const newEp = {
+        id: newEpId,
+        name: fileName,
+        fileName: fileName,
+        title: fileName.replace(/\.[^/.]+$/, ''),
+        filePath: newFilePath,
+        isWatched: false,
+        durationSeconds: 0,
+        watchedSeconds: 0,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (!isOffline && db && currentUser) {
+        await setDoc(doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', newEpId), newEp);
       } else {
-        alert(data.error);
+        addToDirtyQueue({ type: 'SET_EPISODE', dedupeKey: `SET_EPISODE_${animeId}_${newEpId}`, payload: { animeId, ...newEp } });
       }
+      upsertLocalEpisode(animeId, newEp);
+      setEpisodes(prev => sortEpisodes([...prev, newEp]));
+
+      alert(`Added "${fileName}" to Firestore database!`);
+      setFmNewFileName('');
+      setShowNewFileInput(false);
     } catch (err) {
-      alert("Error checking file: " + err.message);
+      console.error("Error adding file to Firestore:", err);
+      alert("Error adding file: " + err.message);
+    } finally {
+      setFmLoading(false);
     }
   };
 
   const handleRenameItem = async () => {
     if (!fmRenameTarget || !fmNewName.trim()) return;
+    const newName = fmNewName.trim();
     try {
-      const res = await fetch('/api/manage-folder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'rename', oldPath: fmRenameTarget.path, newName: fmNewName.trim() })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setFmRenameTarget(null);
-        setFmNewName('');
-        loadFileManagerTree(fmCurrentPath);
+      setFmLoading(true);
+      if (!fmRenameTarget.isDirectory) {
+        const ep = fmRenameTarget.episode;
+        if (!ep) return;
+
+        const oldPath = (ep.filePath || fmRenameTarget.path || '').replace(/\\/g, '/');
+        const parentDir = oldPath.substring(0, oldPath.lastIndexOf('/'));
+        const newFilePath = parentDir ? `${parentDir}/${newName}` : newName;
+
+        const updatedEp = {
+          ...ep,
+          name: newName,
+          fileName: newName,
+          title: newName.replace(/\.[^/.]+$/, ''),
+          filePath: newFilePath,
+          updatedAt: new Date().toISOString()
+        };
+
+        if (!isOffline && db && currentUser) {
+          await updateDoc(doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id), updatedEp);
+        } else {
+          addToDirtyQueue({ type: 'SET_EPISODE', dedupeKey: `SET_EPISODE_${animeId}_${ep.id}`, payload: { animeId, ...updatedEp } });
+        }
+        upsertLocalEpisode(animeId, updatedEp);
+        setEpisodes(prev => prev.map(e => e.id === ep.id ? updatedEp : e));
       } else {
-        alert(data.error);
+        const oldSubfolderPath = fmRenameTarget.path.replace(/\\/g, '/').replace(/\/$/, '');
+        const parentDir = oldSubfolderPath.substring(0, oldSubfolderPath.lastIndexOf('/'));
+        const newSubfolderPath = parentDir ? `${parentDir}/${newName}` : newName;
+
+        const targetEps = episodes.filter(ep => {
+          const epPath = (ep.filePath || '').replace(/\\/g, '/');
+          return epPath.startsWith(oldSubfolderPath + '/') || epPath === oldSubfolderPath;
+        });
+
+        const updatedList = [];
+        for (const ep of targetEps) {
+          const oldEpPath = (ep.filePath || '').replace(/\\/g, '/');
+          const newEpPath = oldEpPath.replace(oldSubfolderPath, newSubfolderPath);
+          const updatedEp = {
+            ...ep,
+            filePath: newEpPath,
+            updatedAt: new Date().toISOString()
+          };
+          if (!isOffline && db && currentUser) {
+            await updateDoc(doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id), updatedEp);
+          } else {
+            addToDirtyQueue({ type: 'SET_EPISODE', dedupeKey: `SET_EPISODE_${animeId}_${ep.id}`, payload: { animeId, ...updatedEp } });
+          }
+          upsertLocalEpisode(animeId, updatedEp);
+          updatedList.push(updatedEp);
+        }
+
+        const mapById = new Map(updatedList.map(e => [e.id, e]));
+        setEpisodes(prev => prev.map(e => mapById.get(e.id) || e));
       }
+
+      setFmRenameTarget(null);
+      setFmNewName('');
     } catch (err) {
+      console.error("Error renaming item in Firestore:", err);
       alert("Error renaming item: " + err.message);
+    } finally {
+      setFmLoading(false);
     }
   };
 
   const handleDeleteItem = async (item) => {
-    if (!confirm(`Are you sure you want to delete "${item.name}"? This action cannot be undone.`)) return;
+    if (!confirm(`Are you sure you want to delete "${item.name}" from Firestore library? This action cannot be undone.`)) return;
     try {
-      const res = await fetch('/api/manage-folder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete', targetPath: item.path })
-      });
-      const data = await res.json();
-      if (data.success) {
-        loadFileManagerTree(fmCurrentPath);
+      setFmLoading(true);
+      if (!item.isDirectory) {
+        const epId = item.id;
+        if (!isOffline && db && currentUser) {
+          await deleteDoc(doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', epId));
+        } else {
+          addToDirtyQueue({ type: 'DELETE_EPISODE', dedupeKey: `DELETE_EPISODE_${animeId}_${epId}`, payload: { animeId, id: epId, episodeId: epId } });
+        }
+        deleteLocalEpisode(animeId, epId);
+        setEpisodes(prev => prev.filter(ep => ep.id !== epId));
       } else {
-        alert(data.error);
+        const subfolderPathNorm = item.path.replace(/\\/g, '/').replace(/\/$/, '') + '/';
+        const targetEps = episodes.filter(ep => {
+          const epPathNorm = (ep.filePath || '').replace(/\\/g, '/');
+          return epPathNorm.startsWith(subfolderPathNorm);
+        });
+
+        for (const ep of targetEps) {
+          if (!isOffline && db && currentUser) {
+            await deleteDoc(doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id));
+          } else {
+            addToDirtyQueue({ type: 'DELETE_EPISODE', dedupeKey: `DELETE_EPISODE_${animeId}_${ep.id}`, payload: { animeId, id: ep.id, episodeId: ep.id } });
+          }
+          deleteLocalEpisode(animeId, ep.id);
+        }
+
+        const targetIds = new Set(targetEps.map(e => e.id));
+        setEpisodes(prev => prev.filter(ep => !targetIds.has(ep.id)));
       }
     } catch (err) {
+      console.error("Error deleting item from Firestore:", err);
       alert("Error deleting item: " + err.message);
+    } finally {
+      setFmLoading(false);
     }
   };
 
   const handleMoveItem = async () => {
     if (!fmMoveTarget || !fmDestPath) return;
+    const destFolder = fmDestPath.replace(/\\/g, '/').replace(/\/$/, '');
     try {
-      const res = await fetch('/api/manage-folder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'move', sourcePath: fmMoveTarget.path, destFolderPath: fmDestPath })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setFmMoveTarget(null);
-        setFmDestPath('');
-        loadFileManagerTree(fmCurrentPath);
+      setFmLoading(true);
+      if (!fmMoveTarget.isDirectory) {
+        const ep = fmMoveTarget.episode;
+        if (!ep) return;
+        const newFilePath = `${destFolder}/${ep.fileName || ep.name}`;
+        const updatedEp = {
+          ...ep,
+          filePath: newFilePath,
+          updatedAt: new Date().toISOString()
+        };
+        if (!isOffline && db && currentUser) {
+          await updateDoc(doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id), updatedEp);
+        } else {
+          addToDirtyQueue({ type: 'SET_EPISODE', dedupeKey: `SET_EPISODE_${animeId}_${ep.id}`, payload: { animeId, ...updatedEp } });
+        }
+        upsertLocalEpisode(animeId, updatedEp);
+        setEpisodes(prev => prev.map(e => e.id === ep.id ? updatedEp : e));
       } else {
-        alert(data.error);
+        const oldSubfolderPath = fmMoveTarget.path.replace(/\\/g, '/').replace(/\/$/, '');
+        const folderName = fmMoveTarget.name;
+        const newSubfolderPath = `${destFolder}/${folderName}`;
+
+        const targetEps = episodes.filter(ep => {
+          const epPath = (ep.filePath || '').replace(/\\/g, '/');
+          return epPath.startsWith(oldSubfolderPath + '/') || epPath === oldSubfolderPath;
+        });
+
+        const updatedList = [];
+        for (const ep of targetEps) {
+          const oldEpPath = (ep.filePath || '').replace(/\\/g, '/');
+          const newEpPath = oldEpPath.replace(oldSubfolderPath, newSubfolderPath);
+          const updatedEp = {
+            ...ep,
+            filePath: newEpPath,
+            updatedAt: new Date().toISOString()
+          };
+          if (!isOffline && db && currentUser) {
+            await updateDoc(doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id), updatedEp);
+          } else {
+            addToDirtyQueue({ type: 'SET_EPISODE', dedupeKey: `SET_EPISODE_${animeId}_${ep.id}`, payload: { animeId, ...updatedEp } });
+          }
+          upsertLocalEpisode(animeId, updatedEp);
+          updatedList.push(updatedEp);
+        }
+        const mapById = new Map(updatedList.map(e => [e.id, e]));
+        setEpisodes(prev => prev.map(e => mapById.get(e.id) || e));
       }
+
+      setFmMoveTarget(null);
+      setFmDestPath('');
     } catch (err) {
+      console.error("Error moving item in Firestore:", err);
       alert("Error moving item: " + err.message);
+    } finally {
+      setFmLoading(false);
     }
   };
 
@@ -1297,7 +1582,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
               )}
 
               <button
-                onClick={handleRescan}
+                onClick={() => handleRescan()}
                 className="px-4 py-2 rounded-xl bg-white/5 border border-white/5 hover:text-neonCyan hover:bg-white/10 hover:border-neonCyan/20 text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-all shadow-inner"
               >
                 <RefreshCw size={14} />
@@ -1353,7 +1638,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                     </button>
 
                     <button
-                      onClick={handleRescan}
+                      onClick={() => handleRescan()}
                       className="w-full py-2.5 rounded-xl bg-white/5 border border-white/10 hover:text-neonCyan text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <RefreshCw size={14} />
@@ -2285,7 +2570,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
         )}
       </AnimatePresence>
 
-      {/* Folder Rescan Status Modal */}
+      {/* Folder Rescan Status & Consent Modal */}
       <AnimatePresence>
         {showRescanModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
@@ -2297,10 +2582,10 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
             >
               <div className="flex justify-between items-start border-b border-white/10 pb-3">
                 <h2 className="text-base font-bold flex items-center gap-2 text-white">
-                  <RefreshCw className={`text-neonCyan ${rescanStatus === 'scanning' ? 'animate-spin' : ''}`} size={18} />
-                  Rescan Folder & Playlist
+                  <RefreshCw className={`text-neonCyan ${rescanStatus === 'scanning' || rescanStatus === 'applying' ? 'animate-spin' : ''}`} size={18} />
+                  {rescanStatus === 'preview' ? 'Scan Results — Preview Changes' : 'Rescan Folder & Playlist'}
                 </h2>
-                {rescanStatus !== 'scanning' && (
+                {rescanStatus !== 'scanning' && rescanStatus !== 'applying' && (
                   <button
                     onClick={() => setShowRescanModal(false)}
                     className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
@@ -2310,46 +2595,150 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                 )}
               </div>
 
-              <div className="bg-black/40 border border-white/10 rounded-xl p-4 space-y-3 text-xs">
-                <div className="flex items-center gap-2">
-                  {rescanStatus === 'scanning' ? (
+              {/* Scanning / Applying State */}
+              {(rescanStatus === 'scanning' || rescanStatus === 'applying') && (
+                <div className="bg-black/40 border border-white/10 rounded-xl p-4 space-y-3 text-xs">
+                  <div className="flex items-center gap-2">
                     <Loader2 className="animate-spin text-neonCyan" size={16} />
-                  ) : rescanStatus === 'completed' ? (
-                    <CheckCircle2 className="text-emerald-400" size={16} />
-                  ) : rescanStatus === 'error' ? (
-                    <AlertTriangle className="text-red-400" size={16} />
-                  ) : null}
-                  <span className="font-semibold text-gray-200">
-                    {rescanStatus === 'scanning' && 'Scanning directory/playlist...'}
-                    {rescanStatus === 'completed' && 'Rescan completed successfully!'}
-                    {rescanStatus === 'error' && 'Rescan failed'}
-                  </span>
+                    <span className="font-semibold text-gray-200">
+                      {rescanStatus === 'scanning' ? 'Scanning directory/playlist...' : 'Updating Firestore...'}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-black/60 rounded-lg border border-white/5 font-mono text-[11px] text-gray-300">
+                    {rescanMessage}
+                  </div>
                 </div>
+              )}
 
-                <div className="p-3 bg-black/60 rounded-lg border border-white/5 font-mono text-[11px] text-gray-300">
-                  {rescanMessage}
+              {/* Preview Diff & Consent State */}
+              {rescanStatus === 'preview' && rescanDiff && (
+                <div className="space-y-4 text-xs">
+                  {/* Summary Metric Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 text-center">
+                      <span className="block text-lg font-black text-emerald-400">+{rescanDiff.newEpisodes.length}</span>
+                      <span className="text-[10px] text-gray-400 font-medium">New Episodes</span>
+                    </div>
+
+                    <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-xl p-3 text-center">
+                      <span className="block text-lg font-black text-neonCyan">+{rescanDiff.addedFolders.length}</span>
+                      <span className="text-[10px] text-gray-400 font-medium">New Folders</span>
+                    </div>
+
+                    <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-center">
+                      <span className="block text-lg font-black text-blue-400">{rescanDiff.retainedEpisodes.length}</span>
+                      <span className="text-[10px] text-gray-400 font-medium">Existing Kept</span>
+                    </div>
+
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-center">
+                      <span className="block text-lg font-black text-red-400">-{rescanDiff.removedEpisodes.length}</span>
+                      <span className="text-[10px] text-gray-400 font-medium">Removed/Missing</span>
+                    </div>
+                  </div>
+
+                  {/* Detail Item Lists */}
+                  <div className="max-h-[220px] overflow-y-auto bg-black/60 rounded-xl border border-white/10 p-3 space-y-2 text-xs">
+                    {rescanDiff.newEpisodes.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                          <Sparkles size={12} /> New Episodes Found ({rescanDiff.newEpisodes.length}):
+                        </span>
+                        {rescanDiff.newEpisodes.map(ep => (
+                          <div key={ep.id} className="text-[11px] text-emerald-300/90 font-mono truncate pl-2 border-l-2 border-emerald-500/50">
+                            + {ep.fileName}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {rescanDiff.addedFolders.length > 0 && (
+                      <div className="space-y-1 pt-2 border-t border-white/5">
+                        <span className="text-[11px] font-bold text-neonCyan flex items-center gap-1">
+                          <FolderPlus size={12} /> New Folders Found ({rescanDiff.addedFolders.length}):
+                        </span>
+                        {rescanDiff.addedFolders.map(f => (
+                          <div key={f} className="text-[11px] text-neonCyan/90 font-mono truncate pl-2 border-l-2 border-neonCyan/50">
+                            + {f}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {rescanDiff.removedEpisodes.length > 0 && (
+                      <div className="space-y-1 pt-2 border-t border-white/5">
+                        <span className="text-[11px] font-bold text-red-400 flex items-center gap-1">
+                          <Trash2 size={12} /> Missing / Removed Items ({rescanDiff.removedEpisodes.length}):
+                        </span>
+                        {rescanDiff.removedEpisodes.map(ep => (
+                          <div key={ep.id} className="text-[11px] text-red-300/90 font-mono truncate pl-2 border-l-2 border-red-500/50">
+                            - {ep.fileName}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {rescanDiff.newEpisodes.length === 0 && rescanDiff.addedFolders.length === 0 && rescanDiff.removedEpisodes.length === 0 && (
+                      <div className="text-center py-4 text-gray-400 text-xs">
+                        No new files or folder changes detected. Library is up to date!
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-gray-400 italic">
+                    ⚡ Note: Only newly found episodes will be uploaded to Firestore. Existing episodes are retained unchanged.
+                  </p>
+
+                  {/* Consent Buttons */}
+                  <div className="flex justify-end gap-3 pt-2 border-t border-white/10">
+                    <button
+                      type="button"
+                      onClick={() => setShowRescanModal(false)}
+                      className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-bold cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleApplyRescanChanges}
+                      className="px-5 py-2 rounded-xl bg-neon-gradient hover:brightness-110 text-white text-xs font-bold uppercase tracking-wider shadow-purple-glow cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Sparkles size={14} /> Apply Changes (Change)
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="flex justify-end pt-2">
-                {rescanStatus !== 'scanning' ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowRescanModal(false)}
-                    className="px-5 py-2 rounded-xl bg-neon-gradient text-white text-xs font-bold uppercase tracking-wider hover:brightness-110 shadow-purple-glow cursor-pointer"
-                  >
-                    Close
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled
-                    className="px-5 py-2 rounded-xl bg-white/5 text-gray-500 text-xs font-bold uppercase tracking-wider border border-white/5"
-                  >
-                    Processing...
-                  </button>
-                )}
-              </div>
+              {/* Completed / Error State */}
+              {(rescanStatus === 'completed' || rescanStatus === 'error') && (
+                <div className="space-y-4">
+                  <div className="bg-black/40 border border-white/10 rounded-xl p-4 space-y-3 text-xs">
+                    <div className="flex items-center gap-2">
+                      {rescanStatus === 'completed' ? (
+                        <CheckCircle2 className="text-emerald-400" size={16} />
+                      ) : (
+                        <AlertTriangle className="text-red-400" size={16} />
+                      )}
+                      <span className="font-semibold text-gray-200">
+                        {rescanStatus === 'completed' ? 'Rescan completed successfully!' : 'Rescan failed'}
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-black/60 rounded-lg border border-white/5 font-mono text-[11px] text-gray-300">
+                      {rescanMessage}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowRescanModal(false)}
+                      className="px-5 py-2 rounded-xl bg-neon-gradient text-white text-xs font-bold uppercase tracking-wider hover:brightness-110 shadow-purple-glow cursor-pointer"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
             </motion.div>
           </div>
         )}

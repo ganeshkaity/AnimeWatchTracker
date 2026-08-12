@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import fs from 'fs';
+import http from 'http';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -47,7 +48,8 @@ export async function POST(request) {
       '--extraintf=http',
       `--http-port=${port}`,
       `--http-password=${password}`,
-      '--no-sub-autodetect-file'
+      '--no-sub-autodetect-file',
+      '--no-volume-save'
     ];
 
     if (resumeTime && resumeTime > 0) {
@@ -58,14 +60,19 @@ export async function POST(request) {
       args.push(`--rate=${speed}`);
     }
 
+    let targetVlcVol = 256;
     if (volume !== undefined && volume !== null) {
-      const vlcVol = Math.round((volume / 100) * 256);
-      args.push(`--volume=${vlcVol}`);
+      const volNum = Number(volume);
+      targetVlcVol = Math.round((volNum / 100) * 256);
+      args.push(`--volume=${targetVlcVol}`);
+
+      const mmVol = (volNum / 100).toFixed(2);
+      args.push(`--mmdevice-volume=${mmVol}`);
     }
 
     args.push(filePath);
 
-    console.log(`Spawning local VLC instance: "${vlcPath}"`);
+    console.log(`Spawning local VLC instance: "${vlcPath}" with args:`, args);
 
     // Spawn process as detached so it can run independently of Next.js dev server
     const child = spawn(vlcPath, args, {
@@ -78,6 +85,28 @@ export async function POST(request) {
     // Cache process reference in global object
     global.vlcProcess = child;
     global.vlcCurrentFile = filePath;
+
+    // Send HTTP command to forcefully set initial volume once VLC HTTP interface is ready
+    const sendVlcVolumeCommand = (val) => {
+      try {
+        const auth = Buffer.from(':' + password).toString('base64');
+        const req = http.request({
+          hostname: '127.0.0.1',
+          port: port,
+          path: `/requests/status.json?command=volume&val=${val}`,
+          method: 'GET',
+          headers: { 'Authorization': 'Basic ' + auth },
+          timeout: 800
+        }, (res) => {
+          res.resume();
+        });
+        req.on('error', () => {});
+        req.end();
+      } catch (e) {}
+    };
+
+    setTimeout(() => sendVlcVolumeCommand(targetVlcVol), 500);
+    setTimeout(() => sendVlcVolumeCommand(targetVlcVol), 1200);
 
     return NextResponse.json({ success: true });
   } catch (err) {

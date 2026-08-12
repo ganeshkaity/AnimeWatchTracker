@@ -44,7 +44,7 @@ export async function POST(request) {
     }
     
     if (!fs.existsSync(folderPath)) {
-      return NextResponse.json({ success: false, error: 'Directory does not exist on this machine' }, { status: 404 });
+      return NextResponse.json({ success: true, episodes: [], message: 'Directory does not exist on local disk.' });
     }
 
     const episodes = [];
