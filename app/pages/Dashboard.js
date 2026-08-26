@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { collection, query, onSnapshot, writeBatch, doc, deleteDoc, updateDoc, setDoc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
@@ -16,10 +16,12 @@ import {
   StickyNote, Download, Wifi, WifiOff, RefreshCw, ChevronLeft, ChevronRight,
   Star, Flame, TrendingUp, Clock, Sparkles, Film, Bookmark, Bell, Menu, X,
   Tv, Eye, ShieldCheck, Heart, User, Filter, Compass, Calendar, AlertTriangle,
-  Youtube, Video, CheckSquare, Square
+  Youtube, Video, CheckSquare, Square, ExternalLink, Globe
 } from 'lucide-react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
+import AnimeCoverSearch from '../components/AnimeCoverSearch';
+import CachedImage from '../utils/imageCache';
 
 const GRADIENTS = [
   "from-violet-600 to-indigo-700",
@@ -93,13 +95,24 @@ const getHeroSlides = (animesList) => {
       genres = anime.genres.split(',').map(g => g.trim());
     }
     const validGenres = genres.filter(g => GENRES_LIST.includes(g) && g !== 'All');
+
+    const totalSeasons = anime.totalSeasons ? Number(anime.totalSeasons) : 1;
+    const totalEpisodes = anime.totalEpisodes ? Number(anime.totalEpisodes) : (anime.episodeCount || 0);
+    const scannedCount = anime.episodeCount || 0;
+    let epDisplay = `${totalEpisodes} EP`;
+    if (scannedCount > 0 && scannedCount !== totalEpisodes) {
+      epDisplay = `${scannedCount}/${totalEpisodes} EP`;
+    }
+
     return {
       id: anime.id,
       title: (anime?.title || 'UNTITLED ANIME').toString().toUpperCase(),
       japaneseTitle: anime.japaneseTitle || 'LOCAL LIBRARY',
       banner: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop',
       rating: getDeterministicRating(anime.id, anime.rating),
-      episodes: `${anime.episodeCount || 0} EP`,
+      episodes: epDisplay,
+      totalSeasons: totalSeasons,
+      totalEpisodes: totalEpisodes,
       year: anime.year || new Date(anime.createdAt || Date.now()).getFullYear().toString(),
       quality: anime.quality || '1080p HD',
       language: anime.language || 'SUB / DUB',
@@ -155,6 +168,9 @@ export default function Dashboard({ onSelectAnime }) {
   const [coverUrl, setCoverUrl] = useState('');
   const [uploadingCover, setUploadingCover] = useState(false);
   const [addGenres, setAddGenres] = useState([]);
+  const [showOnlineSearchAdd, setShowOnlineSearchAdd] = useState(false);
+  const [addTotalSeasons, setAddTotalSeasons] = useState('1');
+  const [addTotalEpisodes, setAddTotalEpisodes] = useState('');
 
   // YouTube Playlist tab state
   const [addModalTab, setAddModalTab] = useState('local'); // 'local' | 'youtube'
@@ -173,24 +189,298 @@ export default function Dashboard({ onSelectAnime }) {
   const [editGenres, setEditGenres] = useState([]);
   const [editCoverUrl, setEditCoverUrl] = useState('');
   const [uploadingEditCover, setUploadingEditCover] = useState(false);
+  const [showOnlineSearchEdit, setShowOnlineSearchEdit] = useState(false);
+  const [editTotalSeasons, setEditTotalSeasons] = useState('1');
+  const [editTotalEpisodes, setEditTotalEpisodes] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
 
   // Ref for trending carousel horizontal scroll
   const trendingRef = useRef(null);
 
+  // Weekly Popular Anime from Internet (Top 10 of the week) with Local Storage Cache
+  const [weeklyPopular, setWeeklyPopular] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('watchanime_weekly_popular');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed?.data) && parsed.data.length > 0) {
+            return parsed.data;
+          }
+        }
+      } catch (e) {}
+    }
+    return [];
+  });
+  const [loadingWeeklyPopular, setLoadingWeeklyPopular] = useState(false);
+  const popularScrollRef = useRef(null);
+  const [isDraggingPopular, setIsDraggingPopular] = useState(false);
+  const [popularStartX, setPopularStartX] = useState(0);
+  const [popularScrollLeft, setPopularScrollLeft] = useState(0);
+  const [popularHasDragged, setPopularHasDragged] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    // Check if cached data is fresh (within 3 hours)
+    let isCacheFresh = false;
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('watchanime_weekly_popular');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed?.timestamp && (Date.now() - parsed.timestamp < 3 * 3600 * 1000) && Array.isArray(parsed?.data) && parsed.data.length > 0) {
+            isCacheFresh = true;
+          }
+        }
+      } catch (e) {}
+    }
+
+    // If cache is fresh and we already have items, skip network fetch to save bandwidth & CPU
+    if (isCacheFresh && weeklyPopular.length > 0) {
+      return;
+    }
+
+    const fetchPopular = async () => {
+      if (weeklyPopular.length === 0) {
+        setLoadingWeeklyPopular(true);
+      }
+      try {
+        const res = await fetch('/api/popular-anime');
+        const data = await res.json();
+        if (isMounted && data.success && Array.isArray(data.anime)) {
+          setWeeklyPopular(data.anime);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem(
+                'watchanime_weekly_popular',
+                JSON.stringify({ timestamp: Date.now(), data: data.anime })
+              );
+            } catch (e) {}
+          }
+        }
+      } catch (err) {
+        console.warn('[Dashboard] Failed to fetch weekly popular anime:', err);
+      } finally {
+        if (isMounted) setLoadingWeeklyPopular(false);
+      }
+    };
+    fetchPopular();
+    return () => { isMounted = false; };
+  }, []);
+
+  // Trending Today from Internet (Top 10 Episodes, Films, Hentai) with Local Storage Cache
+  const [internetTrending, setInternetTrending] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('watchanime_trending_today_v3');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed?.data) && parsed.data.length > 0) {
+            return parsed.data;
+          }
+        }
+      } catch (e) {}
+    }
+    return [];
+  });
+  const [loadingTrending, setLoadingTrending] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    let isFresh = false;
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('watchanime_trending_today_v3');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed?.timestamp && (Date.now() - parsed.timestamp < 2 * 3600 * 1000) && Array.isArray(parsed?.data) && parsed.data.length > 0) {
+            isFresh = true;
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (isFresh && internetTrending.length > 0) {
+      return;
+    }
+
+    const fetchTrending = async () => {
+      if (internetTrending.length === 0) setLoadingTrending(true);
+      try {
+        const res = await fetch('/api/trending-today');
+        const data = await res.json();
+        if (isMounted && data.success && Array.isArray(data.trending)) {
+          setInternetTrending(data.trending);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem(
+                'watchanime_trending_today_v3',
+                JSON.stringify({ timestamp: Date.now(), data: data.trending })
+              );
+            } catch (e) {}
+          }
+        }
+      } catch (err) {
+        console.warn('[Dashboard] Failed to fetch trending today:', err);
+      } finally {
+        if (isMounted) setLoadingTrending(false);
+      }
+    };
+    fetchTrending();
+    return () => { isMounted = false; };
+  }, []);
+
+  const handlePopularScroll = (direction) => {
+    if (!popularScrollRef.current) return;
+    const amount = direction === 'left' ? -380 : 380;
+    popularScrollRef.current.scrollBy({ left: amount, behavior: 'smooth' });
+  };
+
+  const handlePopularMouseDown = (e) => {
+    if (!popularScrollRef.current) return;
+    setIsDraggingPopular(true);
+    setPopularHasDragged(false);
+    setPopularStartX(e.pageX - popularScrollRef.current.offsetLeft);
+    setPopularScrollLeft(popularScrollRef.current.scrollLeft);
+  };
+
+  const handlePopularMouseMove = (e) => {
+    if (!isDraggingPopular || !popularScrollRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - popularScrollRef.current.offsetLeft;
+    const walk = (x - popularStartX) * 1.5;
+    if (Math.abs(walk) > 5) {
+      setPopularHasDragged(true);
+    }
+    popularScrollRef.current.scrollLeft = popularScrollLeft - walk;
+  };
+
+  const handlePopularMouseUp = () => {
+    setIsDraggingPopular(false);
+  };
+
+  const handlePopularMouseLeave = () => {
+    setIsDraggingPopular(false);
+  };
+
+  const handlePopularCardClick = (slide) => {
+    if (popularHasDragged) return; // Prevent navigation while dragging
+    if (slide.isUploaded && slide.uploadedAnimeId) {
+      onSelectAnime(slide.uploadedAnimeId);
+    } else {
+      // Prefill Add Anime modal to link or track this show!
+      setAnimeTitle(slide.title);
+      setCoverUrl(slide.banner || slide.image);
+      setShowAddModal(true);
+    }
+  };
+
+  const handleOpenExternalAnime = (e, item) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const title = item.animeTitle || item.title || '';
+    const url = item.siteUrl || (item.rawId ? `https://anilist.co/anime/${item.rawId}` : `https://anilist.co/search/anime?search=${encodeURIComponent(title)}`);
+    if (typeof window !== 'undefined') {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const handleOpenMalSearch = (e, item) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const title = item.animeTitle || item.title || '';
+    const url = `https://myanimelist.net/anime.php?q=${encodeURIComponent(title)}&cat=anime`;
+    if (typeof window !== 'undefined') {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const handleAddAnimeToLibrary = (e, item) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    setAnimeTitle(item.animeTitle || item.title || '');
+    setCoverUrl(item.banner || item.image || '');
+    setShowAddModal(true);
+  };
+
   // Get dynamic lists from database animes
   const heroSlides = getHeroSlides(animes);
 
-  const trendingShows = animes.slice(0, 6).map((anime, idx) => ({
-    id: anime.id,
-    rank: String(idx + 1).padStart(2, '0'),
-    title: anime.title || 'Untitled Anime',
-    episode: anime.lastWatchedEpisode ? `Ep ${anime.lastWatchedEpisode}` : 'EP 0',
-    rating: getDeterministicRating(anime.id, anime.rating),
-    image: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop',
-    lang: anime.language || 'SUB/DUB',
-    quality: anime.quality || 'HD'
-  }));
+  // Helper to extract the current cover photo of an anime folder
+  const getAnimeFolderCover = (a) => {
+    if (!a) return '';
+    if (a.thumbnailBase64) {
+      return (a.thumbnailBase64.startsWith('http') || a.thumbnailBase64.startsWith('data:'))
+        ? a.thumbnailBase64
+        : `/api/image?path=${encodeURIComponent(a.thumbnailBase64)}`;
+    }
+    if (a.thumbnailPath) {
+      return `/api/image?path=${encodeURIComponent(a.thumbnailPath)}`;
+    }
+    return a.coverImage || a.coverUrl || a.image || '';
+  };
+
+  const trendingShows = useMemo(() => {
+    if (internetTrending.length === 0) {
+      return animes.slice(0, 6).map((anime, idx) => ({
+        id: anime.id,
+        rank: String(idx + 1).padStart(2, '0'),
+        animeTitle: anime.title || 'Untitled Anime',
+        title: anime.title || 'Untitled Anime',
+        episode: anime.lastWatchedEpisode ? `Ep ${anime.lastWatchedEpisode}` : 'EP 1',
+        rating: getDeterministicRating(anime.id, anime.rating),
+        image: getAnimeFolderCover(anime) || 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx151807-it355ZgzquUd.png',
+        lang: anime.language || 'SUB/DUB',
+        quality: anime.quality || 'HD',
+        type: 'Local Anime',
+        typeBadge: 'LOCAL',
+        typeColor: 'purple',
+        isUploaded: true,
+        uploadedAnimeId: anime.id,
+      }));
+    }
+
+    const clean = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    return internetTrending.map((item, idx) => {
+      const iTitle = clean(item.animeTitle || item.title);
+      const iRomaji = clean(item.romajiTitle);
+      const iEnglish = clean(item.englishTitle);
+
+      // Best match against library animes by title, romaji, english, or folder name
+      const matched = animes.find((a) => {
+        const aTitle = clean(a.title);
+        const aFolder = a.folderPath ? clean(a.folderPath.split(/[/\\]/).pop()) : '';
+        return (
+          (aTitle && (aTitle === iTitle || (iRomaji && aTitle === iRomaji) || (iEnglish && aTitle === iEnglish))) ||
+          (aTitle && aTitle.length >= 4 && (iTitle.includes(aTitle) || aTitle.includes(iTitle))) ||
+          (iRomaji && aTitle && iRomaji.length >= 4 && (iRomaji.includes(aTitle) || aTitle.includes(iRomaji))) ||
+          (iEnglish && aTitle && iEnglish.length >= 4 && (iEnglish.includes(aTitle) || aTitle.includes(iEnglish))) ||
+          (aFolder && aFolder.length >= 4 && (iTitle.includes(aFolder) || aFolder.includes(iTitle)))
+        );
+      });
+
+      // For anime already in library, use the current cover photo of the anime folder
+      const localCover = matched ? getAnimeFolderCover(matched) : '';
+
+      return {
+        ...item,
+        rank: String(idx + 1).padStart(2, '0'),
+        image: (matched && localCover) ? localCover : item.image,
+        banner: (matched && localCover) ? localCover : (item.banner || item.image),
+        isUploaded: !!matched,
+        uploadedAnimeId: matched ? matched.id : null,
+      };
+    });
+  }, [internetTrending, animes]);
+
+  const handleTrendingCardClick = (show) => {
+    if (show.isUploaded && show.uploadedAnimeId) {
+      onSelectAnime(show.uploadedAnimeId);
+    } else {
+      setAnimeTitle(show.animeTitle || show.title);
+      setCoverUrl(show.banner || show.image);
+      setShowAddModal(true);
+    }
+  };
 
   const recentlyUpdated = [...animes]
     .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
@@ -205,17 +495,72 @@ export default function Dashboard({ onSelectAnime }) {
       isYouTube: !!(anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://'))
     }));
 
-  const popularThisWeek = [...animes]
-    .sort((a, b) => (b.progressPercent || 0) - (a.progressPercent || 0))
-    .slice(0, 4)
-    .map(anime => ({
-      id: anime.id,
-      title: anime.title || 'Untitled Anime',
-      studio: anime.studio || 'Local',
-      rating: getDeterministicRating(anime.id, anime.rating),
-      episodes: `${anime.episodeCount || 0} EP`,
-      banner: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop',
-    }));
+  const popularThisWeek = useMemo(() => {
+    if (weeklyPopular.length > 0) {
+      const clean = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return weeklyPopular.slice(0, 10).map((item, idx) => {
+        const iTitle = clean(item.title);
+        const iRomaji = clean(item.romajiTitle);
+        // Find if user already has this anime uploaded in their library
+        const matched = animes.find((a) => {
+          const aTitle = clean(a.title);
+          return (
+            aTitle === iTitle ||
+            (iRomaji && aTitle === iRomaji) ||
+            (aTitle.length > 4 && iTitle.includes(aTitle)) ||
+            (iTitle.length > 4 && aTitle.includes(iTitle))
+          );
+        });
+
+        const localCover = matched ? getAnimeFolderCover(matched) : '';
+
+        return {
+          id: matched ? matched.id : `ext-${item.id}`,
+          title: item.title,
+          animeTitle: item.title,
+          romajiTitle: item.romajiTitle,
+          studio: item.studio || 'Trending',
+          rating: item.rating || '8.5',
+          episodes: item.episodes || 'TV',
+          image: (matched && localCover) ? localCover : (item.image || item.banner),
+          banner: (matched && localCover) ? localCover : (item.banner || item.image),
+          rank: item.rank || idx + 1,
+          isUploaded: !!matched,
+          uploadedAnimeId: matched ? matched.id : null,
+          year: item.year,
+          siteUrl: item.siteUrl || `https://anilist.co/search/anime?search=${encodeURIComponent(item.title)}`,
+          source: item.source || 'AniList'
+        };
+      });
+    }
+
+    // Fallback if offline or loading
+    return [...animes]
+      .sort((a, b) => (b.progressPercent || 0) - (a.progressPercent || 0))
+      .slice(0, 10)
+      .map((anime, idx) => {
+        const totalSeasons = anime.totalSeasons ? Number(anime.totalSeasons) : 1;
+        const totalEpisodes = anime.totalEpisodes ? Number(anime.totalEpisodes) : (anime.episodeCount || 0);
+        const scannedCount = anime.episodeCount || 0;
+        let epLabel = `${totalEpisodes} EP`;
+        if (scannedCount > 0 && scannedCount !== totalEpisodes) {
+          epLabel = `${scannedCount}/${totalEpisodes} EP`;
+        }
+        return {
+          id: anime.id,
+          title: anime.title || 'Untitled Anime',
+          studio: anime.studio || 'Local',
+          rating: getDeterministicRating(anime.id, anime.rating),
+          episodes: epLabel,
+          totalSeasons: totalSeasons,
+          totalEpisodes: totalEpisodes,
+          banner: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop',
+          rank: idx + 1,
+          isUploaded: true,
+          uploadedAnimeId: anime.id,
+        };
+      });
+  }, [weeklyPopular, animes]);
 
   const topRatedAnime = [...animes]
     .sort((a, b) => parseFloat(b.rating || 0) - parseFloat(a.rating || 0))
@@ -372,12 +717,17 @@ export default function Dashboard({ onSelectAnime }) {
       const animeId = slugify(ytPlaylistData.title) || `yt_${ytPlaylistData.id}_${Date.now()}`;
       const randomGradient = GRADIENTS[Math.floor(Math.random() * GRADIENTS.length)];
 
+      const totalSeasonsVal = addTotalSeasons ? parseInt(addTotalSeasons, 10) : 1;
+      const totalEpisodesVal = addTotalEpisodes ? parseInt(addTotalEpisodes, 10) : selectedVideos.length;
+
       const animeData = {
         title: ytPlaylistData.title,
         folderPath: ytPlaylistUrl.trim(),
         isYouTube: true,
         playlistId: ytPlaylistData.id,
         episodeCount: selectedVideos.length,
+        totalSeasons: totalSeasonsVal,
+        totalEpisodes: totalEpisodesVal,
         progressPercent: 0,
         coverGradient: randomGradient,
         createdAt: new Date().toISOString(),
@@ -463,6 +813,12 @@ export default function Dashboard({ onSelectAnime }) {
         if (scanData.success) {
           setScanResult(scanData.episodes);
           setParsedEpsCount(scanData.episodes.length);
+          if (!addTotalEpisodes) {
+            setAddTotalEpisodes(String(scanData.episodes.length));
+          }
+          if (!addTotalSeasons) {
+            setAddTotalSeasons('1');
+          }
         } else {
           alert("Error scanning folder: " + scanData.error);
         }
@@ -492,6 +848,12 @@ export default function Dashboard({ onSelectAnime }) {
       if (data.success) {
         setScanResult(data.episodes);
         setParsedEpsCount(data.episodes.length);
+        if (!addTotalEpisodes) {
+          setAddTotalEpisodes(String(data.episodes.length));
+        }
+        if (!addTotalSeasons) {
+          setAddTotalSeasons('1');
+        }
         
         if (!animeTitle) {
           const folderName = folderPath.trim().split(/[\\/]/).pop();
@@ -530,10 +892,15 @@ export default function Dashboard({ onSelectAnime }) {
       }
       const randomGradient = GRADIENTS[Math.floor(Math.random() * GRADIENTS.length)];
 
+      const totalSeasonsVal = addTotalSeasons ? parseInt(addTotalSeasons, 10) : 1;
+      const totalEpisodesVal = addTotalEpisodes ? parseInt(addTotalEpisodes, 10) : scanResult.length;
+
       const animeData = {
         title: animeTitle.trim(),
         folderPath: cleanPath,
         episodeCount: scanResult.length,
+        totalSeasons: totalSeasonsVal,
+        totalEpisodes: totalEpisodesVal,
         progressPercent: 0,
         coverGradient: randomGradient,
         createdAt: new Date().toISOString(),
@@ -596,6 +963,8 @@ export default function Dashboard({ onSelectAnime }) {
       setAnimeTitle('');
       setCoverUrl('');
       setAddGenres([]);
+      setAddTotalSeasons('1');
+      setAddTotalEpisodes('');
       setScanResult([]);
       setNamingPattern('auto');
       setParsedEpsCount(0);
@@ -647,24 +1016,67 @@ export default function Dashboard({ onSelectAnime }) {
   };
 
   const uploadToImgBB = async (fileOrBase64) => {
-    const formData = new FormData();
-    if (typeof fileOrBase64 === 'string') {
-      const cleanBase64 = fileOrBase64.split(',')[1] || fileOrBase64;
-      formData.append('image', cleanBase64);
-    } else {
-      formData.append('image', fileOrBase64);
+    // 1. Try via our Next.js server-side proxy route (bypasses browser CORS & ad-blockers)
+    try {
+      let payload = fileOrBase64;
+      if (typeof fileOrBase64 !== 'string') {
+        payload = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(fileOrBase64);
+        });
+      }
+
+      const serverRes = await fetch('/api/upload-imgbb', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: payload })
+      });
+
+      if (serverRes.ok) {
+        const serverData = await serverRes.json();
+        if (serverData.success && serverData.url) {
+          return serverData.url;
+        }
+      }
+    } catch (proxyErr) {
+      console.warn('[uploadToImgBB] Server proxy attempt failed, trying direct:', proxyErr);
     }
-    
-    const res = await fetch('https://api.imgbb.com/1/upload?key=f836d90a7d863714c3ebfd67412a5cbf', {
-      method: 'POST',
-      body: formData
-    });
-    const data = await res.json();
-    if (data.success && data.data && data.data.url) {
-      return data.data.url;
-    } else {
-      throw new Error(data.error?.message || 'Failed to upload to ImgBB');
+
+    // 2. Direct client-side ImgBB upload attempt
+    try {
+      const formData = new FormData();
+      if (typeof fileOrBase64 === 'string') {
+        const cleanBase64 = fileOrBase64.split(',')[1] || fileOrBase64;
+        formData.append('image', cleanBase64);
+      } else {
+        formData.append('image', fileOrBase64);
+      }
+      
+      const res = await fetch('https://api.imgbb.com/1/upload?key=f836d90a7d863714c3ebfd67412a5cbf', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (data.success && data.data?.url) {
+        return data.data.url;
+      }
+    } catch (directErr) {
+      console.warn('[uploadToImgBB] Direct ImgBB upload failed:', directErr);
     }
+
+    // 3. Resilient fallback: If it's already an online HTTP image URL, use it directly!
+    if (typeof fileOrBase64 === 'string' && (fileOrBase64.startsWith('http://') || fileOrBase64.startsWith('https://'))) {
+      return fileOrBase64;
+    }
+
+    // 4. Return base64 as final fallback if file data
+    if (typeof fileOrBase64 === 'string' && fileOrBase64.startsWith('data:')) {
+      return fileOrBase64;
+    }
+
+    throw new Error('Image upload failed. Please try another image or local file.');
   };
 
   const handleNewCoverUpload = async (e) => {
@@ -716,6 +1128,9 @@ export default function Dashboard({ onSelectAnime }) {
     e.preventDefault();
     setEditingAnime(anime);
     setEditTitle(anime.title || '');
+    setEditTotalSeasons(anime.totalSeasons ? String(anime.totalSeasons) : '1');
+    setEditTotalEpisodes(anime.totalEpisodes ? String(anime.totalEpisodes) : String(anime.episodeCount || ''));
+    setShowOnlineSearchEdit(false);
     
     let rawGenres = [];
     if (Array.isArray(anime.genres)) {
@@ -734,10 +1149,15 @@ export default function Dashboard({ onSelectAnime }) {
     if (!editingAnime) return;
 
     const targetUserId = editingAnime.userId || getUserId();
+    const totalSeasonsVal = editTotalSeasons ? parseInt(editTotalSeasons, 10) : (editingAnime.totalSeasons || 1);
+    const totalEpisodesVal = editTotalEpisodes ? parseInt(editTotalEpisodes, 10) : (editingAnime.totalEpisodes || editingAnime.episodeCount || 0);
+
     const update = {
       id: editingAnime.id,
       title: editTitle.trim(),
       genres: editGenres,
+      totalSeasons: totalSeasonsVal,
+      totalEpisodes: totalEpisodesVal,
       updatedAt: new Date().toISOString(),
     };
 
@@ -761,6 +1181,8 @@ export default function Dashboard({ onSelectAnime }) {
         await setDoc(doc(db, 'users', targetUserId, 'anime', editingAnime.id), {
           title: editTitle.trim(),
           genres: editGenres,
+          totalSeasons: totalSeasonsVal,
+          totalEpisodes: totalEpisodesVal,
           thumbnailBase64: update.thumbnailBase64 || '',
           thumbnailPath: update.thumbnailPath || '',
           updatedAt: new Date().toISOString()
@@ -782,6 +1204,8 @@ export default function Dashboard({ onSelectAnime }) {
     }
 
     setEditingAnime(null);
+    setEditTotalSeasons('1');
+    setEditTotalEpisodes('');
   };
 
   // Save Settings
@@ -903,6 +1327,34 @@ export default function Dashboard({ onSelectAnime }) {
   // Continue Watching items (watching status)
   const continueWatchingList = animes.filter(a => (a.progressPercent || 0) > 0 && (a.progressPercent || 0) < 100);
 
+  // ── Lazy-Load Chunking for Anime Catalog (Initial 24, +24 on scroll) ───────
+  const [visibleCount, setVisibleCount] = useState(24);
+  const loadMoreRef = useRef(null);
+
+  // Reset pagination count when search, filter, or sort changes
+  useEffect(() => {
+    setVisibleCount(24);
+  }, [search, sortBy, filterBy, selectedGenre]);
+
+  // IntersectionObserver to lazily load next batch when scrolling near bottom
+  useEffect(() => {
+    if (!loadMoreRef.current || visibleCount >= filteredAnimes.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => Math.min(prev + 24, filteredAnimes.length));
+        }
+      },
+      { rootMargin: '350px' }
+    );
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [visibleCount, filteredAnimes.length]);
+
+  const displayedAnimes = useMemo(() => {
+    return filteredAnimes.slice(0, visibleCount);
+  }, [filteredAnimes, visibleCount]);
+
   const getInitials = (title) => {
     if (!title || typeof title !== 'string') return '';
     return title.split(' ').slice(0, 2).map(w => w ? w[0] : '').join('').toUpperCase();
@@ -975,7 +1427,7 @@ export default function Dashboard({ onSelectAnime }) {
                       >
                         <div className="w-9 h-12 rounded-lg overflow-hidden bg-white/5 flex-shrink-0 relative">
                           {anime.thumbnailBase64 || anime.thumbnailPath ? (
-                            <img 
+                            <CachedImage 
                               src={anime.thumbnailBase64 && (anime.thumbnailBase64.startsWith('http') || anime.thumbnailBase64.startsWith('data:')) ? anime.thumbnailBase64 : `/api/image?path=${encodeURIComponent(anime.thumbnailPath || '')}`} 
                               alt={anime.title} 
                               className="w-full h-full object-cover" 
@@ -989,7 +1441,12 @@ export default function Dashboard({ onSelectAnime }) {
                         <div className="min-w-0 flex-1">
                           <h4 className="font-bold text-xs text-white truncate">{anime.title}</h4>
                           <p className="text-[10px] text-gray-400 truncate">
-                            {anime.episodeCount} Episodes • {Math.round(anime.progressPercent || 0)}% completed
+                            {anime.totalSeasons ? `S${anime.totalSeasons} • ` : ''}
+                            {anime.totalEpisodes ? (
+                              anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
+                                ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
+                                : `${anime.totalEpisodes} Episodes`
+                            ) : `${anime.episodeCount} Episodes`} • {Math.round(anime.progressPercent || 0)}% completed
                           </p>
                         </div>
                       </div>
@@ -1205,7 +1662,7 @@ export default function Dashboard({ onSelectAnime }) {
                               >
                                 <div className="w-8 h-10 rounded overflow-hidden bg-white/5 flex-shrink-0 relative">
                                   {anime.thumbnailBase64 || anime.thumbnailPath ? (
-                                    <img 
+                                    <CachedImage 
                                       src={anime.thumbnailBase64 && (anime.thumbnailBase64.startsWith('http') || anime.thumbnailBase64.startsWith('data:')) ? anime.thumbnailBase64 : `/api/image?path=${encodeURIComponent(anime.thumbnailPath || '')}`} 
                                       alt={anime.title} 
                                       className="w-full h-full object-cover" 
@@ -1405,7 +1862,7 @@ export default function Dashboard({ onSelectAnime }) {
                 <div
                   className="relative h-[130%] w-full max-w-[380px] lg:max-w-[440px] rounded-none overflow-hidden origin-top-right transform rotate-[7deg] shadow-[-25px_0_50px_rgba(0,0,0,0.95)]"
                 >
-                  <img 
+                  <CachedImage 
                     src={currentHero.banner} 
                     alt={currentHero.title}
                     className="w-full h-full object-cover transform -rotate-[7deg] scale-[1.65] origin-center"
@@ -1440,16 +1897,17 @@ export default function Dashboard({ onSelectAnime }) {
                 </div>
 
                 {/* Metadata Section */}
-                <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-gray-400">
+                <div className="flex flex-wrap items-center gap-3 md:gap-4 text-xs font-bold text-gray-400">
                   <span className="flex items-center gap-1">
                     <Star size={14} className="fill-amber-400 text-amber-400" />
                     <span className="text-amber-400 font-extrabold">{currentHero.rating}</span>
                   </span>
-                  <span className="flex items-center gap-1.5">
-                    <Tv size={14} className="text-[#a855f7]" /> TV
+                  <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-[#a855f7]/15 border border-[#a855f7]/30 text-[#c084fc]">
+                    <Tv size={13} className="text-[#a855f7]" />
+                    {currentHero.totalSeasons ? (currentHero.totalSeasons > 1 ? `${currentHero.totalSeasons} Seasons` : 'Season 1') : 'TV'}
                   </span>
-                  <span className="flex items-center gap-1.5">
-                    <Clock size={14} className="text-pink-500" /> {currentHero.episodes}
+                  <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-pink-500/15 border border-pink-500/30 text-pink-300">
+                    <Clock size={13} className="text-pink-400" /> {currentHero.episodes}
                   </span>
                   <span className="flex items-center gap-1.5">
                     <Calendar size={14} className="text-cyan-400" /> {currentHero.year}
@@ -1537,8 +1995,13 @@ export default function Dashboard({ onSelectAnime }) {
                   <Flame size={20} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-extrabold tracking-wide text-white">Trending Today</h2>
-                  <p className="text-[11px] text-gray-400 font-medium">Most watched anime of the week</p>
+                  <h2 className="text-xl font-extrabold tracking-wide text-white flex items-center gap-2">
+                    Trending Today
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-black uppercase tracking-wider hidden sm:inline">
+                      Episodes & Films
+                    </span>
+                  </h2>
+                  <p className="text-[11px] text-gray-400 font-medium">Top 10 trending anime episodes, animation films & releases from internet</p>
                 </div>
               </div>
 
@@ -1567,47 +2030,106 @@ export default function Dashboard({ onSelectAnime }) {
               {trendingShows.map((show) => (
                 <div
                   key={show.id}
-                  onClick={() => onSelectAnime(show.id)}
-                  className="flex-none w-44 md:w-52 group cursor-pointer"
+                  onClick={() => handleTrendingCardClick(show)}
+                  className="flex-none w-48 md:w-56 group cursor-pointer"
                 >
-                  <div className="relative h-64 md:h-72 rounded-2xl overflow-hidden glass-card">
-                    <img
+                  <div className="relative h-64 md:h-72 rounded-2xl overflow-hidden glass-card border border-white/10 hover:border-[#7c5cff]/40 transition-all duration-300">
+                    <CachedImage
                       src={show.image}
                       alt={show.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#0b0d12] via-transparent to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#0b0d12] via-[#0b0d12]/30 to-transparent opacity-90 group-hover:opacity-95 transition-opacity" />
 
                     {/* Rank Badge */}
-                    <div className="absolute top-3 left-3 px-2.5 py-1 rounded-xl bg-black/80 backdrop-blur-md border border-white/10 text-amber-400 font-black text-xs tracking-wider shadow-lg">
+                    <div className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-lg bg-black/80 backdrop-blur-md border border-white/10 text-amber-400 font-black text-xs tracking-wider shadow-lg">
                       #{show.rank}
                     </div>
 
-                    {/* Rating & Quality */}
-                    <div className="absolute top-3 right-3 flex flex-col gap-1 items-end">
-                      <span className="px-2 py-0.5 rounded-lg bg-green-500/20 border border-green-500/50 text-green-400 font-bold text-[10px] flex items-center gap-1 backdrop-blur-md">
-                        <Star size={10} className="fill-green-400" /> {show.rating}
-                      </span>1
-                      <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 text-[9px] font-extrabold uppercase backdrop-blur-md">
-                        {show.quality}
+                    {/* In Library Badge / External Details */}
+                    <div className="absolute top-2.5 right-2.5 z-20">
+                      {show.isUploaded ? (
+                        <span className="px-2 py-0.5 rounded-full text-[8px] font-extrabold uppercase tracking-wider bg-emerald-500/90 text-white shadow-md flex items-center gap-1 backdrop-blur-md">
+                          <CheckCircle2 size={9} /> In Library
+                        </span>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenExternalAnime(e, show)}
+                            className="p-1 rounded-lg bg-black/80 hover:bg-[#7c5cff] text-cyan-300 hover:text-white border border-white/10 hover:border-[#7c5cff]/40 transition shadow-md backdrop-blur-md cursor-pointer"
+                            title="Open Online Details (AniList / MAL)"
+                          >
+                            <ExternalLink size={11} />
+                          </button>
+                          <span className="px-2 py-0.5 rounded-full text-[8px] font-extrabold uppercase tracking-wider bg-black/70 text-gray-300 border border-white/10 shadow-md backdrop-blur-md">
+                            Not in Library
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Rating & Type Badges */}
+                    <div className="absolute bottom-16 inset-x-3 flex items-center justify-between pointer-events-none">
+                      <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider shadow-md backdrop-blur-md ${
+                        show.typeColor === 'amber'
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                          : show.typeColor === 'rose'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                          : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                      }`}>
+                        {show.typeBadge || show.type}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded-md bg-black/70 text-amber-400 font-extrabold text-[10px] flex items-center gap-1 border border-white/10 backdrop-blur-md">
+                        <Star size={10} className="fill-amber-400" /> {show.rating}
                       </span>
                     </div>
 
-                    {/* Play Hover Overlay */}
-                    <div className="absolute inset-0 bg-[#7c5cff]/30 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                      <div className="p-3.5 rounded-full bg-[#7c5cff] text-white shadow-xl transform scale-75 group-hover:scale-100 transition-transform duration-300">
-                        <Play size={22} fill="white" />
-                      </div>
+                    {/* Play / Add & External Link Hover Overlay */}
+                    <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col items-center justify-center gap-2 p-3 z-10 backdrop-blur-xs">
+                      {show.isUploaded ? (
+                        <div className="p-3.5 rounded-full bg-[#7c5cff] text-white shadow-xl transform scale-75 group-hover:scale-100 transition-transform duration-300 flex items-center justify-center">
+                          <Play size={22} fill="white" />
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-2 w-full max-w-[150px]">
+                          <button
+                            type="button"
+                            onClick={(e) => handleAddAnimeToLibrary(e, show)}
+                            className="w-full px-3 py-2 rounded-xl bg-gradient-to-r from-[#7c5cff] to-indigo-600 hover:from-[#6b47ff] hover:to-indigo-500 text-white text-[11px] font-black uppercase tracking-wider shadow-lg flex items-center justify-center gap-1.5 transition-all transform active:scale-95 cursor-pointer"
+                          >
+                            <Plus size={14} /> Add to Library
+                          </button>
+                          <div className="flex items-center gap-1.5 w-full">
+                            <button
+                              type="button"
+                              onClick={(e) => handleOpenExternalAnime(e, show)}
+                              className="flex-1 px-2 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 border border-white/20 text-cyan-300 hover:text-white text-[10px] font-bold shadow-md flex items-center justify-center gap-1 transition cursor-pointer backdrop-blur-md"
+                              title="View Details on AniList"
+                            >
+                              <Globe size={11} /> AniList
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => handleOpenMalSearch(e, show)}
+                              className="flex-1 px-2 py-1.5 rounded-xl bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/30 text-blue-300 hover:text-white text-[10px] font-bold shadow-md flex items-center justify-center gap-1 transition cursor-pointer backdrop-blur-md"
+                              title="View Details on MyAnimeList"
+                            >
+                              <ExternalLink size={11} /> MAL
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Bottom Text */}
-                    <div className="absolute bottom-0 inset-x-0 p-3 space-y-1">
-                      <h3 className="font-bold text-xs text-white line-clamp-1 group-hover:text-[#7c5cff] transition-colors">
+                    <div className="absolute bottom-0 inset-x-0 p-3 space-y-1 bg-gradient-to-t from-black via-black/80 to-transparent">
+                      <h3 className="font-bold text-xs text-white line-clamp-1 group-hover:text-[#7c5cff] transition-colors" title={show.title}>
                         {show.title}
                       </h3>
                       <div className="flex items-center justify-between text-[10px] text-gray-400">
-                        <span>{show.episode}</span>
-                        <span className="px-1.5 py-0.5 rounded bg-white/10 text-gray-300 font-semibold">{show.lang}</span>
+                        <span className="text-gray-300 font-medium truncate max-w-[65%]">{show.animeTitle}</span>
+                        <span className="px-1.5 py-0.2 rounded bg-white/10 text-white font-mono text-[9px]">{show.episode}</span>
                       </div>
                     </div>
                   </div>
@@ -1641,9 +2163,9 @@ export default function Dashboard({ onSelectAnime }) {
                 >
                   <div className="relative w-20 h-24 rounded-xl overflow-hidden bg-[#181c24] flex-shrink-0">
                     {anime.thumbnailBase64 ? (
-                      <img src={anime.thumbnailBase64} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      <CachedImage src={anime.thumbnailBase64} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     ) : anime.thumbnailPath ? (
-                      <img src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      <CachedImage src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     ) : (
                       <div className={`w-full h-full bg-gradient-to-br ${anime.coverGradient || 'from-violet-600 to-indigo-700'} flex items-center justify-center font-bold text-white/40 text-xl`}>
                         {getInitials(anime.title)}
@@ -1666,8 +2188,23 @@ export default function Dashboard({ onSelectAnime }) {
 
                     <div>
                       <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
-                        <span>Progress</span>
-                        <span className="font-bold text-[#7c5cff]">{Math.round(anime.progressPercent || 0)}%</span>
+                        <div className="flex items-center gap-1.5 truncate max-w-[70%]">
+                          {Boolean(anime.totalSeasons) && (
+                            <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-extrabold text-[9px] shrink-0">
+                              S{anime.totalSeasons}
+                            </span>
+                          )}
+                          <span className="truncate">
+                            {anime.totalEpisodes ? (
+                              anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
+                                ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
+                                : `${anime.totalEpisodes} Ep`
+                            ) : (
+                              `${anime.episodeCount || 0} Ep`
+                            )}
+                          </span>
+                        </div>
+                        <span className="font-bold text-[#7c5cff] shrink-0 ml-1">{Math.round(anime.progressPercent || 0)}%</span>
                       </div>
                       <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
                         <div
@@ -1704,7 +2241,7 @@ export default function Dashboard({ onSelectAnime }) {
                   className="glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between"
                 >
                   <div className="relative h-48 overflow-hidden bg-[#181c24] flex items-center justify-center">
-                    <img src={show.image} alt={show.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                    <CachedImage src={show.image} alt={show.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                     <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/70 text-gray-300 font-bold text-[9px]">
                       {show.episode}
                     </div>
@@ -1733,43 +2270,172 @@ export default function Dashboard({ onSelectAnime }) {
           </section>
         )}
 
-        {/* 6. POPULAR THIS WEEK */}
+        {/* 6. POPULAR THIS WEEK (Top 10 from Internet + Drag-and-Drop Slidable Row) */}
         {popularThisWeek.length > 0 && (
           <section id="popular" className="space-y-4">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-[#a855f7]">
-                <TrendingUp size={20} />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-[#a855f7]">
+                  <TrendingUp size={20} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-extrabold tracking-wide text-white flex items-center gap-2">
+                    Popular This Week
+                    <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-black uppercase tracking-wider hidden sm:inline">
+                      Top 10 Online
+                    </span>
+                  </h2>
+                  <p className="text-[11px] text-gray-400 font-medium">Top fan favorites and community hype from MyAnimeList & AniList</p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-xl font-extrabold tracking-wide text-white">Popular This Week</h2>
-                <p className="text-[11px] text-gray-400 font-medium">Top fan favorites and community hype</p>
+
+              {/* Scroll Navigation Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handlePopularScroll('left')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/15 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                  title="Scroll left"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePopularScroll('right')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/15 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                  title="Scroll right"
+                >
+                  <ChevronRight size={18} />
+                </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Slidable Row-wise with Mouse Drag & Drop */}
+            <div
+              ref={popularScrollRef}
+              onMouseDown={handlePopularMouseDown}
+              onMouseMove={handlePopularMouseMove}
+              onMouseUp={handlePopularMouseUp}
+              onMouseLeave={handlePopularMouseLeave}
+              className="flex gap-4 overflow-x-auto no-scrollbar scroll-smooth cursor-grab active:cursor-grabbing select-none pb-3 pt-1"
+            >
               {popularThisWeek.map((slide, idx) => (
                 <div
                   key={`pop-${slide.id}-${idx}`}
-                  onClick={() => onSelectAnime(slide.id)}
-                  className="glass-card p-3 rounded-2xl flex gap-3 items-center group cursor-pointer"
+                  onClick={() => handlePopularCardClick(slide)}
+                  className="w-64 sm:w-72 shrink-0 glass-card rounded-2xl p-3 flex flex-col justify-between group cursor-pointer relative overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-purple-glow border border-white/10"
                 >
-                  <div className="w-16 h-20 rounded-xl overflow-hidden flex-shrink-0 relative bg-[#181c24] flex items-center justify-center">
-                    <img src={slide.banner} alt={slide.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+                  {/* Poster Thumbnail */}
+                  <div className="relative h-44 rounded-xl overflow-hidden mb-2.5 bg-[#181c24] flex items-center justify-center">
+                    <CachedImage
+                      src={slide.banner}
+                      alt={slide.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 pointer-events-none"
+                    />
+                    
+                    {/* Rank Number Badge */}
+                    <div className="absolute top-2 left-2 px-2.5 py-0.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black text-xs shadow-md">
+                      #{slide.rank || (idx + 1)}
+                    </div>
+
+                    {/* In Library / External Details Badge */}
+                    <div className="absolute top-2 right-2 z-20">
+                      {slide.isUploaded ? (
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-emerald-500/90 text-white shadow-md flex items-center gap-1 backdrop-blur-md">
+                          <CheckCircle2 size={10} /> In Library
+                        </span>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenExternalAnime(e, slide)}
+                            className="p-1 rounded-lg bg-black/80 hover:bg-[#7c5cff] text-cyan-300 hover:text-white border border-white/10 hover:border-[#7c5cff]/40 transition shadow-md backdrop-blur-md cursor-pointer"
+                            title="Open Online Details (AniList / MAL)"
+                          >
+                            <ExternalLink size={11} />
+                          </button>
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-amber-500/90 text-black shadow-md flex items-center gap-1 backdrop-blur-md font-bold">
+                            Not in Library
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Hover Prompt if Not Uploaded */}
+                    {!slide.isUploaded && (
+                      <div className="absolute inset-0 bg-black/75 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col items-center justify-center gap-2 p-3 text-center z-10 backdrop-blur-xs">
+                        <button
+                          type="button"
+                          onClick={(e) => handleAddAnimeToLibrary(e, slide)}
+                          className="w-full max-w-[150px] px-3 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-[11px] font-black uppercase tracking-wider shadow-lg flex items-center justify-center gap-1.5 transition-all transform active:scale-95 cursor-pointer"
+                        >
+                          <Plus size={14} /> Add to Library
+                        </button>
+                        <div className="flex items-center gap-1.5 w-full max-w-[150px]">
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenExternalAnime(e, slide)}
+                            className="flex-1 px-2 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 border border-white/20 text-cyan-300 hover:text-white text-[10px] font-bold shadow-md flex items-center justify-center gap-1 transition cursor-pointer backdrop-blur-md"
+                            title="View Details on AniList"
+                          >
+                            <Globe size={11} /> AniList
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenMalSearch(e, slide)}
+                            className="flex-1 px-2 py-1.5 rounded-xl bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/30 text-blue-300 hover:text-white text-[10px] font-bold shadow-md flex items-center justify-center gap-1 transition cursor-pointer backdrop-blur-md"
+                            title="View Details on MyAnimeList"
+                          >
+                            <ExternalLink size={11} /> MAL
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-[9px] font-bold uppercase text-[#a855f7] tracking-wider block">
-                      {slide.studio}
-                    </span>
-                    <h4 className="font-extrabold text-xs text-white line-clamp-1 group-hover:text-[#7c5cff] transition-colors">
+
+                  {/* Details */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="font-bold uppercase text-[#a855f7] tracking-wider truncate max-w-[140px]">
+                        {slide.studio}
+                      </span>
+                      {slide.year && (
+                        <span className="text-gray-500 font-semibold">{slide.year}</span>
+                      )}
+                    </div>
+
+                    <h4 className="font-extrabold text-xs text-white line-clamp-1 group-hover:text-[#7c5cff] transition-colors" title={slide.title}>
                       {slide.title}
                     </h4>
-                    <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-1">
-                      <span className="text-amber-400 font-bold flex items-center gap-0.5">
-                        <Star size={10} className="fill-amber-400" /> {slide.rating}
+
+                    <div className="flex items-center justify-between text-[10px] text-gray-400 pt-1">
+                      <span className="text-amber-400 font-bold flex items-center gap-1">
+                        <Star size={11} className="fill-amber-400 text-amber-400" /> {slide.rating}
                       </span>
-                      <span>•</span>
-                      <span>{slide.episodes}</span>
+                      <span className="px-2 py-0.5 rounded bg-white/5 text-gray-400 text-[10px]">
+                        {slide.episodes}
+                      </span>
                     </div>
+
+                    {/* Bottom Quick Action Bar for Anime Not in Library */}
+                    {!slide.isUploaded && (
+                      <div className="pt-2 mt-1 border-t border-white/5 flex items-center justify-between text-[10px]">
+                        <button
+                          type="button"
+                          onClick={(e) => handleAddAnimeToLibrary(e, slide)}
+                          className="text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 cursor-pointer transition"
+                        >
+                          <Plus size={11} /> Add to Library
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenExternalAnime(e, slide)}
+                          className="text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 cursor-pointer transition"
+                        >
+                          <ExternalLink size={10} /> Online Details
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1798,7 +2464,7 @@ export default function Dashboard({ onSelectAnime }) {
                   className="glass-card rounded-2xl p-3 flex flex-col justify-between group cursor-pointer relative overflow-hidden"
                 >
                   <div className="relative h-44 rounded-xl overflow-hidden mb-2 bg-[#181c24] flex items-center justify-center">
-                    <img src={show.image} alt={show.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                    <CachedImage src={show.image} alt={show.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     <div className="absolute top-2 left-2 px-2 py-0.5 rounded-lg bg-amber-500 text-black font-black text-xs">
                       #{idx + 1}
                     </div>
@@ -1855,7 +2521,9 @@ export default function Dashboard({ onSelectAnime }) {
                 Tracked Local Library
               </h2>
               <p className="text-xs text-gray-400 mt-0.5">
-                {filteredAnimes.length} anime series available in your local computer catalog
+                {displayedAnimes.length < filteredAnimes.length
+                  ? `Showing ${displayedAnimes.length} of ${filteredAnimes.length} anime series (scroll to load more)`
+                  : `${filteredAnimes.length} anime series available in your local computer catalog`}
               </p>
             </div>
 
@@ -1942,8 +2610,8 @@ export default function Dashboard({ onSelectAnime }) {
                 </span>
               </div>
 
-              {/* Anime Cards */}
-              {filteredAnimes.map((anime) => (
+              {/* Anime Cards - Rendered Lazily in Chunks */}
+              {displayedAnimes.map((anime) => (
                 <div
                   key={anime.id}
                   onClick={() => onSelectAnime(anime.id)}
@@ -1952,9 +2620,9 @@ export default function Dashboard({ onSelectAnime }) {
                   {/* Poster Image */}
                   <div className="h-44 relative overflow-hidden bg-[#181c24] flex items-center justify-center">
                     {anime.thumbnailBase64 ? (
-                      <img src={anime.thumbnailBase64} alt={anime.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                      <CachedImage src={anime.thumbnailBase64} alt={anime.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                     ) : anime.thumbnailPath ? (
-                      <img src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} alt={anime.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                      <CachedImage src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} alt={anime.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                     ) : (
                       <div className={`w-full h-full bg-gradient-to-tr ${anime.coverGradient || 'from-violet-600 to-indigo-700'} flex items-center justify-center`}>
                         <span className="text-3xl font-black text-white/30 group-hover:scale-110 transition-transform">
@@ -2020,8 +2688,23 @@ export default function Dashboard({ onSelectAnime }) {
 
                     <div className="mt-2">
                       <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
-                        <span>{anime.episodeCount} Episodes</span>
-                        <span className="font-bold text-white">{Math.round(anime.progressPercent || 0)}%</span>
+                        <div className="flex items-center gap-1.5 truncate max-w-[70%]">
+                          {Boolean(anime.totalSeasons) && (
+                            <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-extrabold text-[9px] shrink-0">
+                              S{anime.totalSeasons}
+                            </span>
+                          )}
+                          <span className="truncate" title={anime.totalEpisodes ? `${anime.totalEpisodes} Total Episodes (${anime.episodeCount || 0} local)` : `${anime.episodeCount || 0} Episodes`}>
+                            {anime.totalEpisodes ? (
+                              anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
+                                ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
+                                : `${anime.totalEpisodes} Episodes`
+                            ) : (
+                              `${anime.episodeCount || 0} Episodes`
+                            )}
+                          </span>
+                        </div>
+                        <span className="font-bold text-white shrink-0 ml-1">{Math.round(anime.progressPercent || 0)}%</span>
                       </div>
                       <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
                         <div
@@ -2033,6 +2716,26 @@ export default function Dashboard({ onSelectAnime }) {
                   </div>
                 </div>
               ))}
+
+              {/* Lazy Loading Sentinel and Progressive Load Trigger */}
+              {visibleCount < filteredAnimes.length && (
+                <div
+                  ref={loadMoreRef}
+                  className="col-span-full py-8 flex flex-col items-center justify-center gap-3 border-t border-white/5 mt-4"
+                >
+                  <div className="flex items-center gap-2 text-xs font-semibold text-gray-400">
+                    <Loader2 size={16} className="animate-spin text-[#7c5cff]" />
+                    <span>Loading more anime ({displayedAnimes.length} of {filteredAnimes.length})...</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount((prev) => Math.min(prev + 24, filteredAnimes.length))}
+                    className="px-5 py-2 rounded-xl bg-white/5 hover:bg-[#7c5cff] text-xs font-bold text-gray-300 hover:text-white transition border border-white/10 shadow-sm active:scale-95"
+                  >
+                    Load Next 24 Shows
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -2215,8 +2918,55 @@ export default function Dashboard({ onSelectAnime }) {
                     />
                   </div>
 
+                  {/* Season Count & Total Episodes Inputs */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                        Total Seasons
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="e.g. 1"
+                        className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                        value={addTotalSeasons}
+                        onChange={(e) => setAddTotalSeasons(e.target.value)}
+                        disabled={!folderPath}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                        Total Episodes
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder={parsedEpsCount ? `Scanned: ${parsedEpsCount}` : "e.g. 24"}
+                        className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                        value={addTotalEpisodes}
+                        onChange={(e) => setAddTotalEpisodes(e.target.value)}
+                        disabled={!folderPath}
+                      />
+                    </div>
+                  </div>
+
                   <div>
-                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Cover Image (Optional)</label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">Cover Image (Optional)</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowOnlineSearchAdd(prev => !prev)}
+                        className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                          showOnlineSearchAdd
+                            ? 'bg-purple-600 text-white shadow-md'
+                            : 'bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/50 hover:to-indigo-600/50 text-purple-200 border border-purple-500/30'
+                        }`}
+                      >
+                        <Sparkles size={12} className="text-purple-300" />
+                        {showOnlineSearchAdd ? 'Hide Cover Search' : 'Search Covers Online'}
+                      </button>
+                    </div>
+
                     <div className="flex flex-col gap-3">
                       <input
                         type="file"
@@ -2224,6 +2974,19 @@ export default function Dashboard({ onSelectAnime }) {
                         onChange={handleNewCoverUpload}
                         className="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-white/10 file:text-white hover:file:bg-white/20 file:cursor-pointer"
                       />
+
+                      {showOnlineSearchAdd && (
+                        <AnimeCoverSearch
+                          initialQuery={animeTitle}
+                          onSelectCover={(url) => {
+                            setCoverUrl(url);
+                            setShowOnlineSearchAdd(false);
+                          }}
+                          onClose={() => setShowOnlineSearchAdd(false)}
+                          uploadToImgBB={uploadToImgBB}
+                        />
+                      )}
+
                       {uploadingCover && (
                         <div className="flex items-center gap-2 text-xs text-[#7c5cff]">
                           <Loader2 className="animate-spin" size={14} />
@@ -2505,9 +3268,7 @@ export default function Dashboard({ onSelectAnime }) {
                     className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white bg-[#111827]"
                   >
                     <option value="ask">Ask every time</option>
-                    <option value="builtin">Built-in HTML5 Player</option>
-                    <option value="artplayer">ArtPlayer (M3U8/Custom)</option>
-                    <option value="videojs">Video.js Player (Web)</option>
+                    <option value="mediaserver">Media Server Player (Windows Host)</option>
                     <option value="vlc">VLC Player (Local Desktop)</option>
                   </select>
                 </div>
@@ -2602,6 +3363,36 @@ export default function Dashboard({ onSelectAnime }) {
                   />
                 </div>
 
+                {/* Season Count & Total Episodes Inputs */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                      Total Seasons
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="e.g. 1"
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={editTotalSeasons}
+                      onChange={(e) => setEditTotalSeasons(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                      Total Episodes
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder={`Current: ${editingAnime?.episodeCount || 0}`}
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={editTotalEpisodes}
+                      onChange={(e) => setEditTotalEpisodes(e.target.value)}
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Select Categories / Genres (Max 5)</label>
                   <div className="flex flex-wrap gap-2 mt-1 max-h-32 overflow-y-auto p-1 border border-white/5 rounded-xl bg-black/20 no-scrollbar">
@@ -2637,7 +3428,22 @@ export default function Dashboard({ onSelectAnime }) {
                 </div>
 
                 <div>
-                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Cover Image (Optional)</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">Cover Image (Optional)</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowOnlineSearchEdit(prev => !prev)}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                        showOnlineSearchEdit
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/50 hover:to-indigo-600/50 text-purple-200 border border-purple-500/30'
+                      }`}
+                    >
+                      <Sparkles size={12} className="text-purple-300" />
+                      {showOnlineSearchEdit ? 'Hide Cover Search' : 'Search Covers Online'}
+                    </button>
+                  </div>
+
                   <div className="flex flex-col gap-3">
                     <div className="flex gap-2">
                       <input
@@ -2654,6 +3460,18 @@ export default function Dashboard({ onSelectAnime }) {
                         Choose Local PC Image
                       </button>
                     </div>
+
+                    {showOnlineSearchEdit && (
+                      <AnimeCoverSearch
+                        initialQuery={editTitle}
+                        onSelectCover={(url) => {
+                          setEditCoverUrl(url);
+                          setShowOnlineSearchEdit(false);
+                        }}
+                        onClose={() => setShowOnlineSearchEdit(false)}
+                        uploadToImgBB={uploadToImgBB}
+                      />
+                    )}
 
                     {uploadingEditCover && (
                       <div className="flex items-center gap-2 text-xs text-[#7c5cff]">

@@ -18,6 +18,7 @@ export async function POST(request) {
     }
 
     const { stdout } = await execFileAsync('yt-dlp', [
+      '--extractor-args', 'youtube:player_client=android,web',
       '-J',
       '--no-warnings',
       targetUrl

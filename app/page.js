@@ -1,16 +1,37 @@
 "use client";
 
 import React, { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useAuth } from './context/AuthContext';
 import { useRouter } from 'next/navigation';
-import Dashboard from './pages/Dashboard';
-import AnimeDetail from './pages/AnimeDetail';
-import Player from './pages/Player';
-import VideoJsContainer from './pages/VideoJsContainer';
-import ArtPlayerContainer from './pages/ArtPlayerContainer';
-import YoutubePlayerContainer from './pages/YoutubePlayerContainer';
 import { Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+
+const Dashboard = dynamic(() => import('./pages/Dashboard'), {
+  loading: () => (
+    <div className="min-h-screen flex flex-col justify-center items-center gap-3">
+      <Loader2 className="animate-spin text-[#7c5cff]" size={36} />
+      <span className="text-xs uppercase tracking-widest text-gray-500 font-bold">Loading Tracker...</span>
+    </div>
+  ),
+  ssr: false,
+});
+
+const AnimeDetail = dynamic(() => import('./pages/AnimeDetail'), {
+  ssr: false,
+});
+
+const YoutubePlayerContainer = dynamic(() => import('./pages/YoutubePlayerContainer'), {
+  ssr: false,
+});
+
+const MediaServerPlayerContainer = dynamic(() => import('./pages/MediaServerPlayerContainer'), {
+  ssr: false,
+});
+
+const YtDlpPlayerContainer = dynamic(() => import('./pages/YtDlpPlayerContainer'), {
+  ssr: false,
+});
 
 export default function Home() {
   const { currentUser, loading } = useAuth();
@@ -18,7 +39,7 @@ export default function Home() {
   const [activeAnimeId, setActiveAnimeId] = useState(null);
   const [activeEpisodeId, setActiveEpisodeId] = useState(null);
   const [activeEpisodesList, setActiveEpisodesList] = useState([]);
-  const [playerType, setPlayerType] = useState('builtin');
+  const [playerType, setPlayerType] = useState('mediaserver');
 
   if (loading) {
     return (
@@ -40,29 +61,22 @@ export default function Home() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.3, ease: 'easeInOut' }}
           >
-            {playerType === 'videojs' ? (
-              <VideoJsContainer
-                animeId={activeAnimeId}
-                episodeId={activeEpisodeId}
-                episodes={activeEpisodesList}
-                onBack={() => setActiveEpisodeId(null)}
-              />
-            ) : playerType === 'artplayer' ? (
-              <ArtPlayerContainer
-                animeId={activeAnimeId}
-                episodeId={activeEpisodeId}
-                episodes={activeEpisodesList}
-                onBack={() => setActiveEpisodeId(null)}
-              />
-            ) : playerType === 'youtube' ? (
+            {playerType === 'youtube' ? (
               <YoutubePlayerContainer
                 animeId={activeAnimeId}
                 episodeId={activeEpisodeId}
                 episodes={activeEpisodesList}
                 onBack={() => setActiveEpisodeId(null)}
               />
+            ) : playerType === 'ytdlp' || playerType === 'yt-dlp' ? (
+              <YtDlpPlayerContainer
+                animeId={activeAnimeId}
+                episodeId={activeEpisodeId}
+                episodes={activeEpisodesList}
+                onBack={() => setActiveEpisodeId(null)}
+              />
             ) : (
-              <Player
+              <MediaServerPlayerContainer
                 animeId={activeAnimeId}
                 episodeId={activeEpisodeId}
                 episodes={activeEpisodesList}
@@ -81,7 +95,7 @@ export default function Home() {
             <AnimeDetail
               animeId={activeAnimeId}
               onBack={() => setActiveAnimeId(null)}
-              onPlayEpisode={(epId, epList, type = 'builtin') => {
+              onPlayEpisode={(epId, epList, type = 'mediaserver') => {
                 setActiveEpisodeId(epId);
                 setActiveEpisodesList(epList);
                 setPlayerType(type);

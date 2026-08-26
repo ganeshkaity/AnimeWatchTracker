@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getLocalAnimes, getLocalEpisodes } from '../utils/localStore';
-import ArtPlayerContainer from './ArtPlayerContainer';
+import MediaServerPlayerContainer from './MediaServerPlayerContainer';
 
 const PAIRING_STORAGE_KEY = 'watchanime_stream_pairing';
 const PLAYER_PREF_KEY = 'watchanime_stream_player_pref';
@@ -577,9 +577,9 @@ export default function Stream({ onBack }) {
 
         {/* Video Player Rendering */}
         <div className="w-full h-full flex items-center justify-center pt-14 pb-4 px-2">
-          {playerPref === 'artplayer' ? (
+          {playerPref === 'artplayer' || playerPref === 'mediaserver' ? (
             <div className="w-full h-full rounded-2xl overflow-hidden shadow-2xl">
-              <ArtPlayerContainer
+              <MediaServerPlayerContainer
                 animeId={selectedAnime.id}
                 episodeId={activeEpisode.id}
                 episodes={episodesList}

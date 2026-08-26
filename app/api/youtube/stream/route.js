@@ -1,5 +1,4 @@
-import { spawn, execFile } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import fs from 'fs';
 import { NextResponse } from 'next/server';
 import {
@@ -8,8 +7,6 @@ import {
   markSessionFinished,
   getCachedSize
 } from '../../../lib/youtubeCacheManager';
-
-const execFileAsync = promisify(execFile);
 
 export const dynamic = 'force-dynamic';
 
@@ -68,7 +65,7 @@ export async function GET(request) {
             'Content-Range': `bytes ${start}-${actualEnd}/${session.isFinished ? cachedSize : '*'}`,
             'Accept-Ranges': 'bytes',
             'Content-Length': String(chunkSize),
-            'Content-Type': quality === 'audio-only' ? 'audio/webm' : 'video/mp4',
+            'Content-Type': quality === 'audio-only' ? 'audio/mp4' : 'video/mp4',
             'X-Packet-Cache': 'HIT',
           },
         });
@@ -79,90 +76,115 @@ export async function GET(request) {
     const targetUrl = videoId.startsWith('http') ? videoId : `https://www.youtube.com/watch?v=${videoId}`;
     const formatSpec = getFormatSpec(quality);
 
-    // Extract direct media stream URL(s) using yt-dlp -g
-    const { stdout: urlStdout } = await execFileAsync('yt-dlp', [
-      '-g',
+    // Spawn yt-dlp with android,web client to completely prevent 403 Forbidden errors
+    const ytProcess = spawn('yt-dlp', [
+      '--extractor-args', 'youtube:player_client=android,web',
       '-f', formatSpec,
+      '-o', '-',
       '--no-warnings',
       targetUrl
     ]);
 
-    const urls = urlStdout.trim().split(/\r?\n/).filter(Boolean);
-    if (urls.length === 0) {
-      return NextResponse.json({ success: false, error: 'Failed to extract YouTube stream URL' }, { status: 500 });
-    }
+    // Spawn FFmpeg to remux on-the-fly into fragmented MP4
+    const ffmpegArgs = [
+      '-v', 'error',
+      '-i', 'pipe:0'
+    ];
 
-    // Build FFmpeg command args
-    const ffmpegArgs = ['-v', 'error'];
-
-    if (urls.length === 1) {
-      // Single combined stream
-      ffmpegArgs.push('-i', urls[0]);
-      if (quality === 'audio-only') {
-        ffmpegArgs.push('-c:a', 'aac', '-b:a', '192k', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1');
-      } else {
-        ffmpegArgs.push('-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1');
-      }
+    if (quality === 'audio-only') {
+      ffmpegArgs.push(
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-f', 'mp4',
+        '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+        'pipe:1'
+      );
     } else {
-      // Video + Audio separate streams (DASH)
-      ffmpegArgs.push('-i', urls[0], '-i', urls[1]);
-      ffmpegArgs.push('-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1');
+      ffmpegArgs.push(
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-ac', '2',
+        '-f', 'mp4',
+        '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+        'pipe:1'
+      );
     }
 
-    const ffmpeg = spawn('ffmpeg', ffmpegArgs);
-    session.ffmpegProcess = ffmpeg;
+    const ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
+    session.ffmpegProcess = ffmpegProcess;
+    session.ytProcess = ytProcess;
 
-    ffmpeg.stderr.on('data', (data) => {
-      const msg = data.toString();
-      if (msg.includes('Error') || msg.includes('Invalid')) {
-        console.error('[yt ffmpeg]', msg.trim());
+    // Pipe yt-dlp stdout directly into FFmpeg stdin
+    ytProcess.stdout.pipe(ffmpegProcess.stdin);
+
+    const killAll = () => {
+      try { ytProcess.kill('SIGKILL'); } catch {}
+      try { ffmpegProcess.kill('SIGKILL'); } catch {}
+    };
+
+    ytProcess.stderr.on('data', (d) => {
+      const msg = d.toString();
+      if (msg.includes('ERROR') || msg.includes('403')) {
+        console.error('[yt-dlp err]', msg.trim());
       }
+    });
+
+    ffmpegProcess.stderr.on('data', (d) => {
+      const msg = d.toString();
+      if (msg.includes('Error') || msg.includes('Invalid')) {
+        console.error('[yt ffmpeg err]', msg.trim());
+      }
+    });
+
+    ytProcess.on('error', (err) => {
+      console.error('[yt-dlp spawn error]', err);
+      killAll();
+    });
+
+    ffmpegProcess.on('error', (err) => {
+      console.error('[ffmpeg spawn error]', err);
+      killAll();
     });
 
     const abortSignal = request.signal;
     if (abortSignal) {
-      const onAbort = () => {
-        try { ffmpeg.kill('SIGKILL'); } catch {}
-      };
-      if (abortSignal.aborted) { ffmpeg.kill('SIGKILL'); }
+      const onAbort = () => killAll();
+      if (abortSignal.aborted) { killAll(); }
       else { abortSignal.addEventListener('abort', onAbort, { once: true }); }
     }
 
     const stream = new ReadableStream({
       start(controller) {
-        ffmpeg.stdout.on('data', (chunk) => {
-          // Write chunk into Packet Cache file
+        ffmpegProcess.stdout.on('data', (chunk) => {
           appendChunk(sessionId, chunk);
           try { controller.enqueue(chunk); } catch {}
         });
-        ffmpeg.stdout.on('end', () => {
+        ffmpegProcess.stdout.on('end', () => {
           markSessionFinished(sessionId);
           try { controller.close(); } catch {}
         });
-        ffmpeg.stdout.on('error', () => {
+        ffmpegProcess.stdout.on('error', () => {
           try { controller.close(); } catch {}
         });
-        ffmpeg.on('error', (err) => {
-          console.error('[yt ffmpeg error]', err);
-          try { controller.error(err); } catch {}
-        });
-        ffmpeg.on('close', () => {
+        ffmpegProcess.on('close', () => {
           markSessionFinished(sessionId);
           try { controller.close(); } catch {}
         });
       },
       cancel() {
-        try { ffmpeg.kill('SIGKILL'); } catch {}
+        killAll();
       },
     });
 
     return new Response(stream, {
       headers: {
-        'Content-Type': 'video/mp4',
-        'Cache-Control': 'no-cache, no-store',
+        'Content-Type': quality === 'audio-only' ? 'audio/mp4' : 'video/mp4',
         'Accept-Ranges': 'bytes',
-        'X-Packet-Cache': 'MISS-RECORDING',
-        'X-Session-ID': sessionId
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'X-Session-ID': sessionId,
       },
     });
 

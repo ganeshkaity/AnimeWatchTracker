@@ -4,10 +4,6 @@ import React, { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '../../context/AuthContext';
 import AnimeDetail from '../../pages/AnimeDetail';
-import Player from '../../pages/Player';
-import ArtPlayerContainer from '../../pages/ArtPlayerContainer';
-import VideoJsContainer from '../../pages/VideoJsContainer';
-import { AnimatePresence, motion } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 
 export default function AnimePage() {
@@ -19,7 +15,7 @@ export default function AnimePage() {
 
   const [activeEpisodeId, setActiveEpisodeId] = useState(null);
   const [activeEpisodesList, setActiveEpisodesList] = useState([]);
-  const [playerType, setPlayerType] = useState('builtin');
+  const [playerType, setPlayerType] = useState('mediaserver');
 
   if (loading) {
     return (
@@ -35,7 +31,7 @@ export default function AnimePage() {
       <AnimeDetail
         animeId={animeId}
         onBack={() => router.push('/')}
-        onPlayEpisode={(epId, epList, type = 'builtin', extraOpts = {}) => {
+        onPlayEpisode={(epId, epList, type = 'mediaserver', extraOpts = {}) => {
           const speed = extraOpts.speed || 1;
           const volume = Math.round((extraOpts.volume ?? 1) * 100);
           const quality = extraOpts.quality || '';

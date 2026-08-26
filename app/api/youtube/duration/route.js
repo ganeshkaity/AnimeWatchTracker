@@ -19,6 +19,7 @@ export async function POST(request) {
 
     // Use --print duration to get just the duration — much faster than -J
     const { stdout } = await execFileAsync('yt-dlp', [
+      '--extractor-args', 'youtube:player_client=android,web',
       '--print', 'duration',
       '--no-warnings',
       '--no-download',

@@ -4,10 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../../../context/AuthContext';
 import { getLocalAnimes, getLocalEpisodes } from '../../../utils/localStore';
-import Player from '../../../pages/Player';
-import ArtPlayerContainer from '../../../pages/ArtPlayerContainer';
-import VideoJsContainer from '../../../pages/VideoJsContainer';
 import YoutubePlayerContainer from '../../../pages/YoutubePlayerContainer';
+import MediaServerPlayerContainer from '../../../pages/MediaServerPlayerContainer';
+import YtDlpPlayerContainer from '../../../pages/YtDlpPlayerContainer';
 import { Loader2 } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../../firebase';
@@ -18,7 +17,7 @@ export default function PlayerPage() {
   const searchParams = useSearchParams();
   const { currentUser, loading: authLoading } = useAuth();
 
-  const playerType = params?.playerType || 'builtin';
+  const playerType = params?.playerType || 'mediaserver';
   const animeId = params?.slug;
   const initialEpId = searchParams.get('ep');
   const speedParam = searchParams.get('speed');
@@ -90,33 +89,24 @@ export default function PlayerPage() {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {playerType === 'videojs' ? (
-        <VideoJsContainer
-          animeId={animeId}
-          episodeId={currentEpisodeId}
-          episodes={episodes}
-          onBack={handleBack}
-          initialSpeed={speedParam ? parseFloat(speedParam) : 1}
-          initialVolume={volumeParam ? parseFloat(volumeParam) / 100 : 1}
-        />
-      ) : playerType === 'artplayer' ? (
-        <ArtPlayerContainer
-          animeId={animeId}
-          episodeId={currentEpisodeId}
-          episodes={episodes}
-          onBack={handleBack}
-          initialSpeed={speedParam ? parseFloat(speedParam) : 1}
-          initialVolume={volumeParam ? parseFloat(volumeParam) / 100 : 1}
-        />
-      ) : playerType === 'youtube' ? (
+      {playerType === 'youtube' ? (
         <YoutubePlayerContainer
           animeId={animeId}
           episodeId={currentEpisodeId}
           episodes={episodes}
           onBack={handleBack}
         />
+      ) : playerType === 'ytdlp' || playerType === 'yt-dlp' ? (
+        <YtDlpPlayerContainer
+          animeId={animeId}
+          episodeId={currentEpisodeId}
+          episodes={episodes}
+          onBack={handleBack}
+          initialSpeed={speedParam ? parseFloat(speedParam) : 1}
+          initialVolume={volumeParam ? parseFloat(volumeParam) / 100 : 1}
+        />
       ) : (
-        <Player
+        <MediaServerPlayerContainer
           animeId={animeId}
           episodeId={currentEpisodeId}
           episodes={episodes}

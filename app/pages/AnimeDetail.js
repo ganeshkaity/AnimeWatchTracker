@@ -16,7 +16,7 @@ import {
   Sparkles, History, RotateCcw, X, Heart, EyeOff, Film, Clock, Search,
   ChevronDown, ChevronUp, Folder, Tv, ExternalLink, RefreshCw, Loader2, CheckCheck,
   Wifi, Laptop, Smartphone, Settings2, QrCode, Youtube, FolderPlus, Trash2, Edit3,
-  Move, Upload, FolderTree, FileVideo, HardDrive, FilePlus
+  Move, Upload, FolderTree, FileVideo, HardDrive, FilePlus, Server
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -202,6 +202,8 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   const [helperExpanded, setHelperExpanded] = useState(false);
   const [flagsExpanded, setFlagsExpanded] = useState(false);
   const [ratingExpanded, setRatingExpanded] = useState(true);
+  const [fetchingMalRating, setFetchingMalRating] = useState(false);
+  const [fetchRatingMessage, setFetchRatingMessage] = useState('');
 
   const [playbackSpeed, setPlaybackSpeed] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -308,6 +310,71 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
       }
     } else {
       addToDirtyQueue({ type: 'SET_ANIME', dedupeKey: `SET_ANIME_${animeId}`, payload: update });
+    }
+  };
+
+  const handleFetchMalRating = async () => {
+    if (!anime?.title || fetchingMalRating) return;
+
+    setFetchingMalRating(true);
+    setFetchRatingMessage('');
+
+    try {
+      const res = await fetch(`/api/anime-rating?q=${encodeURIComponent(anime.title)}`);
+      const data = await res.json();
+
+      if (data.success && data.rating) {
+        const ratingStr = String(data.rating);
+        const popularityStr = data.popularity ? `#${data.popularity}` : '';
+        const membersCount = data.members || 0;
+        const rankStr = data.rank ? `#${data.rank}` : '';
+        const scoreStr = data.score ? String(data.score) : ratingStr;
+
+        const update = {
+          id: animeId,
+          rating: ratingStr,
+          malScore: scoreStr,
+          malPopularity: popularityStr,
+          malRank: rankStr,
+          malMembers: membersCount,
+          malUrl: data.url || '',
+          updatedAt: new Date().toISOString()
+        };
+
+        // Update local store
+        upsertLocalAnime(update);
+        setAnime(prev => prev ? { ...prev, ...update } : prev);
+
+        // Update Firestore
+        if (!isOffline && db && currentUser) {
+          try {
+            await updateDoc(doc(db, 'users', getUserId(), 'anime', animeId), {
+              rating: ratingStr,
+              malScore: scoreStr,
+              malPopularity: popularityStr,
+              malRank: rankStr,
+              malMembers: membersCount,
+              malUrl: data.url || '',
+              updatedAt: new Date().toISOString()
+            });
+          } catch (err) {
+            console.error("Failed to update rating in Firestore:", err);
+            addToDirtyQueue({ type: 'SET_ANIME', dedupeKey: `SET_ANIME_${animeId}`, payload: update });
+          }
+        } else {
+          addToDirtyQueue({ type: 'SET_ANIME', dedupeKey: `SET_ANIME_${animeId}`, payload: update });
+        }
+
+        setFetchRatingMessage(`Updated: ${data.rating}/10 (${data.source}${data.popularity ? ` • Pop #${data.popularity}` : ''})`);
+        setTimeout(() => setFetchRatingMessage(''), 5000);
+      } else {
+        alert(data.error || 'Could not fetch rating from internet.');
+      }
+    } catch (err) {
+      console.error('Error fetching online rating:', err);
+      alert('Failed to connect to rating service: ' + (err.message || 'Network error'));
+    } finally {
+      setFetchingMalRating(false);
     }
   };
 
@@ -586,6 +653,19 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     }
   };
 
+  const playInMediaServer = async (episode) => {
+    setPromptPlayEp(null);
+    await saveDefaultPlayerIfChecked('mediaserver');
+    const quality = ytModalSelectedQuality || episode.selectedQuality || ytWidgetSelectedQuality || 'best';
+    if (onPlayEpisode) {
+      onPlayEpisode(episode.id, episodes, 'mediaserver', {
+        speed: playbackSpeed,
+        volume: playbackVolume,
+        quality
+      });
+    }
+  };
+
   const playInYoutube = async (episode) => {
     setPromptPlayEp(null);
     await saveDefaultPlayerIfChecked('youtube');
@@ -594,6 +674,19 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
         speed: playbackSpeed,
         volume: playbackVolume,
         quality: 'best' // Embed ignores our quality fetch, but we pass it anyway
+      });
+    }
+  };
+
+  const playInYtDlp = async (episode) => {
+    setPromptPlayEp(null);
+    await saveDefaultPlayerIfChecked('ytdlp');
+    const quality = ytModalSelectedQuality || episode.selectedQuality || ytWidgetSelectedQuality || 'best';
+    if (onPlayEpisode) {
+      onPlayEpisode(episode.id, episodes, 'ytdlp', {
+        speed: playbackSpeed,
+        volume: playbackVolume,
+        quality
       });
     }
   };
@@ -694,30 +787,38 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     }
 
     const defPlayer = currentUser?.defaultPlayer;
-    const isYt = episode.isYouTube || episode.filePath?.startsWith('youtube://');
+    const isYt = !!(
+      episode.isYouTube ||
+      episode.filePath?.startsWith('youtube://') ||
+      anime?.isYouTube ||
+      anime?.folderPath?.startsWith('http') ||
+      anime?.folderPath?.startsWith('youtube://')
+    );
 
     // Pre-fetch YouTube duration before launching any player
     const ep = isYt ? await ensureYtDuration(episode) : episode;
 
-    if (defPlayer && defPlayer !== 'ask') {
-      if (defPlayer === 'builtin') {
-        playInBuiltin(ep);
-      } else if (defPlayer === 'artplayer') {
-        playInArtPlayer(ep);
-      } else if (defPlayer === 'videojs') {
-        playInVideoJs(ep);
-      } else if (defPlayer === 'youtube') {
-        if (isYt) playInYoutube(ep);
-        else playInBuiltin(ep);
-      } else if (defPlayer === 'vlc') {
-        if (isYt) {
-          setMakeDefault(false);
-          setPromptPlayEp(ep);
-        } else {
-          playInVlc(ep);
-        }
+    // RULE 1: For YouTube playlist animes (Only YouTube Embed or YT-DLP)
+    if (isYt) {
+      if (defPlayer === 'youtube') {
+        playInYoutube(ep);
+      } else if (defPlayer === 'ytdlp') {
+        playInYtDlp(ep);
+      } else {
+        // If defPlayer is 'mediaserver', 'vlc', 'ask', or unset -> give player selection modal (YouTube Embed, YT-DLP)
+        setMakeDefault(false);
+        setPromptPlayEp(ep);
       }
+      return;
+    }
+
+    // RULE 2: For local storage episodes (Only Media Server or VLC, never YouTube)
+    if (defPlayer === 'mediaserver') {
+      playInMediaServer(ep);
+    } else if (defPlayer === 'vlc') {
+      playInVlc(ep);
     } else {
+      // If defPlayer is 'youtube', 'ytdlp', 'ask', or unset -> give player selection modal (Media Server, VLC)
       setMakeDefault(false);
       setPromptPlayEp(ep);
     }
@@ -1549,7 +1650,14 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                       YouTube
                     </span>
                   )}
-                  <span className="text-xs text-gray-500 font-normal hidden sm:inline">({anime.episodeCount} Episodes)</span>
+                  <span className="text-xs text-gray-500 font-normal hidden sm:inline">
+                    ({anime.totalSeasons ? `Season ${anime.totalSeasons} • ` : ''}
+                    {anime.totalEpisodes ? (
+                      anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
+                        ? `${anime.episodeCount}/${anime.totalEpisodes} Episodes`
+                        : `${anime.totalEpisodes} Episodes`
+                    ) : `${anime.episodeCount || 0} Episodes`})
+                  </span>
                 </h1>
                 <p className="text-[10px] text-gray-500 line-clamp-1 max-w-md">
                   {anime.folderPath}
@@ -2122,11 +2230,9 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                       className="w-full bg-white/10 border border-white/15 text-xs text-white rounded-xl p-2 font-semibold focus:outline-none focus:border-neonCyan cursor-pointer"
                     >
                       <option value="ask" className="bg-gray-900 text-white">Ask Every Time (Modal)</option>
-                      <option value="builtin" className="bg-gray-900 text-white">Built-in HTML5 Player</option>
-                      <option value="artplayer" className="bg-gray-900 text-white">ArtPlayer Container</option>
-                      <option value="videojs" className="bg-gray-900 text-white">Video.js Container</option>
-                      <option value="youtube" className="bg-gray-900 text-white">YouTube Embed</option>
+                      <option value="mediaserver" className="bg-gray-900 text-white">Media Server Player (Windows Host)</option>
                       <option value="vlc" className="bg-gray-900 text-white">VLC Player (Desktop Host)</option>
+                      <option value="youtube" className="bg-gray-900 text-white">YouTube Embed</option>
                     </select>
                   </div>
                   
@@ -2162,15 +2268,63 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                   )}
                 </div>
 
-                {/* Rating */}
-                <div className="space-y-2 pt-2 border-t border-white/5">
-                  <h4 className="font-semibold text-white text-[11px] uppercase tracking-wider flex items-center justify-between">
-                    <span>Rate this Anime</span>
-                    <span className="text-amber-400 font-extrabold">
-                      {anime?.rating ? `${parseFloat(anime.rating).toFixed(1)} / 10` : 'Not Rated'}
-                    </span>
-                  </h4>
-                  <div className="space-y-2">
+                {/* Rating & Popularity Section */}
+                <div className="space-y-3 pt-2 border-t border-white/5">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-white text-[11px] uppercase tracking-wider">
+                      Rating & Popularity
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={handleFetchMalRating}
+                      disabled={fetchingMalRating}
+                      className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/50 hover:to-indigo-600/50 text-purple-200 border border-purple-500/30 hover:border-purple-400/50 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      title="Fetch official rating and popularity from MyAnimeList / Jikan"
+                    >
+                      <RefreshCw size={11} className={fetchingMalRating ? 'animate-spin' : ''} />
+                      {fetchingMalRating ? 'Fetching...' : 'Fetch from MAL / Jikan'}
+                    </button>
+                  </div>
+
+                  {/* Rating display & info badges */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-extrabold text-xs">
+                      <Star size={13} className="fill-amber-400" />
+                      <span>{anime?.rating ? `${parseFloat(anime.rating).toFixed(1)} / 10` : 'Not Rated'}</span>
+                    </div>
+
+                    {(anime?.malPopularity || anime?.popularity) && (
+                      <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 font-bold text-[11px]">
+                        <span>Popularity: {anime.malPopularity || anime.popularity}</span>
+                      </div>
+                    )}
+
+                    {anime?.malRank && (
+                      <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-pink-500/10 border border-pink-500/30 text-pink-300 font-bold text-[11px]">
+                        <span>Rank: {anime.malRank}</span>
+                      </div>
+                    )}
+
+                    {anime?.malMembers > 0 && (
+                      <div className="text-[10px] text-gray-400">
+                        ({(anime.malMembers / 1000).toFixed(0)}k members)
+                      </div>
+                    )}
+                  </div>
+
+                  {fetchRatingMessage && (
+                    <div className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[10px] font-semibold flex items-center gap-1">
+                      <CheckCircle2 size={12} />
+                      <span>{fetchRatingMessage}</span>
+                    </div>
+                  )}
+
+                  {/* Manual Rating Slider */}
+                  <div className="space-y-1 pt-1">
+                    <div className="flex justify-between text-[10px] text-gray-400">
+                      <span>Manual Adjust</span>
+                      <span className="text-amber-400 font-semibold">{anime?.rating ? parseFloat(anime.rating).toFixed(1) : '8.0'}</span>
+                    </div>
                     <input
                       type="range"
                       min="1.0"
@@ -2445,38 +2599,6 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                 {promptPlayEp.fileName}
               </p>
 
-              {/* Dynamic YouTube Quality Selector inside Player Selection Window */}
-              {(promptPlayEp.isYouTube || promptPlayEp.filePath?.startsWith('youtube://')) && (
-                <div className="bg-black/40 p-3 rounded-xl border border-white/10 text-left space-y-1.5 mb-4">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-red-400 flex items-center gap-1.5">
-                      <Youtube size={14} /> YouTube Streaming Quality
-                    </label>
-                    <button
-                      type="button"
-                      onClick={handleFetchYtModalQualities}
-                      disabled={ytModalLoadingQualities}
-                      className="px-2 py-0.5 text-[10px] font-bold bg-white/10 hover:bg-white/20 border border-white/10 text-white rounded-lg transition cursor-pointer flex items-center gap-1"
-                    >
-                      <RefreshCw size={10} className={ytModalLoadingQualities ? 'animate-spin' : ''} />
-                      {ytModalLoadingQualities ? 'Detecting...' : 'Fetch Server Formats'}
-                    </button>
-                  </div>
-
-                  <select
-                    value={ytModalSelectedQuality}
-                    onChange={(e) => setYtModalSelectedQuality(e.target.value)}
-                    className="w-full bg-white/10 border border-white/15 text-xs text-white rounded-xl p-2 font-semibold focus:outline-none focus:border-neonCyan cursor-pointer"
-                  >
-                    {ytModalQualities.map((q) => (
-                      <option key={q.id} value={q.id} className="bg-gray-900 text-white">
-                        {q.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
               <div className="flex items-center gap-2.5 mb-6 px-1">
                 <input
                   type="checkbox"
@@ -2490,71 +2612,120 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                 </label>
               </div>
 
-              <div className={`grid gap-4 mb-6 ${promptPlayEp.isYouTube || promptPlayEp.filePath?.startsWith('youtube://') ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-4'}`}>
-                {/* Built-in Player Card */}
-                <button
-                  type="button"
-                  onClick={() => playInBuiltin(promptPlayEp)}
-                  className="p-5 rounded-2xl bg-cyan-500/5 border border-cyan-500/20 hover:border-cyan-400/50 text-cyan-300 hover:text-white hover:bg-cyan-500/10 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_20px_rgba(6,182,212,0.25)]"
-                >
-                  <div className="p-3 rounded-xl bg-cyan-500/10 group-hover:bg-cyan-500/20 transition-colors">
-                    <Tv size={24} className="text-cyan-400" />
-                  </div>
-                  <span className="text-[10px] font-black uppercase tracking-widest">Built-in</span>
-                </button>
+              {/* Check if prompt episode is YouTube or local storage */}
+              {(() => {
+                const isPromptYt = !!(
+                  promptPlayEp.isYouTube ||
+                  promptPlayEp.filePath?.startsWith('youtube://') ||
+                  anime?.isYouTube ||
+                  anime?.folderPath?.startsWith('http') ||
+                  anime?.folderPath?.startsWith('youtube://')
+                );
 
-                {/* ArtPlayer Card */}
-                <button
-                  type="button"
-                  onClick={() => playInArtPlayer(promptPlayEp)}
-                  className="p-5 rounded-2xl bg-purple-500/5 border border-purple-500/20 hover:border-purple-400/50 text-purple-300 hover:text-white hover:bg-purple-500/10 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_20px_rgba(168,85,247,0.25)]"
-                >
-                  <div className="p-3 rounded-xl bg-purple-500/10 group-hover:bg-purple-500/20 transition-colors">
-                    <Film size={24} className="text-purple-400" />
-                  </div>
-                  <span className="text-[10px] font-black uppercase tracking-widest">ArtPlayer</span>
-                </button>
+                return (
+                  <>
+                    {/* Quality selector for YouTube */}
+                    {isPromptYt && (
+                      <div className="bg-black/40 p-3 rounded-xl border border-white/10 text-left space-y-1.5 mb-4">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-bold uppercase tracking-wider text-red-400 flex items-center gap-1.5">
+                            <Youtube size={14} /> YouTube Streaming Quality
+                          </label>
+                          <button
+                            type="button"
+                            onClick={handleFetchYtModalQualities}
+                            disabled={ytModalLoadingQualities}
+                            className="px-2 py-0.5 text-[10px] font-bold bg-white/10 hover:bg-white/20 border border-white/10 text-white rounded-lg transition cursor-pointer flex items-center gap-1"
+                          >
+                            <RefreshCw size={10} className={ytModalLoadingQualities ? 'animate-spin' : ''} />
+                            {ytModalLoadingQualities ? 'Detecting...' : 'Fetch Server Formats'}
+                          </button>
+                        </div>
 
-                {/* Video.js Card */}
-                <button
-                  type="button"
-                  onClick={() => playInVideoJs(promptPlayEp)}
-                  className="p-5 rounded-2xl bg-indigo-500/5 border border-indigo-500/20 hover:border-indigo-400/50 text-indigo-300 hover:text-white hover:bg-indigo-500/10 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_20px_rgba(99,102,241,0.25)]"
-                >
-                  <div className="p-3 rounded-xl bg-indigo-500/10 group-hover:bg-indigo-500/20 transition-colors">
-                    <Play size={24} className="text-indigo-400" fill="currentColor" />
-                  </div>
-                  <span className="text-[10px] font-black uppercase tracking-widest">Video.js</span>
-                </button>
+                        <select
+                          value={ytModalSelectedQuality}
+                          onChange={(e) => setYtModalSelectedQuality(e.target.value)}
+                          className="w-full bg-white/10 border border-white/15 text-xs text-white rounded-xl p-2 font-semibold focus:outline-none focus:border-neonCyan cursor-pointer"
+                        >
+                          {ytModalQualities.map((q) => (
+                            <option key={q.id} value={q.id} className="bg-gray-900 text-white">
+                              {q.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
 
-                {/* VLC Player Card (Excluded for YouTube Videos) */}
-                {!(promptPlayEp.isYouTube || promptPlayEp.filePath?.startsWith('youtube://')) && (
-                  <button
-                    type="button"
-                    onClick={() => playInVlc(promptPlayEp)}
-                    className="p-5 rounded-2xl bg-orange-500/5 border border-orange-500/20 hover:border-orange-400/50 text-orange-300 hover:text-white hover:bg-orange-500/10 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_20px_rgba(249,115,22,0.25)]"
-                  >
-                    <div className="p-3 rounded-xl bg-orange-500/10 group-hover:bg-orange-500/20 transition-colors">
-                      <VLCIcon className="w-6 h-6" />
+                    <div className="grid gap-4 mb-6 grid-cols-1 sm:grid-cols-2 max-w-md mx-auto">
+                      {isPromptYt ? (
+                        <>
+                          {/* 1. YouTube Embed Player */}
+                          <button
+                            type="button"
+                            onClick={() => playInYoutube(promptPlayEp)}
+                            className="p-6 rounded-2xl bg-red-500/10 border border-red-500/30 hover:border-red-400 text-red-300 hover:text-white hover:bg-red-500/20 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_25px_rgba(239,68,68,0.35)]"
+                          >
+                            <div className="p-3.5 rounded-2xl bg-red-500/20 group-hover:bg-red-500/30 transition-colors">
+                              <Youtube size={28} className="text-red-400" />
+                            </div>
+                            <div className="text-center">
+                              <span className="text-xs font-black uppercase tracking-widest block text-white">YouTube Embed</span>
+                              <span className="text-[10px] text-gray-400 font-medium">Native IFrame Player</span>
+                            </div>
+                          </button>
+
+                          {/* 2. YT-DLP Player */}
+                          <button
+                            type="button"
+                            onClick={() => playInYtDlp(promptPlayEp)}
+                            className="p-6 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 hover:border-cyan-400 text-cyan-300 hover:text-white hover:bg-cyan-500/20 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_25px_rgba(6,182,212,0.35)]"
+                          >
+                            <div className="p-3.5 rounded-2xl bg-cyan-500/20 group-hover:bg-cyan-500/30 transition-colors">
+                              <Server size={28} className="text-cyan-400" />
+                            </div>
+                            <div className="text-center">
+                              <span className="text-xs font-black uppercase tracking-widest block text-white">YT-DLP Player</span>
+                              <span className="text-[10px] text-gray-400 font-medium">Custom Media Engine</span>
+                            </div>
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {/* 1. Media Server Player Card (Local Media) */}
+                          <button
+                            type="button"
+                            onClick={() => playInMediaServer(promptPlayEp)}
+                            className="p-6 rounded-2xl bg-purple-500/10 border border-purple-500/30 hover:border-purple-400 text-purple-300 hover:text-white hover:bg-purple-500/20 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_25px_rgba(168,85,247,0.35)]"
+                          >
+                            <div className="p-3.5 rounded-2xl bg-purple-500/20 group-hover:bg-purple-500/30 transition-colors">
+                              <Server size={28} className="text-purple-400" />
+                            </div>
+                            <div className="text-center">
+                              <span className="text-xs font-black uppercase tracking-widest block text-white">Media Server Player</span>
+                              <span className="text-[10px] text-gray-400 font-medium">Windows Media Streaming</span>
+                            </div>
+                          </button>
+
+                          {/* 2. VLC Player Card (Local Media) */}
+                          <button
+                            type="button"
+                            onClick={() => playInVlc(promptPlayEp)}
+                            className="p-6 rounded-2xl bg-orange-500/10 border border-orange-500/30 hover:border-orange-400 text-orange-300 hover:text-white hover:bg-orange-500/20 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_25px_rgba(249,115,22,0.35)]"
+                          >
+                            <div className="p-3.5 rounded-2xl bg-orange-500/20 group-hover:bg-orange-500/30 transition-colors">
+                              <VLCIcon className="w-7 h-7" />
+                            </div>
+                            <div className="text-center">
+                              <span className="text-xs font-black uppercase tracking-widest block text-white">VLC Player</span>
+                              <span className="text-[10px] text-gray-400 font-medium">External Desktop Player</span>
+                            </div>
+                          </button>
+                        </>
+                      )}
                     </div>
-                    <span className="text-[10px] font-black uppercase tracking-widest">VLC Player</span>
-                  </button>
-                )}
-
-                {/* Youtube Player Card (Included for YouTube Videos) */}
-                {(promptPlayEp.isYouTube || promptPlayEp.filePath?.startsWith('youtube://')) && (
-                  <button
-                    type="button"
-                    onClick={() => playInYoutube(promptPlayEp)}
-                    className="p-5 rounded-2xl bg-red-500/5 border border-red-500/20 hover:border-red-400/50 text-red-300 hover:text-white hover:bg-red-500/10 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_20px_rgba(239,68,68,0.25)]"
-                  >
-                    <div className="p-3 rounded-xl bg-red-500/10 group-hover:bg-red-500/20 transition-colors">
-                      <Youtube size={24} className="text-red-400" />
-                    </div>
-                    <span className="text-[10px] font-black uppercase tracking-widest">YouTube Embed</span>
-                  </button>
-                )}
-              </div>
+                  </>
+                );
+              })()}
 
               <div className="flex justify-end pt-6 mt-6 border-t border-white/5">
                 <button
@@ -2834,41 +3005,19 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
               </div>
 
               <div className="w-full flex flex-col gap-3 pt-2">
-                <button
-                  onClick={() => {
-                    const ep = streamPlayerModalEp;
-                    setStreamPlayerModalEp(null);
-                    playInArtPlayer(ep);
-                  }}
-                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-purple-600/80 to-indigo-600/80 hover:from-purple-600 hover:to-indigo-600 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg cursor-pointer"
-                >
-                  <Sparkles size={16} className="text-cyan-300" />
-                  ArtPlayer (Modern Web Player)
-                </button>
-
-                <button
-                  onClick={() => {
-                    const ep = streamPlayerModalEp;
-                    setStreamPlayerModalEp(null);
-                    playInVideoJs(ep);
-                  }}
-                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-600/80 to-blue-600/80 hover:from-indigo-600 hover:to-blue-600 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg cursor-pointer"
-                >
-                  <Play size={16} fill="currentColor" className="text-indigo-200" />
-                  Video.js Player
-                </button>
-
-                <button
-                  onClick={() => {
-                    const ep = streamPlayerModalEp;
-                    setStreamPlayerModalEp(null);
-                    playInBuiltin(ep);
-                  }}
-                  className="w-full py-3 rounded-2xl bg-white/10 border border-white/15 hover:bg-white/20 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer"
-                >
-                  <Tv size={16} className="text-emerald-400" />
-                  Native HTML5 Video Player
-                </button>
+                {!(streamPlayerModalEp.isYouTube || streamPlayerModalEp.filePath?.startsWith('youtube://')) && (
+                  <button
+                    onClick={() => {
+                      const ep = streamPlayerModalEp;
+                      setStreamPlayerModalEp(null);
+                      playInMediaServer(ep);
+                    }}
+                    className="w-full py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 hover:brightness-110 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg cursor-pointer"
+                  >
+                    <Server size={16} className="text-violet-200" />
+                    Media Server Player (Windows Host)
+                  </button>
+                )}
 
                 {(streamPlayerModalEp.isYouTube || streamPlayerModalEp.filePath?.startsWith('youtube://')) && (
                   <button

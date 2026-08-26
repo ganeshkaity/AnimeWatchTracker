@@ -30,6 +30,7 @@ export async function POST(request) {
 
     // Execute yt-dlp to extract flat playlist json metadata only
     const { stdout } = await execFileAsync('yt-dlp', [
+      '--extractor-args', 'youtube:player_client=android,web',
       '--dump-single-json',
       '--flat-playlist',
       '--no-warnings',
