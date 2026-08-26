@@ -1,0 +1,283 @@
+# ==============================================================================
+# FIRESTORE DATABASE STRUCTURE & SCHEMA SPECIFICATION
+# Project: WatchAnime
+# Engine: Google Cloud Firestore (NoSQL Document Store)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. HIERARCHICAL TREE VIEW
+# ------------------------------------------------------------------------------
+
+firestore_root/
+└── users/                                    [Collection: Root User Registry]
+    └── {userId}/                             [Document: User Profile & Preferences]
+        │
+        ├── Fields:
+        │   ├── uid: string                   (Unique user identifier)
+        │   ├── displayName: string           (User profile name)
+        │   ├── vlcPath: string               (Local filesystem path to VLC executable)
+        │   ├── defaultPlayer: string         ("artplayer" | "videojs" | "vlc" | "ask")
+        │   └── createdAt: string (ISO 8601)  (Timestamp of user registration)
+        │
+        ├── anime/                            [Subcollection: User's Anime Library]
+        │   └── {animeId}/                    [Document: Tracked Anime / Playlist]
+        │       │
+        │       ├── Fields (Local Folder Anime):
+        │       │   ├── title: string                 (Clean anime title)
+        │       │   ├── folderPath: string            (Absolute path on host disk)
+        │       │   ├── episodeCount: number          (Total detected episodes)
+        │       │   ├── progressPercent: number       (Calculated completion 0 - 100)
+        │       │   ├── lastWatchedEpisode: string    (Episode number / identifier)
+        │       │   ├── lastOpenedAt: string (ISO)    (Last interaction timestamp)
+        │       │   ├── coverGradient: string         (Tailwind CSS gradient class)
+        │       │   ├── thumbnailBase64: string       (Base64 encoded cover art)
+        │       │   ├── thumbnailPath: string         (Local path to cover image)
+        │       │   ├── rating: string | number       (User / system rating e.g. "9.4")
+        │       │   ├── genres: array[string]         (Assigned tags & genres)
+        │       │   ├── description: string           (Synopsis or folder details)
+        │       │   ├── quality: string               (Resolution tag e.g. "1080p HD")
+        │       │   ├── language: string              ("SUB / DUB", "RAW", etc.)
+        │       │   ├── studio: string                (Studio or production tag)
+        │       │   ├── year: string                  (Release year)
+        │       │   ├── isFavorite: boolean           (Bookmarking / starred flag)
+        │       │   ├── isYouTube: boolean            (false for local files)
+        │       │   ├── userId: string                (Owning user UID)
+        │       │   ├── createdAt: string (ISO 8601)  (Creation timestamp)
+        │       │   └── updatedAt: string (ISO 8601)  (Last update timestamp)
+        │       │
+        │       ├── Fields (YouTube Playlist Anime):
+        │       │   ├── isYouTube: boolean            (true)
+        │       │   ├── playlistId: string            (YouTube playlist ID)
+        │       │   └── [All other standard anime metadata fields]
+        │       │
+        │       └── episodes/                 [Subcollection: Episode Manifest]
+        │           └── {episodeId}/          [Document: Individual Episode State]
+        │               │
+        │               ├── Fields (Local Video Episode):
+        │               │   ├── episodeNumber: number | string (Episode index e.g. 1)
+        │               │   ├── fileName: string               (Physical file name)
+        │               │   ├── filePath: string               (Absolute local file path)
+        │               │   ├── durationSeconds: number        (Runtime in seconds)
+        │               │   ├── watchedSeconds: number         (Progress timestamp in sec)
+        │               │   ├── lastPositionSeconds: number    (Resume playback point)
+        │               │   ├── isWatched: boolean             (Completion status flag)
+        │               │   ├── isFlagged: boolean             (Bookmark / favorite flag)
+        │               │   ├── flags: array[string]           (Tags: "Filler", "OP", etc.)
+        │               │   ├── note: string                   (Episode watcher note)
+        │               │   ├── isOffPattern: boolean          (Regex match indicator)
+        │               │   ├── createdAt: number (epoch ms)   (Scan timestamp)
+        │               │   └── updatedAt: string (ISO 8601)   (Last updated timestamp)
+        │               │
+        │               └── Fields (YouTube Episode):
+        │                   ├── isYouTube: boolean             (true)
+        │                   ├── youtubeId: string              (YouTube 11-char video ID)
+        │                   ├── selectedQuality: string        ("best", "1080p", "720p")
+        │                   ├── durationFormatted: string      (Formatted string "24:15")
+        │                   ├── thumbnailUrl: string           (YouTube thumbnail URL)
+        │                   └── [All other standard episode playback fields]
+        │
+        └── notes/                            [Subcollection: User Markdown Notes]
+            └── {noteId}/                     [Document: Individual Note]
+                │
+                ├── Fields:
+                │   ├── title: string                 (Note title)
+                │   ├── content: string               (Markdown note body)
+                │   ├── tag: string                   (Category tag e.g. "General", "Review")
+                │   ├── isStarred: boolean            (Quick-access star flag)
+                │   ├── isImportant: boolean          (High-priority flag)
+                │   ├── userId: string                (Owner user UID)
+                │   ├── createdAt: string (ISO 8601)  (Creation timestamp)
+                │   └── updatedAt: string (ISO 8601)  (Last modification timestamp)
+
+# ------------------------------------------------------------------------------
+# 2. DETAILED COLLECTION & DOCUMENT SCHEMAS (JSON / TYPESCRIPT FORMAT)
+# ------------------------------------------------------------------------------
+
+```typescript
+// --- 1. User Document: users/{userId} ---
+interface UserDocument {
+  uid: string;
+  displayName?: string;
+  vlcPath?: string;
+  defaultPlayer?: 'artplayer' | 'videojs' | 'vlc' | 'ask';
+  createdAt?: string;
+}
+
+// --- 2. Anime Document: users/{userId}/anime/{animeId} ---
+interface AnimeDocument {
+  id: string;
+  userId: string;
+  title: string;
+  folderPath: string;
+  episodeCount: number;
+  progressPercent: number;
+  lastWatchedEpisode: string | number;
+  lastOpenedAt: string;
+  coverGradient?: string;
+  thumbnailBase64?: string;
+  thumbnailPath?: string;
+  rating?: string | number;
+  genres?: string[];
+  description?: string;
+  quality?: string;
+  language?: string;
+  studio?: string;
+  year?: string;
+  isFavorite?: boolean;
+  isYouTube?: boolean;
+  playlistId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// --- 3. Episode Document: users/{userId}/anime/{animeId}/episodes/{episodeId} ---
+interface EpisodeDocument {
+  id: string;
+  episodeNumber: number | string;
+  fileName: string;
+  filePath: string;
+  durationSeconds?: number;
+  durationFormatted?: string;
+  watchedSeconds?: number;
+  lastPositionSeconds?: number;
+  isWatched: boolean;
+  isFlagged?: boolean;
+  flags?: string[];
+  note?: string;
+  isOffPattern?: boolean;
+  isYouTube?: boolean;
+  youtubeId?: string;
+  selectedQuality?: string;
+  thumbnailUrl?: string;
+  createdAt: number;
+  updatedAt: string;
+}
+
+// --- 4. Note Document: users/{userId}/notes/{noteId} ---
+interface NoteDocument {
+  id: string;
+  userId: string;
+  title: string;
+  content: string;
+  tag: string;
+  isStarred: boolean;
+  isImportant: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+# ------------------------------------------------------------------------------
+# 3. OFFLINE SYNC ENGINE & DIRTY MUTATION QUEUE
+# ------------------------------------------------------------------------------
+
+When offline or when performing optimistic UI updates, mutations are serialized
+to localStorage under the key 'watchanime_dirty_queue' before syncing to Firestore:
+
+```json
+[
+  {
+    "type": "SET_ANIME",
+    "dedupeKey": "SET_ANIME_{animeId}",
+    "payload": { "id": "naruto-shippuden", "userId": "...", "title": "Naruto Shippuden", "progressPercent": 42 }
+  },
+  {
+    "type": "SET_EPISODES_BATCH",
+    "dedupeKey": "SET_EPISODES_BATCH_{animeId}",
+    "payload": { "animeId": "naruto-shippuden", "animeUserId": "...", "episodes": [ ... ] }
+  },
+  {
+    "type": "SET_EPISODE",
+    "dedupeKey": "SET_EPISODE_{animeId}_{episodeId}",
+    "payload": { "animeId": "naruto-shippuden", "id": "ep_1", "isWatched": true, "lastPositionSeconds": 1420 }
+  },
+  {
+    "type": "SET_NOTE",
+    "dedupeKey": "SET_NOTE_{noteId}",
+    "payload": { "id": "note_1700000000", "title": "Arc thoughts", "content": "..." }
+  },
+  {
+    "type": "DELETE_ANIME",
+    "payload": { "id": "naruto-shippuden", "userId": "..." }
+  },
+  {
+    "type": "DELETE_NOTE",
+    "payload": { "id": "note_1700000000", "userId": "..." }
+  }
+]
+```
+
+# ------------------------------------------------------------------------------
+# 4. FIRESTORE SECURITY RULES (firestore.rules)
+# ------------------------------------------------------------------------------
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // User profile document rules
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // Allow unauthenticated local development access when anonymous mode is used:
+      allow read, write: if true;
+
+      // User's tracked anime subcollection
+      match /anime/{animeId} {
+        allow read, write: if true;
+
+        // Episode subcollection within anime
+        match /episodes/{episodeId} {
+          allow read, write: if true;
+        }
+      }
+
+      // User's notes subcollection
+      match /notes/{noteId} {
+        allow read, write: if true;
+      }
+    }
+    
+    // Collection group queries if global discovery is enabled
+    match /{path=**}/anime/{animeId} {
+      allow read: if true;
+    }
+  }
+}
+```
+
+# ------------------------------------------------------------------------------
+# 5. FIRESTORE COMPOSITE INDEXES CONFIGURATION (firestore.indexes.json)
+# ------------------------------------------------------------------------------
+
+```json
+{
+  "indexes": [
+    {
+      "collectionGroup": "anime",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "progressPercent", "order": "DESCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "episodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "episodeNumber", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isStarred", "order": "DESCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
+```
