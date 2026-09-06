@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { collection, query, onSnapshot, doc, updateDoc, getDocs, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
@@ -16,7 +16,8 @@ import {
   Sparkles, History, RotateCcw, X, Heart, EyeOff, Film, Clock, Search,
   ChevronDown, ChevronUp, Folder, Tv, ExternalLink, RefreshCw, Loader2, CheckCheck,
   Wifi, Laptop, Smartphone, Settings2, QrCode, Youtube, FolderPlus, Trash2, Edit3,
-  Move, Upload, FolderTree, FileVideo, HardDrive, FilePlus, Server
+  Move, Upload, FolderTree, FileVideo, HardDrive, FilePlus, Server,
+  PlusCircle, CheckSquare, Square, SlidersHorizontal, ShieldCheck, Check, Layers, FolderMinus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -117,6 +118,10 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   const [selectedNamingPattern, setSelectedNamingPattern] = useState('Auto');
   const [manageFolderExpanded, setManageFolderExpanded] = useState(true);
   const [rescanDiff, setRescanDiff] = useState(null);
+  const [rescanSyncMode, setRescanSyncMode] = useState('normal'); // 'normal' | 'new_only' | 'deleted_only' | 'custom'
+  const [selectedNewEpIds, setSelectedNewEpIds] = useState(new Set());
+  const [selectedRemovedEpIds, setSelectedRemovedEpIds] = useState(new Set());
+  const [rescanActiveTab, setRescanActiveTab] = useState('all'); // 'all' | 'new' | 'removed'
 
   // File Manager Modal State
   const [showFileManagerModal, setShowFileManagerModal] = useState(false);
@@ -198,6 +203,15 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
 
   // Expanded/Collapsed subfolder groups (initially closed)
   const [expandedFolders, setExpandedFolders] = useState({});
+
+  // Dynamic Real-Time Progress Percent derived from active episode list
+  const effectiveProgressPercent = useMemo(() => {
+    if (episodes && episodes.length > 0) {
+      const watchedCount = episodes.filter(e => !!e.isWatched).length;
+      return Math.round((watchedCount / episodes.length) * 100);
+    }
+    return Math.round(anime?.progressPercent || 0);
+  }, [episodes, anime?.progressPercent]);
 
   const [helperExpanded, setHelperExpanded] = useState(false);
   const [flagsExpanded, setFlagsExpanded] = useState(false);
@@ -895,35 +909,48 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
 
         if (scannedFiles.length > 0) {
           const processed = processScannedFiles(scannedFiles, anime.folderPath, pattern);
-          const existingEpMap = new Map(episodes.map(e => [e.id, e]));
+          
+          const existingById = new Map(episodes.map(e => [e.id, e]));
+          const existingByPath = new Map(episodes.map(e => [(e.filePath || '').replace(/\\/g, '/').toLowerCase(), e]));
+          const existingByName = new Map(episodes.map(e => [(e.fileName || e.name || '').toLowerCase(), e]));
+
+          const findExisting = (pEp, epId) => {
+            if (existingById.has(epId)) return existingById.get(epId);
+            const normPath = (pEp.filePath || pEp.path || '').replace(/\\/g, '/').toLowerCase();
+            if (normPath && existingByPath.has(normPath)) return existingByPath.get(normPath);
+            const normName = (pEp.fileName || pEp.name || '').toLowerCase();
+            if (normName && existingByName.has(normName)) return existingByName.get(normName);
+            return null;
+          };
 
           scannedCandidateEps = processed.map((pEp) => {
-            const epId = pEp.id || pEp.docId || getSafeDocId(pEp.filePath || pEp.fileName, anime.folderPath);
-            const existing = existingEpMap.get(epId);
+            const rawId = pEp.id || pEp.docId || getSafeDocId(pEp.filePath || pEp.fileName, anime.folderPath);
+            const existing = findExisting(pEp, rawId);
+            const epId = existing?.id || rawId;
             return {
               ...pEp,
               id: epId,
               animeId: animeId,
-              isWatched: existing ? existing.isWatched : (pEp.isWatched || false),
-              watchedSeconds: existing ? existing.watchedSeconds : (pEp.watchedSeconds || 0),
-              lastPositionSeconds: existing ? existing.lastPositionSeconds : (pEp.lastPositionSeconds || 0),
-              flags: existing ? existing.flags : (pEp.flags || []),
-              note: existing ? existing.note : (pEp.note || ''),
+              isWatched: existing ? !!existing.isWatched : (pEp.isWatched || false),
+              watchedSeconds: existing ? (existing.watchedSeconds || 0) : (pEp.watchedSeconds || 0),
+              lastPositionSeconds: existing ? (existing.lastPositionSeconds || 0) : (pEp.lastPositionSeconds || 0),
+              flags: existing ? (existing.flags || []) : (pEp.flags || []),
+              note: existing ? (existing.note || '') : (pEp.note || ''),
               updatedAt: new Date().toISOString()
             };
           });
         } else {
-          scannedCandidateEps = episodes.map(ep => ({ ...ep, updatedAt: new Date().toISOString() }));
+          scannedCandidateEps = [];
         }
       }
 
       // Calculate Diff against current episodes
-      const existingEpMap = new Map(episodes.map(e => [e.id, e]));
-      const newEpisodes = scannedCandidateEps.filter(ep => !existingEpMap.has(ep.id));
-      const retainedEpisodes = scannedCandidateEps.filter(ep => existingEpMap.has(ep.id));
+      const existingIdSet = new Set(episodes.map(e => e.id));
+      const scannedIdSet = new Set(scannedCandidateEps.map(e => e.id));
 
-      const scannedIds = new Set(scannedCandidateEps.map(e => e.id));
-      const removedEpisodes = episodes.filter(ep => !scannedIds.has(ep.id));
+      const newEpisodes = scannedCandidateEps.filter(ep => !existingIdSet.has(ep.id));
+      const retainedEpisodes = scannedCandidateEps.filter(ep => existingIdSet.has(ep.id));
+      const removedEpisodes = episodes.filter(ep => !scannedIdSet.has(ep.id));
 
       // Folder Diff
       const oldFolders = new Set(episodes.map(e => getSubfolder(e.filePath, anime?.folderPath || '')));
@@ -933,7 +960,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
       const removedFoldersList = Array.from(oldFolders).filter(f => f && f !== '' && !newFolders.has(f));
 
       const mergedList = sortEpisodes([
-        ...episodes.filter(e => scannedIds.has(e.id)),
+        ...retainedEpisodes,
         ...newEpisodes
       ]);
 
@@ -949,6 +976,25 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
       };
 
       setRescanDiff(diff);
+
+      // Initialize selection sets
+      const allNewIds = new Set(newEpisodes.map(e => e.id));
+      const allRemovedIds = new Set(removedEpisodes.map(e => e.id));
+      setSelectedNewEpIds(allNewIds);
+      setSelectedRemovedEpIds(allRemovedIds);
+
+      // Smart default mode based on detected changes
+      if (newEpisodes.length > 0 && removedEpisodes.length > 0) {
+        setRescanSyncMode('normal');
+      } else if (newEpisodes.length > 0) {
+        setRescanSyncMode('new_only');
+      } else if (removedEpisodes.length > 0) {
+        setRescanSyncMode('deleted_only');
+      } else {
+        setRescanSyncMode('normal');
+      }
+
+      setRescanActiveTab('all');
       setRescanStatus('preview');
     } catch (err) {
       console.error('Error during rescan:', err);
@@ -957,65 +1003,218 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     }
   };
 
-  // Apply Rescan Changes Handler (only uploads newly found episodes to Firestore!)
+  // Switch Sync Mode handler
+  const handleSelectSyncMode = (mode) => {
+    setRescanSyncMode(mode);
+    if (!rescanDiff) return;
+    if (mode === 'normal') {
+      setSelectedNewEpIds(new Set(rescanDiff.newEpisodes.map(e => e.id)));
+      setSelectedRemovedEpIds(new Set(rescanDiff.removedEpisodes.map(e => e.id)));
+    } else if (mode === 'new_only') {
+      setSelectedNewEpIds(new Set(rescanDiff.newEpisodes.map(e => e.id)));
+      setSelectedRemovedEpIds(new Set()); // Nothing deleted!
+    } else if (mode === 'deleted_only') {
+      setSelectedNewEpIds(new Set()); // Nothing added!
+      setSelectedRemovedEpIds(new Set(rescanDiff.removedEpisodes.map(e => e.id)));
+    }
+  };
+
+  // Toggle single new episode checkbox
+  const handleToggleNewEpisode = (epId) => {
+    setRescanSyncMode('custom');
+    setSelectedNewEpIds(prev => {
+      const next = new Set(prev);
+      if (next.has(epId)) next.delete(epId);
+      else next.add(epId);
+      return next;
+    });
+  };
+
+  // Toggle single removed episode checkbox (checked = will remove)
+  const handleToggleRemovedEpisode = (epId) => {
+    setRescanSyncMode('custom');
+    setSelectedRemovedEpIds(prev => {
+      const next = new Set(prev);
+      if (next.has(epId)) next.delete(epId);
+      else next.add(epId);
+      return next;
+    });
+  };
+
+  // Select all or deselect all new episodes
+  const handleSelectAllNew = (select) => {
+    if (!rescanDiff) return;
+    setRescanSyncMode('custom');
+    if (select) {
+      setSelectedNewEpIds(new Set(rescanDiff.newEpisodes.map(e => e.id)));
+    } else {
+      setSelectedNewEpIds(new Set());
+    }
+  };
+
+  // Select all or deselect all removed episodes
+  const handleSelectAllRemoved = (select) => {
+    if (!rescanDiff) return;
+    setRescanSyncMode('custom');
+    if (select) {
+      setSelectedRemovedEpIds(new Set(rescanDiff.removedEpisodes.map(e => e.id)));
+    } else {
+      setSelectedRemovedEpIds(new Set());
+    }
+  };
+
+  // Toggle entire subfolder for new episodes
+  const handleToggleFolderNew = (folderName, selectAll) => {
+    if (!rescanDiff) return;
+    setRescanSyncMode('custom');
+    const folderEpIds = rescanDiff.newEpisodes
+      .filter(ep => getSubfolder(ep.filePath, anime?.folderPath || '') === folderName)
+      .map(ep => ep.id);
+    setSelectedNewEpIds(prev => {
+      const next = new Set(prev);
+      folderEpIds.forEach(id => {
+        if (selectAll) next.add(id);
+        else next.delete(id);
+      });
+      return next;
+    });
+  };
+
+  // Toggle entire subfolder for removed episodes
+  const handleToggleFolderRemoved = (folderName, selectAll) => {
+    if (!rescanDiff) return;
+    setRescanSyncMode('custom');
+    const folderEpIds = rescanDiff.removedEpisodes
+      .filter(ep => getSubfolder(ep.filePath, anime?.folderPath || '') === folderName)
+      .map(ep => ep.id);
+    setSelectedRemovedEpIds(prev => {
+      const next = new Set(prev);
+      folderEpIds.forEach(id => {
+        if (selectAll) next.add(id);
+        else next.delete(id);
+      });
+      return next;
+    });
+  };
+
+  // Apply Rescan Changes Handler (respects chosen sync mode & selected items)
   const handleApplyRescanChanges = async () => {
     if (!rescanDiff || !anime) return;
     setRescanStatus('applying');
-    setRescanMessage('Uploading new episodes to Firestore and updating library...');
+    setRescanMessage('Applying rescan changes to library and database...');
 
     try {
-      const { newEpisodes, removedEpisodes, allMergedEpisodes, pattern } = rescanDiff;
+      const { newEpisodes, removedEpisodes, pattern } = rescanDiff;
 
-      // 1. Upload ONLY NEW episodes to Firestore if online
+      // Filter exact episodes to add & remove based on user's selected sets
+      const episodesToAdd = newEpisodes.filter(ep => selectedNewEpIds.has(ep.id));
+      const episodesToRemove = removedEpisodes.filter(ep => selectedRemovedEpIds.has(ep.id));
+
+      // Build retained list: all currently existing episodes EXCEPT those selected for removal
+      const removedIdSet = new Set(episodesToRemove.map(e => e.id));
+      const retainedCurrentEpisodes = episodes.filter(ep => !removedIdSet.has(ep.id));
+
+      // Build final merged episodes
+      const allMergedEpisodes = sortEpisodes([
+        ...retainedCurrentEpisodes,
+        ...episodesToAdd
+      ]);
+
+      // Calculate new accurate progress percentage and last watched episode
+      const total = allMergedEpisodes.length;
+      const watched = allMergedEpisodes.filter(e => !!e.isWatched).length;
+      const newProgressPercent = total > 0 ? Math.round((watched / total) * 100) : 0;
+      let lastWatchedNum = anime.lastWatchedEpisode || '';
+      let lastOpened = new Date(0);
+      allMergedEpisodes.forEach(ep => {
+        if (ep.lastPositionSeconds > 0 || ep.isWatched) {
+          const t = new Date(ep.updatedAt || 0);
+          if (t > lastOpened) {
+            lastOpened = t;
+            lastWatchedNum = `EP-${ep.episodeNumber || 1}`;
+          }
+        }
+      });
+
+      const updatedAnimeDoc = {
+        ...anime,
+        namingPattern: pattern,
+        episodeCount: total,
+        progressPercent: newProgressPercent,
+        lastWatchedEpisode: lastWatchedNum,
+        updatedAt: new Date().toISOString()
+      };
+
+      // 1. Immediately apply locally to state & storage
+      episodesToAdd.forEach(ep => upsertLocalEpisode(animeId, ep));
+      episodesToRemove.forEach(ep => deleteLocalEpisode(animeId, ep.id));
+
+      setEpisodes(allMergedEpisodes);
+      setLocalEpisodes(animeId, allMergedEpisodes);
+      upsertLocalAnime(updatedAnimeDoc);
+      setAnime(updatedAnimeDoc);
+
+      // 2. Upload to Firestore if online
       if (!isOffline && db && currentUser) {
         const batch = writeBatch(db);
 
-        // Upload ONLY newly found episodes!
-        newEpisodes.forEach(ep => {
+        // Upload ONLY newly added episodes!
+        episodesToAdd.forEach(ep => {
           const epRef = doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id);
           batch.set(epRef, ep, { merge: true });
         });
 
-        // Delete removed episodes if any
-        removedEpisodes.forEach(ep => {
+        // Delete ONLY selected removed episodes
+        episodesToRemove.forEach(ep => {
           const epRef = doc(db, 'users', getUserId(), 'anime', animeId, 'episodes', ep.id);
           batch.delete(epRef);
         });
 
-        // Update anime metadata
+        // Update anime metadata with recalculated progressPercent and episodeCount
         const animeRef = doc(db, 'users', getUserId(), 'anime', animeId);
-        batch.update(animeRef, {
+        batch.set(animeRef, {
           namingPattern: pattern,
-          episodeCount: allMergedEpisodes.length,
+          episodeCount: total,
+          progressPercent: newProgressPercent,
+          lastWatchedEpisode: lastWatchedNum,
           updatedAt: new Date().toISOString()
-        });
+        }, { merge: true });
 
         await batch.commit();
       } else {
         // Queue dirty ops for offline sync
-        newEpisodes.forEach(ep => {
+        episodesToAdd.forEach(ep => {
           addToDirtyQueue({ type: 'SET_EPISODE', dedupeKey: `SET_EPISODE_${animeId}_${ep.id}`, payload: { animeId, ...ep } });
         });
-        removedEpisodes.forEach(ep => {
+        episodesToRemove.forEach(ep => {
           addToDirtyQueue({ type: 'DELETE_EPISODE', dedupeKey: `DELETE_EPISODE_${animeId}_${ep.id}`, payload: { animeId, id: ep.id, episodeId: ep.id } });
+        });
+        addToDirtyQueue({
+          type: 'SET_ANIME',
+          dedupeKey: `SET_ANIME_${animeId}`,
+          payload: {
+            id: animeId,
+            namingPattern: pattern,
+            episodeCount: total,
+            progressPercent: newProgressPercent,
+            lastWatchedEpisode: lastWatchedNum,
+            updatedAt: new Date().toISOString()
+          }
         });
       }
 
-      // Save locally
-      newEpisodes.forEach(ep => upsertLocalEpisode(animeId, ep));
-      removedEpisodes.forEach(ep => deleteLocalEpisode(animeId, ep.id));
-
-      setEpisodes(allMergedEpisodes);
-      setLocalEpisodes(animeId, allMergedEpisodes);
-      upsertLocalAnime({
-        ...anime,
-        namingPattern: pattern,
-        episodeCount: allMergedEpisodes.length,
-        updatedAt: new Date().toISOString()
-      });
-
       setRescanStatus('completed');
-      setRescanMessage(`Rescan complete! Uploaded ${newEpisodes.length} newly found episodes to Firestore.`);
+      let summaryText = 'Library updated successfully!';
+      if (episodesToAdd.length > 0 && episodesToRemove.length > 0) {
+        summaryText = `Added ${episodesToAdd.length} new episode(s) and removed ${episodesToRemove.length} missing item(s).`;
+      } else if (episodesToAdd.length > 0) {
+        summaryText = `Added ${episodesToAdd.length} new episode(s). Existing & missing items were kept untouched.`;
+      } else if (episodesToRemove.length > 0) {
+        summaryText = `Removed ${episodesToRemove.length} missing item(s) from library.`;
+      } else {
+        summaryText = `No episode changes applied. Library metadata refreshed.`;
+      }
+      setRescanMessage(`Rescan complete! ${summaryText} (${total} total episodes, ${watched} watched).`);
     } catch (err) {
       console.error("Error applying rescan changes:", err);
       setRescanStatus('error');
@@ -1269,6 +1468,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     if (!confirm(`Are you sure you want to delete "${item.name}" from Firestore library? This action cannot be undone.`)) return;
     try {
       setFmLoading(true);
+      let updatedRemainingEps = [];
       if (!item.isDirectory) {
         const epId = item.id;
         if (!isOffline && db && currentUser) {
@@ -1277,7 +1477,8 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
           addToDirtyQueue({ type: 'DELETE_EPISODE', dedupeKey: `DELETE_EPISODE_${animeId}_${epId}`, payload: { animeId, id: epId, episodeId: epId } });
         }
         deleteLocalEpisode(animeId, epId);
-        setEpisodes(prev => prev.filter(ep => ep.id !== epId));
+        updatedRemainingEps = episodes.filter(ep => ep.id !== epId);
+        setEpisodes(updatedRemainingEps);
       } else {
         const subfolderPathNorm = item.path.replace(/\\/g, '/').replace(/\/$/, '') + '/';
         const targetEps = episodes.filter(ep => {
@@ -1295,7 +1496,56 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
         }
 
         const targetIds = new Set(targetEps.map(e => e.id));
-        setEpisodes(prev => prev.filter(ep => !targetIds.has(ep.id)));
+        updatedRemainingEps = episodes.filter(ep => !targetIds.has(ep.id));
+        setEpisodes(updatedRemainingEps);
+      }
+
+      // Recalculate anime progress & episodeCount after deletion
+      const total = updatedRemainingEps.length;
+      const watched = updatedRemainingEps.filter(e => e.isWatched).length;
+      const newProgressPercent = total > 0 ? Math.round((watched / total) * 100) : 0;
+      let lastWatchedNum = anime?.lastWatchedEpisode || '';
+      let lastOpened = new Date(0);
+      updatedRemainingEps.forEach(ep => {
+        if (ep.lastPositionSeconds > 0 || ep.isWatched) {
+          const t = new Date(ep.updatedAt || 0);
+          if (t > lastOpened) {
+            lastOpened = t;
+            lastWatchedNum = `EP-${ep.episodeNumber || 1}`;
+          }
+        }
+      });
+
+      const updatedAnimeDoc = {
+        ...anime,
+        episodeCount: total,
+        progressPercent: newProgressPercent,
+        lastWatchedEpisode: lastWatchedNum,
+        updatedAt: new Date().toISOString()
+      };
+
+      upsertLocalAnime(updatedAnimeDoc);
+      setAnime(prev => prev ? { ...prev, ...updatedAnimeDoc } : prev);
+
+      if (!isOffline && db && currentUser) {
+        await updateDoc(doc(db, 'users', getUserId(), 'anime', animeId), {
+          episodeCount: total,
+          progressPercent: newProgressPercent,
+          lastWatchedEpisode: lastWatchedNum,
+          updatedAt: new Date().toISOString()
+        }).catch(() => {});
+      } else {
+        addToDirtyQueue({
+          type: 'SET_ANIME',
+          dedupeKey: `SET_ANIME_${animeId}`,
+          payload: {
+            id: animeId,
+            episodeCount: total,
+            progressPercent: newProgressPercent,
+            lastWatchedEpisode: lastWatchedNum,
+            updatedAt: new Date().toISOString()
+          }
+        });
       }
     } catch (err) {
       console.error("Error deleting item from Firestore:", err);
@@ -1669,17 +1919,17 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
             <div className="hidden md:flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
               <div className="text-right">
                 <div className="text-xs text-gray-400 mb-1">
-                  Library Progress: <span className="font-semibold text-white">{Math.round(anime.progressPercent || 0)}%</span>
+                  Library Progress: <span className="font-semibold text-white">{effectiveProgressPercent}%</span>
                 </div>
                 <div className="w-32 md:w-40 h-2 bg-white/5 rounded-full overflow-hidden">
                   <div 
                     className="h-full bg-neon-gradient shadow-purple-glow rounded-full"
-                    style={{ width: `${anime.progressPercent || 0}%` }}
+                    style={{ width: `${effectiveProgressPercent}%` }}
                   />
                 </div>
               </div>
 
-              {anime.progressPercent !== 100 && (
+              {effectiveProgressPercent !== 100 && (
                 <button
                   onClick={() => setShowMarkCompleteConfirm(true)}
                   className="px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500 text-emerald-300 hover:text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-all shadow-inner whitespace-nowrap"
@@ -1715,12 +1965,12 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                 <div className="flex-1">
                   <div className="text-[11px] text-gray-400 mb-1 flex justify-between items-center pr-2">
                     <span>Watch Progress</span>
-                    <span className="font-bold text-neonCyan">{Math.round(anime.progressPercent || 0)}%</span>
+                    <span className="font-bold text-neonCyan">{effectiveProgressPercent}%</span>
                   </div>
                   <div className="w-full h-1.5 bg-white/15 rounded-full overflow-hidden">
                     <div 
                       className="h-full bg-neon-gradient shadow-purple-glow rounded-full"
-                      style={{ width: `${anime.progressPercent || 0}%` }}
+                      style={{ width: `${effectiveProgressPercent}%` }}
                     />
                   </div>
                 </div>
@@ -1753,7 +2003,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                       Rescan Folder
                     </button>
 
-                    {anime.progressPercent !== 100 && (
+                    {effectiveProgressPercent !== 100 && (
                       <button
                         onClick={() => setShowMarkCompleteConfirm(true)}
                         className="w-full py-2.5 rounded-xl bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500 text-emerald-300 hover:text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
@@ -2741,156 +2991,514 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
         )}
       </AnimatePresence>
 
-      {/* Folder Rescan Status & Consent Modal */}
+      {/* Folder Rescan Status & Multi-Option Sync Modal */}
       <AnimatePresence>
         {showRescanModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-lg glass-panel p-6 rounded-2xl border border-white/10 shadow-neon-border text-left space-y-4"
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-2xl glass-panel p-5 sm:p-6 rounded-2xl border border-white/15 shadow-neon-border text-left space-y-4 max-h-[92vh] flex flex-col my-auto"
             >
-              <div className="flex justify-between items-start border-b border-white/10 pb-3">
-                <h2 className="text-base font-bold flex items-center gap-2 text-white">
-                  <RefreshCw className={`text-neonCyan ${rescanStatus === 'scanning' || rescanStatus === 'applying' ? 'animate-spin' : ''}`} size={18} />
-                  {rescanStatus === 'preview' ? 'Scan Results — Preview Changes' : 'Rescan Folder & Playlist'}
-                </h2>
+              {/* Modal Header */}
+              <div className="flex justify-between items-start border-b border-white/10 pb-3.5 shrink-0">
+                <div>
+                  <h2 className="text-base sm:text-lg font-black flex items-center gap-2 text-white">
+                    <RefreshCw className={`text-neonCyan ${rescanStatus === 'scanning' || rescanStatus === 'applying' ? 'animate-spin' : ''}`} size={20} />
+                    {rescanStatus === 'preview' ? 'Folder Rescan Results & Sync Options' : 'Rescan Folder & Playlist'}
+                  </h2>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    {rescanStatus === 'preview'
+                      ? 'Review discovered changes and choose how your library should be updated.'
+                      : 'Scanning your disk and checking for library differences...'}
+                  </p>
+                </div>
                 {rescanStatus !== 'scanning' && rescanStatus !== 'applying' && (
                   <button
                     onClick={() => setShowRescanModal(false)}
-                    className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
+                    className="p-1.5 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
                   >
-                    <X size={16} />
+                    <X size={18} />
                   </button>
                 )}
               </div>
 
               {/* Scanning / Applying State */}
               {(rescanStatus === 'scanning' || rescanStatus === 'applying') && (
-                <div className="bg-black/40 border border-white/10 rounded-xl p-4 space-y-3 text-xs">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="animate-spin text-neonCyan" size={16} />
-                    <span className="font-semibold text-gray-200">
-                      {rescanStatus === 'scanning' ? 'Scanning directory/playlist...' : 'Updating Firestore...'}
+                <div className="bg-black/40 border border-white/10 rounded-xl p-5 space-y-3 text-xs my-auto">
+                  <div className="flex items-center gap-2.5">
+                    <Loader2 className="animate-spin text-neonCyan" size={18} />
+                    <span className="font-bold text-gray-100 text-sm">
+                      {rescanStatus === 'scanning' ? 'Scanning directory / playlist...' : 'Applying updates to library & cloud...'}
                     </span>
                   </div>
-                  <div className="p-3 bg-black/60 rounded-lg border border-white/5 font-mono text-[11px] text-gray-300">
+                  <div className="p-3 bg-black/60 rounded-lg border border-white/5 font-mono text-[11px] text-neonCyan/90">
                     {rescanMessage}
                   </div>
                 </div>
               )}
 
-              {/* Preview Diff & Consent State */}
+              {/* Preview Diff & Multi-Option Sync State */}
               {rescanStatus === 'preview' && rescanDiff && (
-                <div className="space-y-4 text-xs">
+                <div className="space-y-4 overflow-y-auto pr-1 flex-1 text-xs">
                   {/* Summary Metric Cards */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 text-center">
-                      <span className="block text-lg font-black text-emerald-400">+{rescanDiff.newEpisodes.length}</span>
-                      <span className="text-[10px] text-gray-400 font-medium">New Episodes</span>
+                    <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-xl p-2.5 text-center">
+                      <span className="block text-xl font-black text-emerald-400">+{rescanDiff.newEpisodes.length}</span>
+                      <span className="text-[10px] text-emerald-300/80 font-medium">New Episodes</span>
                     </div>
 
-                    <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-xl p-3 text-center">
-                      <span className="block text-lg font-black text-neonCyan">+{rescanDiff.addedFolders.length}</span>
-                      <span className="text-[10px] text-gray-400 font-medium">New Folders</span>
+                    <div className="bg-cyan-500/10 border border-cyan-500/25 rounded-xl p-2.5 text-center">
+                      <span className="block text-xl font-black text-neonCyan">+{rescanDiff.addedFolders.length}</span>
+                      <span className="text-[10px] text-cyan-300/80 font-medium">New Folders</span>
                     </div>
 
-                    <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-center">
-                      <span className="block text-lg font-black text-blue-400">{rescanDiff.retainedEpisodes.length}</span>
-                      <span className="text-[10px] text-gray-400 font-medium">Existing Kept</span>
+                    <div className="bg-blue-500/10 border border-blue-500/25 rounded-xl p-2.5 text-center">
+                      <span className="block text-xl font-black text-blue-400">{rescanDiff.retainedEpisodes.length}</span>
+                      <span className="text-[10px] text-blue-300/80 font-medium">Existing Kept</span>
                     </div>
 
-                    <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-center">
-                      <span className="block text-lg font-black text-red-400">-{rescanDiff.removedEpisodes.length}</span>
-                      <span className="text-[10px] text-gray-400 font-medium">Removed/Missing</span>
+                    <div className="bg-red-500/10 border border-red-500/25 rounded-xl p-2.5 text-center">
+                      <span className="block text-xl font-black text-red-400">-{rescanDiff.removedEpisodes.length}</span>
+                      <span className="text-[10px] text-red-300/80 font-medium">Missing / Removed</span>
                     </div>
                   </div>
 
-                  {/* Detail Item Lists */}
-                  <div className="max-h-[220px] overflow-y-auto bg-black/60 rounded-xl border border-white/10 p-3 space-y-2 text-xs">
-                    {rescanDiff.newEpisodes.length > 0 && (
-                      <div className="space-y-1">
-                        <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
-                          <Sparkles size={12} /> New Episodes Found ({rescanDiff.newEpisodes.length}):
-                        </span>
-                        {rescanDiff.newEpisodes.map(ep => (
-                          <div key={ep.id} className="text-[11px] text-emerald-300/90 font-mono truncate pl-2 border-l-2 border-emerald-500/50">
-                            + {ep.fileName}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                  {/* Sync Mode Selection Options */}
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider block flex items-center gap-1.5">
+                      <SlidersHorizontal size={13} className="text-neonPurple" />
+                      Select Sync Behavior:
+                    </label>
 
-                    {rescanDiff.addedFolders.length > 0 && (
-                      <div className="space-y-1 pt-2 border-t border-white/5">
-                        <span className="text-[11px] font-bold text-neonCyan flex items-center gap-1">
-                          <FolderPlus size={12} /> New Folders Found ({rescanDiff.addedFolders.length}):
-                        </span>
-                        {rescanDiff.addedFolders.map(f => (
-                          <div key={f} className="text-[11px] text-neonCyan/90 font-mono truncate pl-2 border-l-2 border-neonCyan/50">
-                            + {f}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {/* Option 1: Update Normally (Full Sync) */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSyncMode('normal')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between ${
+                          rescanSyncMode === 'normal'
+                            ? 'bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border-cyan-400/80 shadow-[0_0_15px_rgba(6,182,212,0.25)] text-white'
+                            : 'bg-white/5 border-white/10 hover:bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="font-black text-xs flex items-center gap-1.5 text-white">
+                            <RefreshCw size={14} className={rescanSyncMode === 'normal' ? 'text-neonCyan animate-spin-slow' : 'text-gray-400'} />
+                            Update Normally
+                          </span>
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                            Full Sync
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-300/90 leading-tight">
+                          Add <span className="text-emerald-400 font-bold">+{rescanDiff.newEpisodes.length}</span> new episodes and clean <span className="text-red-400 font-bold">-{rescanDiff.removedEpisodes.length}</span> missing items.
+                        </p>
+                      </button>
 
-                    {rescanDiff.removedEpisodes.length > 0 && (
-                      <div className="space-y-1 pt-2 border-t border-white/5">
-                        <span className="text-[11px] font-bold text-red-400 flex items-center gap-1">
-                          <Trash2 size={12} /> Missing / Removed Items ({rescanDiff.removedEpisodes.length}):
-                        </span>
-                        {rescanDiff.removedEpisodes.map(ep => (
-                          <div key={ep.id} className="text-[11px] text-red-300/90 font-mono truncate pl-2 border-l-2 border-red-500/50">
-                            - {ep.fileName}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                      {/* Option 2: Only Update New Episodes (Safe Add) */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSyncMode('new_only')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between ${
+                          rescanSyncMode === 'new_only'
+                            ? 'bg-gradient-to-br from-emerald-500/20 to-teal-600/20 border-emerald-400/80 shadow-[0_0_15px_rgba(16,185,129,0.25)] text-white'
+                            : 'bg-white/5 border-white/10 hover:bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="font-black text-xs flex items-center gap-1.5 text-white">
+                            <PlusCircle size={14} className={rescanSyncMode === 'new_only' ? 'text-emerald-400' : 'text-gray-400'} />
+                            Only New Episodes
+                          </span>
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            Safe Add
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-300/90 leading-tight">
+                          Add <span className="text-emerald-400 font-bold">+{rescanDiff.newEpisodes.length}</span> new files. Keeps all <span className="text-gray-200 font-bold">{rescanDiff.removedEpisodes.length}</span> missing items untouched.
+                        </p>
+                      </button>
 
-                    {rescanDiff.newEpisodes.length === 0 && rescanDiff.addedFolders.length === 0 && rescanDiff.removedEpisodes.length === 0 && (
-                      <div className="text-center py-4 text-gray-400 text-xs">
-                        No new files or folder changes detected. Library is up to date!
-                      </div>
-                    )}
+                      {/* Option 3: Only Update Deleted Items */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSyncMode('deleted_only')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between ${
+                          rescanSyncMode === 'deleted_only'
+                            ? 'bg-gradient-to-br from-red-500/20 to-rose-600/20 border-red-400/80 shadow-[0_0_15px_rgba(239,68,68,0.25)] text-white'
+                            : 'bg-white/5 border-white/10 hover:bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="font-black text-xs flex items-center gap-1.5 text-white">
+                            <Trash2 size={14} className={rescanSyncMode === 'deleted_only' ? 'text-red-400' : 'text-gray-400'} />
+                            Only Deleted Items
+                          </span>
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-red-500/20 text-red-300 border border-red-500/30">
+                            Clean Only
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-300/90 leading-tight">
+                          Remove <span className="text-red-400 font-bold">-{rescanDiff.removedEpisodes.length}</span> deleted items. Will <span className="text-gray-400 font-semibold">skip</span> adding new episodes.
+                        </p>
+                      </button>
+
+                      {/* Option 4: Custom Granular Checkboxes */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSyncMode('custom')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between ${
+                          rescanSyncMode === 'custom'
+                            ? 'bg-gradient-to-br from-purple-500/20 to-indigo-600/20 border-purple-400/80 shadow-[0_0_15px_rgba(168,85,247,0.25)] text-white'
+                            : 'bg-white/5 border-white/10 hover:bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="font-black text-xs flex items-center gap-1.5 text-white">
+                            <CheckSquare size={14} className={rescanSyncMode === 'custom' ? 'text-purple-400' : 'text-gray-400'} />
+                            Custom Selection
+                          </span>
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                            Checkboxes
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-300/90 leading-tight">
+                          Manually select / unselect individual episodes and folders below.
+                        </p>
+                      </button>
+                    </div>
                   </div>
 
-                  <p className="text-[11px] text-gray-400 italic">
-                    ⚡ Note: Only newly found episodes will be uploaded to Firestore. Existing episodes are retained unchanged.
-                  </p>
+                  {/* Summary Live Calculation Pill */}
+                  <div className="bg-black/50 border border-white/10 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                    <div className="flex items-center gap-3">
+                      <span className="text-gray-400">Action Plan:</span>
+                      <span className="text-emerald-400 font-bold">+{selectedNewEpIds.size} to add</span>
+                      <span className="text-red-400 font-bold">-{selectedRemovedEpIds.size} to remove</span>
+                    </div>
+                    <div className="text-gray-300 font-medium">
+                      Library Total: <span className="text-neonCyan font-bold">{episodes.length}</span> → <span className="text-white font-black">{episodes.length - selectedRemovedEpIds.size + selectedNewEpIds.size}</span> eps
+                    </div>
+                  </div>
 
-                  {/* Consent Buttons */}
-                  <div className="flex justify-end gap-3 pt-2 border-t border-white/10">
+                  {/* Interactive Details Filter Tabs */}
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                      <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => setRescanActiveTab('all')}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                            rescanActiveTab === 'all' ? 'bg-white/20 text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                          }`}
+                        >
+                          All Items
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRescanActiveTab('new')}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                            rescanActiveTab === 'new' ? 'bg-emerald-500/30 text-emerald-300 shadow-sm' : 'text-gray-400 hover:text-emerald-400'
+                          }`}
+                        >
+                          <Sparkles size={12} />
+                          New ({rescanDiff.newEpisodes.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRescanActiveTab('removed')}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                            rescanActiveTab === 'removed' ? 'bg-red-500/30 text-red-300 shadow-sm' : 'text-gray-400 hover:text-red-400'
+                          }`}
+                        >
+                          <Trash2 size={12} />
+                          Missing ({rescanDiff.removedEpisodes.length})
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {rescanActiveTab === 'new' && rescanDiff.newEpisodes.length > 0 && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectAllNew(true)}
+                              className="text-[10px] text-emerald-400 hover:underline font-semibold cursor-pointer"
+                            >
+                              Select All
+                            </button>
+                            <span className="text-gray-600">|</span>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectAllNew(false)}
+                              className="text-[10px] text-gray-400 hover:text-white font-semibold cursor-pointer"
+                            >
+                              Deselect All
+                            </button>
+                          </>
+                        )}
+                        {rescanActiveTab === 'removed' && rescanDiff.removedEpisodes.length > 0 && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectAllRemoved(true)}
+                              className="text-[10px] text-red-400 hover:underline font-semibold cursor-pointer"
+                            >
+                              Select All (Delete)
+                            </button>
+                            <span className="text-gray-600">|</span>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectAllRemoved(false)}
+                              className="text-[10px] text-gray-400 hover:text-white font-semibold cursor-pointer"
+                            >
+                              Keep All (Don't Delete)
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Scrollable Item Breakdown List */}
+                    <div className="max-h-[220px] overflow-y-auto bg-black/60 rounded-xl border border-white/10 p-3 space-y-3">
+                      {/* Section: New Episodes */}
+                      {(rescanActiveTab === 'all' || rescanActiveTab === 'new') && rescanDiff.newEpisodes.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-emerald-400">
+                            <span className="flex items-center gap-1.5">
+                              <Sparkles size={13} /> New Episodes Discovered ({rescanDiff.newEpisodes.length}):
+                            </span>
+                            <div className="flex items-center gap-2 text-[10px]">
+                              <button
+                                type="button"
+                                onClick={() => handleSelectAllNew(true)}
+                                className="text-emerald-400 hover:underline cursor-pointer"
+                              >
+                                Check All
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectAllNew(false)}
+                                className="text-gray-400 hover:text-white cursor-pointer"
+                              >
+                                Uncheck All
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* New Folders Badges */}
+                          {rescanDiff.addedFolders.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 py-1">
+                              {rescanDiff.addedFolders.map(folder => (
+                                <span key={folder} className="text-[10px] bg-cyan-500/20 text-neonCyan border border-cyan-500/30 px-2 py-0.5 rounded-md flex items-center gap-1 font-mono">
+                                  <FolderPlus size={10} /> New Folder: {folder}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="space-y-1">
+                            {rescanDiff.newEpisodes.map(ep => {
+                              const isChecked = selectedNewEpIds.has(ep.id);
+                              const subf = getSubfolder(ep.filePath, anime?.folderPath || '');
+                              return (
+                                <div
+                                  key={ep.id}
+                                  onClick={() => handleToggleNewEpisode(ep.id)}
+                                  className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer select-none text-[11px] ${
+                                    isChecked
+                                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                                      : 'bg-white/5 border-white/5 text-gray-500 opacity-60 hover:opacity-90'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={() => {}} // Handled by container onClick
+                                      className="accent-emerald-500 w-4 h-4 rounded cursor-pointer shrink-0"
+                                    />
+                                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white shrink-0">
+                                      EP {ep.episodeNumber || '?'}
+                                    </span>
+                                    {subf && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-neonCyan truncate max-w-[120px]">
+                                        📁 {subf}
+                                      </span>
+                                    )}
+                                    <span className="truncate font-mono text-gray-200" title={ep.fileName}>
+                                      {ep.fileName}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] font-bold text-emerald-400 shrink-0 ml-2">
+                                    {isChecked ? '+ Will Add' : 'Skipped'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Section: Missing / Removed Episodes */}
+                      {(rescanActiveTab === 'all' || rescanActiveTab === 'removed') && rescanDiff.removedEpisodes.length > 0 && (
+                        <div className="space-y-1.5 pt-2 border-t border-white/5">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-red-400">
+                            <span className="flex items-center gap-1.5">
+                              <Trash2 size={13} /> Missing / Deleted Items on PC ({rescanDiff.removedEpisodes.length}):
+                            </span>
+                            <div className="flex items-center gap-2 text-[10px]">
+                              <button
+                                type="button"
+                                onClick={() => handleSelectAllRemoved(true)}
+                                className="text-red-400 hover:underline cursor-pointer"
+                              >
+                                Select All (Delete)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectAllRemoved(false)}
+                                className="text-gray-400 hover:text-white cursor-pointer"
+                              >
+                                Keep All
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Removed Folders Badges */}
+                          {rescanDiff.removedFolders.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 py-1">
+                              {rescanDiff.removedFolders.map(folder => (
+                                <span key={folder} className="text-[10px] bg-red-500/20 text-red-300 border border-red-500/30 px-2 py-0.5 rounded-md flex items-center gap-1 font-mono">
+                                  <FolderMinus size={10} /> Deleted Folder: {folder}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="space-y-1">
+                            {rescanDiff.removedEpisodes.map(ep => {
+                              const isChecked = selectedRemovedEpIds.has(ep.id);
+                              const subf = getSubfolder(ep.filePath, anime?.folderPath || '');
+                              return (
+                                <div
+                                  key={ep.id}
+                                  onClick={() => handleToggleRemovedEpisode(ep.id)}
+                                  className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer select-none text-[11px] ${
+                                    isChecked
+                                      ? 'bg-red-500/10 border-red-500/30 text-red-200'
+                                      : 'bg-emerald-500/5 border-emerald-500/20 text-emerald-300/80'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={() => {}} // Handled by container onClick
+                                      className="accent-red-500 w-4 h-4 rounded cursor-pointer shrink-0"
+                                    />
+                                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white shrink-0">
+                                      EP {ep.episodeNumber || '?'}
+                                    </span>
+                                    {subf && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 truncate max-w-[120px]">
+                                        📁 {subf}
+                                      </span>
+                                    )}
+                                    <span className="truncate font-mono text-gray-300" title={ep.fileName}>
+                                      {ep.fileName}
+                                    </span>
+                                    {ep.isWatched && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-semibold shrink-0">
+                                        Watched
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-[10px] font-bold shrink-0 ml-2">
+                                    {isChecked ? (
+                                      <span className="text-red-400">- Will Delete</span>
+                                    ) : (
+                                      <span className="text-emerald-400">🛡️ Keep in Library</span>
+                                    )}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Clean state / No changes */}
+                      {rescanDiff.newEpisodes.length === 0 && rescanDiff.removedEpisodes.length === 0 && (
+                        <div className="text-center py-6 text-gray-400 text-xs space-y-1">
+                          <CheckCircle2 size={24} className="text-emerald-400 mx-auto mb-1" />
+                          <p className="font-bold text-gray-200">No file or folder changes detected.</p>
+                          <p className="text-[11px] text-gray-500">Your WatchAnime library is 100% in sync with your local folder / playlist.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Consent & Action Buttons */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-white/10 shrink-0">
                     <button
                       type="button"
                       onClick={() => setShowRescanModal(false)}
-                      className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-bold cursor-pointer"
+                      className="w-full sm:w-auto px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-bold cursor-pointer transition text-center"
                     >
                       Cancel
                     </button>
-                    <button
-                      type="button"
-                      onClick={handleApplyRescanChanges}
-                      className="px-5 py-2 rounded-xl bg-neon-gradient hover:brightness-110 text-white text-xs font-bold uppercase tracking-wider shadow-purple-glow cursor-pointer flex items-center gap-1.5"
-                    >
-                      <Sparkles size={14} /> Apply Changes (Change)
-                    </button>
+
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={handleApplyRescanChanges}
+                        disabled={selectedNewEpIds.size === 0 && selectedRemovedEpIds.size === 0 && (rescanDiff.newEpisodes.length > 0 || rescanDiff.removedEpisodes.length > 0)}
+                        className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-neon-gradient hover:brightness-110 text-white text-xs font-black uppercase tracking-wider shadow-purple-glow cursor-pointer flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {rescanSyncMode === 'normal' && (
+                          <>
+                            <RefreshCw size={14} />
+                            Update Normally (+{selectedNewEpIds.size}, -{selectedRemovedEpIds.size})
+                          </>
+                        )}
+                        {rescanSyncMode === 'new_only' && (
+                          <>
+                            <PlusCircle size={14} />
+                            Add {selectedNewEpIds.size} New Only (Keep Missing)
+                          </>
+                        )}
+                        {rescanSyncMode === 'deleted_only' && (
+                          <>
+                            <Trash2 size={14} />
+                            Remove {selectedRemovedEpIds.size} Missing Only
+                          </>
+                        )}
+                        {rescanSyncMode === 'custom' && (
+                          <>
+                            <Check size={14} />
+                            Apply Custom Selection (+{selectedNewEpIds.size}, -{selectedRemovedEpIds.size})
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
 
               {/* Completed / Error State */}
               {(rescanStatus === 'completed' || rescanStatus === 'error') && (
-                <div className="space-y-4">
+                <div className="space-y-4 my-auto">
                   <div className="bg-black/40 border border-white/10 rounded-xl p-4 space-y-3 text-xs">
                     <div className="flex items-center gap-2">
                       {rescanStatus === 'completed' ? (
-                        <CheckCircle2 className="text-emerald-400" size={16} />
+                        <CheckCircle2 className="text-emerald-400" size={18} />
                       ) : (
-                        <AlertTriangle className="text-red-400" size={16} />
+                        <AlertTriangle className="text-red-400" size={18} />
                       )}
-                      <span className="font-semibold text-gray-200">
-                        {rescanStatus === 'completed' ? 'Rescan completed successfully!' : 'Rescan failed'}
+                      <span className="font-bold text-gray-100 text-sm">
+                        {rescanStatus === 'completed' ? 'Rescan updates applied successfully!' : 'Rescan failed'}
                       </span>
                     </div>
 
@@ -2903,9 +3511,9 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                     <button
                       type="button"
                       onClick={() => setShowRescanModal(false)}
-                      className="px-5 py-2 rounded-xl bg-neon-gradient text-white text-xs font-bold uppercase tracking-wider hover:brightness-110 shadow-purple-glow cursor-pointer"
+                      className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-neon-gradient text-white text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-purple-glow cursor-pointer"
                     >
-                      Close
+                      Done
                     </button>
                   </div>
                 </div>

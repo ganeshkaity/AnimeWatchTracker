@@ -1,5 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
 import { NextResponse } from 'next/server';
 
 const execFileAsync = promisify(execFile);
@@ -17,12 +19,18 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'Video ID or URL is required' }, { status: 400 });
     }
 
-    const { stdout } = await execFileAsync('yt-dlp', [
+    const cookiesPath = path.join(process.cwd(), 'cookies.txt');
+    const ytArgs = [
       '--extractor-args', 'youtube:player_client=android,web',
       '-J',
       '--no-warnings',
-      targetUrl
-    ], { maxBuffer: 15 * 1024 * 1024 });
+    ];
+    if (fs.existsSync(cookiesPath)) {
+      ytArgs.push('--cookies', cookiesPath);
+    }
+    ytArgs.push(targetUrl);
+
+    const { stdout } = await execFileAsync('yt-dlp', ytArgs, { maxBuffer: 15 * 1024 * 1024 });
 
     const info = JSON.parse(stdout);
     const formats = Array.isArray(info.formats) ? info.formats : [];

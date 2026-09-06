@@ -1,5 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
 import { NextResponse } from 'next/server';
 
 const execFileAsync = promisify(execFile);
@@ -17,14 +19,20 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'Video ID or URL is required' }, { status: 400 });
     }
 
-    // Use --print duration to get just the duration — much faster than -J
-    const { stdout } = await execFileAsync('yt-dlp', [
+    const cookiesPath = path.join(process.cwd(), 'cookies.txt');
+    const ytArgs = [
       '--extractor-args', 'youtube:player_client=android,web',
       '--print', 'duration',
       '--no-warnings',
       '--no-download',
-      targetUrl
-    ], { timeout: 30000, maxBuffer: 1024 * 1024 });
+    ];
+    if (fs.existsSync(cookiesPath)) {
+      ytArgs.push('--cookies', cookiesPath);
+    }
+    ytArgs.push(targetUrl);
+
+    // Use --print duration to get just the duration — much faster than -J
+    const { stdout } = await execFileAsync('yt-dlp', ytArgs, { timeout: 30000, maxBuffer: 1024 * 1024 });
 
     const durationStr = stdout.trim();
     const duration = parseFloat(durationStr);

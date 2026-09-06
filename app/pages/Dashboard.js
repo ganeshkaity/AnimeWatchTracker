@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { collection, query, onSnapshot, writeBatch, doc, deleteDoc, updateDoc, setDoc, getDocs } from 'firebase/firestore';
+import { collection, query, onSnapshot, writeBatch, doc, deleteDoc, updateDoc, setDoc, getDocs, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { useOffline } from '../context/OfflineContext';
@@ -16,7 +16,7 @@ import {
   StickyNote, Download, Wifi, WifiOff, RefreshCw, ChevronLeft, ChevronRight,
   Star, Flame, TrendingUp, Clock, Sparkles, Film, Bookmark, Bell, Menu, X,
   Tv, Eye, ShieldCheck, Heart, User, Filter, Compass, Calendar, AlertTriangle,
-  Youtube, Video, CheckSquare, Square, ExternalLink, Globe
+  Youtube, Video, CheckSquare, Square, ExternalLink, Globe, Trophy, Award
 } from 'lucide-react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -63,6 +63,18 @@ const getDeterministicRating = (id, rating) => {
   return random.toFixed(1);
 };
 
+export const getAnimeProgressPercent = (anime) => {
+  if (!anime) return 0;
+  try {
+    const localEps = getLocalEpisodes(anime.id);
+    if (Array.isArray(localEps) && localEps.length > 0) {
+      const watched = localEps.filter(e => !!e.isWatched).length;
+      return Math.round((watched / localEps.length) * 100);
+    }
+  } catch (e) {}
+  return Math.round(anime.progressPercent || 0);
+};
+
 const getHeroSlides = (animesList) => {
   if (animesList.length === 0) {
     return [{
@@ -80,9 +92,15 @@ const getHeroSlides = (animesList) => {
       description: 'Your premium personal anime tracking workspace. Add your local anime folder directory to get started parsing episodes and tracking your watch history!'
     }];
   }
-  const watching = animesList.filter(a => (a.progressPercent || 0) > 0 && (a.progressPercent || 0) < 100);
+  const watching = animesList.filter(a => {
+    const pct = getAnimeProgressPercent(a);
+    return pct > 0 && pct < 100;
+  });
   const others = animesList
-    .filter(a => !((a.progressPercent || 0) > 0 && (a.progressPercent || 0) < 100))
+    .filter(a => {
+      const pct = getAnimeProgressPercent(a);
+      return !(pct > 0 && pct < 100);
+    })
     .sort((a, b) => parseFloat(b.rating || 0) - parseFloat(a.rating || 0));
 
   const sortedForHero = [...watching, ...others].slice(0, 4);
@@ -401,8 +419,154 @@ export default function Dashboard({ onSelectAnime }) {
     setShowAddModal(true);
   };
 
-  // Get dynamic lists from database animes
-  const heroSlides = getHeroSlides(animes);
+  // ── Top 20 Top Rated Anime from AniList/Jikan with 1-Day Firestore & LocalStorage Cache ──
+  const [topRatedAnime, setTopRatedAnime] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('watchanime_top_rated_v1');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed?.data) && parsed.data.length > 0) {
+            return parsed.data;
+          }
+        }
+      } catch (e) {}
+    }
+    return [];
+  });
+  const [loadingTopRated, setLoadingTopRated] = useState(false);
+  const [hasScrolledToTopRated, setHasScrolledToTopRated] = useState(false);
+  const lazyTopRatedRef = useRef(null);
+  const topRatedScrollRef = useRef(null);
+
+  // Lazy-load sentinel: only triggers when user scrolls near the Top Rated section
+  useEffect(() => {
+    if (hasScrolledToTopRated || !lazyTopRatedRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setHasScrolledToTopRated(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '350px' }
+    );
+    observer.observe(lazyTopRatedRef.current);
+    return () => observer.disconnect();
+  }, [hasScrolledToTopRated]);
+
+  // Daily fetch / sync logic (executes once daily only after user scrolls to section)
+  useEffect(() => {
+    if (!hasScrolledToTopRated) return;
+
+    let isMounted = true;
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+    const loadTopRated = async () => {
+      // 1. Check local storage cache timestamp (update only 1 time daily)
+      if (typeof window !== 'undefined') {
+        try {
+          const localCacheStr = localStorage.getItem('watchanime_top_rated_v1');
+          if (localCacheStr) {
+            const parsed = JSON.parse(localCacheStr);
+            if (parsed?.timestamp && (Date.now() - parsed.timestamp < ONE_DAY_MS) && Array.isArray(parsed?.data) && parsed.data.length > 0) {
+              setTopRatedAnime(parsed.data);
+              return;
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 2. Check Firestore cache document (system_cache/top_rated_episodes)
+      try {
+        if (db) {
+          const docRef = doc(db, 'system_cache', 'top_rated_episodes');
+          const cachedDoc = await getDoc(docRef).catch(() => null);
+          if (cachedDoc && cachedDoc.exists()) {
+            const firestoreData = cachedDoc.data();
+            if (firestoreData?.timestamp && (Date.now() - firestoreData.timestamp < ONE_DAY_MS) && Array.isArray(firestoreData?.items) && firestoreData.items.length > 0) {
+              if (isMounted) {
+                setTopRatedAnime(firestoreData.items);
+              }
+              if (typeof window !== 'undefined') {
+                try {
+                  localStorage.setItem('watchanime_top_rated_v1', JSON.stringify({ timestamp: firestoreData.timestamp, data: firestoreData.items }));
+                  const photos = {};
+                  firestoreData.items.forEach(it => { if (it.id && it.image) photos[it.id] = it.image; });
+                  localStorage.setItem('watchanime_top_rated_photos', JSON.stringify(photos));
+                } catch (e) {}
+              }
+              return;
+            }
+          }
+        }
+      } catch (firestoreErr) {
+        console.warn('[Dashboard] Firestore top-rated cache read fallback:', firestoreErr);
+      }
+
+      // 3. Fetch fresh from /api/top-rated
+      if (topRatedAnime.length === 0) setLoadingTopRated(true);
+      try {
+        const res = await fetch('/api/top-rated');
+        const data = await res.json();
+        if (isMounted && data.success && Array.isArray(data.anime) && data.anime.length > 0) {
+          const items = data.anime;
+          setTopRatedAnime(items);
+
+          const now = Date.now();
+          // Store in LocalStorage (photos & data)
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('watchanime_top_rated_v1', JSON.stringify({ timestamp: now, data: items }));
+              const photos = {};
+              items.forEach(it => { if (it.id && it.image) photos[it.id] = it.image; });
+              localStorage.setItem('watchanime_top_rated_photos', JSON.stringify(photos));
+            } catch (e) {}
+          }
+
+          // Store other data in Firestore (updated daily for only 1 time)
+          if (db) {
+            try {
+              const docRef = doc(db, 'system_cache', 'top_rated_episodes');
+              await setDoc(docRef, {
+                items: items,
+                timestamp: now,
+                dateStr: new Date().toISOString().split('T')[0],
+                totalCount: items.length
+              }, { merge: true });
+            } catch (fsWriteErr) {
+              console.warn('[Dashboard] Firestore top-rated cache write error:', fsWriteErr);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[Dashboard] Failed to fetch top rated anime:', err);
+      } finally {
+        if (isMounted) setLoadingTopRated(false);
+      }
+    };
+
+    loadTopRated();
+    return () => { isMounted = false; };
+  }, [hasScrolledToTopRated]);
+
+  const scrollTopRated = (direction) => {
+    if (topRatedScrollRef.current) {
+      const { scrollLeft, clientWidth } = topRatedScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
+      topRatedScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  const localTopRatedScrollRef = useRef(null);
+
+  const scrollLocalTopRated = (direction) => {
+    if (localTopRatedScrollRef.current) {
+      const { scrollLeft, clientWidth } = localTopRatedScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
+      localTopRatedScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
 
   // Helper to extract the current cover photo of an anime folder
   const getAnimeFolderCover = (a) => {
@@ -417,6 +581,138 @@ export default function Dashboard({ onSelectAnime }) {
     }
     return a.coverImage || a.coverUrl || a.image || '';
   };
+
+  const [isDraggingTopRated, setIsDraggingTopRated] = useState(false);
+  const [topRatedStartX, setTopRatedStartX] = useState(0);
+  const [topRatedScrollLeft, setTopRatedScrollLeft] = useState(0);
+  const [topRatedHasDragged, setTopRatedHasDragged] = useState(false);
+
+  const handleTopRatedMouseDown = (e) => {
+    if (!topRatedScrollRef.current) return;
+    setIsDraggingTopRated(true);
+    setTopRatedHasDragged(false);
+    setTopRatedStartX(e.pageX - topRatedScrollRef.current.offsetLeft);
+    setTopRatedScrollLeft(topRatedScrollRef.current.scrollLeft);
+  };
+
+  const handleTopRatedMouseMove = (e) => {
+    if (!isDraggingTopRated || !topRatedScrollRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - topRatedScrollRef.current.offsetLeft;
+    const walk = (x - topRatedStartX) * 1.5;
+    if (Math.abs(walk) > 5) {
+      setTopRatedHasDragged(true);
+    }
+    topRatedScrollRef.current.scrollLeft = topRatedScrollLeft - walk;
+  };
+
+  const handleTopRatedMouseUp = () => {
+    setIsDraggingTopRated(false);
+  };
+
+  const handleTopRatedMouseLeave = () => {
+    setIsDraggingTopRated(false);
+  };
+
+  const topRatedWithLibrary = useMemo(() => {
+    const clean = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // 1. Process all external top-rated anime & match with local anime
+    const processedExternal = topRatedAnime.map((show) => {
+      const sTitle = clean(show.seriesTitle || show.animeTitle || show.title);
+      const sSub = clean(show.subTitle);
+
+      const matchingLocal = animes.find((a) => {
+        const aTitle = clean(a.title);
+        const aFolder = a.folderPath ? clean(a.folderPath.split(/[/\\]/).pop()) : '';
+        return (
+          (aTitle && (aTitle === sTitle || (sSub && aTitle === sSub))) ||
+          (aTitle && aTitle.length >= 4 && (sTitle.includes(aTitle) || aTitle.includes(sTitle))) ||
+          (aFolder && aFolder.length >= 4 && (sTitle.includes(aFolder) || aFolder.includes(sTitle)))
+        );
+      });
+
+      const localCover = matchingLocal ? getAnimeFolderCover(matchingLocal) : '';
+      const userRating = matchingLocal && matchingLocal.rating ? parseFloat(matchingLocal.rating) : null;
+      const externalRating = parseFloat(show.rating || 0);
+      const effectiveRating = userRating !== null && !isNaN(userRating) && userRating > 0
+        ? Math.max(userRating, externalRating).toFixed(1)
+        : (show.rating || '9.0');
+
+      const epName = show.episodeName || show.title || 'Top Episode';
+      const seriesName = show.seriesTitle || show.animeTitle || show.subTitle || 'Anime Series';
+
+      return {
+        ...show,
+        title: epName,
+        episodeName: epName,
+        seriesTitle: seriesName,
+        animeTitle: seriesName,
+        image: (matchingLocal && localCover) ? localCover : show.image,
+        banner: (matchingLocal && localCover) ? localCover : (show.banner || show.image),
+        rating: effectiveRating,
+        numericRating: parseFloat(effectiveRating) || 0,
+        isUploaded: Boolean(matchingLocal),
+        uploadedAnimeId: matchingLocal?.id,
+        userCustomRating: userRating !== null && !isNaN(userRating) && userRating > 0 ? userRating.toFixed(1) : null
+      };
+    });
+
+    // 2. Also check if user has local animes with user rating that should compete in top 20
+    const localOnlyShows = [];
+    animes.forEach((local) => {
+      const isAlreadyInList = processedExternal.some(
+        (ext) => ext.isUploaded && ext.uploadedAnimeId === local.id
+      );
+
+      const localRatingNum = local.rating ? parseFloat(local.rating) : 0;
+      if (!isAlreadyInList && localRatingNum > 0) {
+        const localCover = getAnimeFolderCover(local);
+        const totalSeasons = local.totalSeasons ? Number(local.totalSeasons) : 1;
+        const totalEpisodes = local.totalEpisodes ? Number(local.totalEpisodes) : (local.episodeCount || 0);
+        const watchedEp = local.lastWatchedEpisode || 1;
+        const epLabel = `Ep ${watchedEp}`;
+        const epName = `Ep ${watchedEp} - ${local.title || 'Episode'}`;
+
+        localOnlyShows.push({
+          id: `local-top-${local.id}`,
+          rawId: local.id,
+          title: epName,
+          episodeName: epName,
+          seriesTitle: local.title || 'Untitled Anime',
+          animeTitle: local.title || 'Untitled Anime',
+          subTitle: local.folderPath || '',
+          image: localCover || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop',
+          banner: localCover || '',
+          rating: localRatingNum.toFixed(1),
+          numericRating: localRatingNum,
+          episodes: epLabel,
+          type: 'Local',
+          year: local.year || '',
+          genres: Array.isArray(local.genres) ? local.genres.slice(0, 3) : [],
+          studio: local.studio || 'My Local Library',
+          isUploaded: true,
+          uploadedAnimeId: local.id,
+          userCustomRating: localRatingNum.toFixed(1),
+          description: local.notes || 'From your local tracked anime library'
+        });
+      }
+    });
+
+    // 3. Combine and sort by rating descending (user's higher rated anime gets top rank!)
+    const combined = [...processedExternal, ...localOnlyShows]
+      .sort((a, b) => (b.numericRating || 0) - (a.numericRating || 0))
+      .slice(0, 20)
+      .map((item, idx) => ({
+        ...item,
+        rank: idx + 1
+      }));
+
+    return combined;
+  }, [topRatedAnime, animes]);
+
+  // Get dynamic lists from database animes
+  const heroSlides = getHeroSlides(animes);
 
   const trendingShows = useMemo(() => {
     if (internetTrending.length === 0) {
@@ -562,7 +858,7 @@ export default function Dashboard({ onSelectAnime }) {
       });
   }, [weeklyPopular, animes]);
 
-  const topRatedAnime = [...animes]
+  const legacyLocalTopRated = [...animes]
     .sort((a, b) => parseFloat(b.rating || 0) - parseFloat(a.rating || 0))
     .slice(0, 5)
     .map(anime => ({
@@ -1314,18 +1610,24 @@ export default function Dashboard({ onSelectAnime }) {
         if (!genres.includes(selectedGenre)) return false;
       }
       
-      if (filterBy === 'active') return anime.progressPercent > 0 && anime.progressPercent < 100;
-      if (filterBy === 'completed') return anime.progressPercent === 100;
+      const pct = getAnimeProgressPercent(anime);
+      if (filterBy === 'active') return pct > 0 && pct < 100;
+      if (filterBy === 'completed') return pct === 100;
       return true;
     })
     .sort((a, b) => {
       if (sortBy === 'alpha') return (a?.title || '').localeCompare(b?.title || '');
-      if (sortBy === 'progress') return b.progressPercent - a.progressPercent;
+      if (sortBy === 'progress') return getAnimeProgressPercent(b) - getAnimeProgressPercent(a);
       return new Date(b.lastOpenedAt || 0) - new Date(a.lastOpenedAt || 0);
     });
 
   // Continue Watching items (watching status)
-  const continueWatchingList = animes.filter(a => (a.progressPercent || 0) > 0 && (a.progressPercent || 0) < 100);
+  const continueWatchingList = useMemo(() => {
+    return animes.filter(a => {
+      const pct = getAnimeProgressPercent(a);
+      return pct > 0 && pct < 100;
+    });
+  }, [animes]);
 
   // ── Lazy-Load Chunking for Anime Catalog (Initial 24, +24 on scroll) ───────
   const [visibleCount, setVisibleCount] = useState(24);
@@ -1360,11 +1662,21 @@ export default function Dashboard({ onSelectAnime }) {
     return title.split(' ').slice(0, 2).map(w => w ? w[0] : '').join('').toUpperCase();
   };
 
+  const genresScrollRef = useRef(null);
+
   const scrollTrending = (direction) => {
     if (trendingRef.current) {
       const { scrollLeft, clientWidth } = trendingRef.current;
       const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.7 : scrollLeft + clientWidth * 0.7;
       trendingRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  const scrollGenres = (direction) => {
+    if (genresScrollRef.current) {
+      const { scrollLeft, clientWidth } = genresScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
+      genresScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
     }
   };
 
@@ -1689,11 +2001,11 @@ export default function Dashboard({ onSelectAnime }) {
                     <a href="#hero" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
                       <Sparkles size={15} className="text-[#a855f7]" /> Spotlight Hero
                     </a>
-                    <a href="#trending" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
-                      <Flame size={15} className="text-amber-400" /> Trending Today
-                    </a>
                     <a href="#continue-watching" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
                       <Play size={15} className="text-[#7c5cff]" /> Continue Watching
+                    </a>
+                    <a href="#trending" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
+                      <Flame size={15} className="text-amber-400" /> Trending Today
                     </a>
                     <a href="#catalog" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
                       <Film size={15} className="text-cyan-400" /> Local Catalog
@@ -1986,7 +2298,152 @@ export default function Dashboard({ onSelectAnime }) {
           </div>
         </section>
 
-        {/* 3. TRENDING TODAY */}
+        {/* 3. EXPLORE GENRES CATEGORY CHIPS (2-ROW HORIZONTAL SCROLLER) */}
+        <section id="genres" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-[#7c5cff]/10 border border-[#7c5cff]/20 text-[#a855f7]">
+                <Compass size={20} />
+              </div>
+              <div>
+                <h2 className="text-xl font-extrabold tracking-wide text-white flex items-center gap-2">
+                  Explore Genres
+                  <span className="px-2 py-0.5 rounded-full bg-[#7c5cff]/20 text-purple-300 border border-[#7c5cff]/30 text-[10px] font-black uppercase tracking-wider hidden sm:inline">
+                    {GENRES_LIST.length - 1} Categories
+                  </span>
+                </h2>
+                <p className="text-[11px] text-gray-400 font-medium">Filter catalog by your favorite category</p>
+              </div>
+            </div>
+
+            {/* Scroll Navigation Arrows */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => scrollGenres('left')}
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+                title="Scroll Genres Left"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <button
+                onClick={() => scrollGenres('right')}
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+                title="Scroll Genres Right"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          </div>
+
+          <div
+            ref={genresScrollRef}
+            className="grid grid-rows-2 grid-flow-col auto-cols-max gap-2.5 overflow-x-auto no-scrollbar py-1 scroll-smooth"
+          >
+            {GENRES_LIST.map((genre) => (
+              <button
+                key={genre}
+                onClick={() => setSelectedGenre(genre)}
+                className={`whitespace-nowrap px-4 py-2 rounded-full text-xs font-semibold glass-chip cursor-pointer transition select-none flex items-center justify-center shrink-0 ${
+                  selectedGenre === genre
+                    ? 'active text-white bg-[#7c5cff] shadow-md border-[#7c5cff]/50 font-bold'
+                    : 'text-gray-300 hover:text-white hover:bg-white/10 border-white/10'
+                }`}
+              >
+                {genre}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* 4. CONTINUE WATCHING (USER'S ACTIVE TRACKED ANIME) */}
+        {continueWatchingList.length > 0 && (
+          <section id="continue-watching" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-[#7c5cff]/10 border border-[#7c5cff]/20 text-[#7c5cff]">
+                  <Play size={20} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-extrabold tracking-wide text-white">Continue Watching</h2>
+                  <p className="text-[11px] text-gray-400 font-medium">Resume your local playback progress</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {continueWatchingList.map((anime) => (
+                <div
+                  key={anime.id}
+                  onClick={() => onSelectAnime(anime.id)}
+                  className="glass-card p-4 rounded-2xl flex gap-4 items-center group cursor-pointer"
+                >
+                  <div className="relative w-20 h-24 rounded-xl overflow-hidden bg-[#181c24] flex-shrink-0">
+                    {anime.thumbnailBase64 ? (
+                      <CachedImage src={anime.thumbnailBase64} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                    ) : anime.thumbnailPath ? (
+                      <CachedImage src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                    ) : (
+                      <div className={`w-full h-full bg-gradient-to-br ${anime.coverGradient || 'from-violet-600 to-indigo-700'} flex items-center justify-center font-bold text-white/40 text-xl`}>
+                        {getInitials(anime.title)}
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                      <div className="p-2 rounded-full bg-[#7c5cff] text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Play size={14} fill="white" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <h3 className="font-bold text-sm text-white truncate group-hover:text-[#7c5cff] transition-colors">
+                      {anime.title}
+                    </h3>
+                    <p className="text-[10px] text-gray-400 truncate">
+                      Last watched: {anime.lastWatchedEpisode ? `EP ${anime.lastWatchedEpisode}` : 'In progress'}
+                    </p>
+
+                    <div>
+                      {(() => {
+                        const pct = getAnimeProgressPercent(anime);
+                        return (
+                          <>
+                            <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
+                              <div className="flex items-center gap-1.5 truncate max-w-[70%]">
+                                {Boolean(anime.totalSeasons) && (
+                                  <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-extrabold text-[9px] shrink-0">
+                                    S{anime.totalSeasons}
+                                  </span>
+                                )}
+                                <span className="truncate">
+                                  {anime.totalEpisodes ? (
+                                    anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
+                                      ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
+                                      : `${anime.totalEpisodes} Ep`
+                                  ) : (
+                                    `${anime.episodeCount || 0} Ep`
+                                  )}
+                                </span>
+                              </div>
+                              <span className="font-bold text-[#7c5cff] shrink-0 ml-1">{pct}%</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-[#7c5cff] to-[#a855f7] rounded-full transition-all duration-500"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* 4. TRENDING TODAY */}
         {trendingShows.length > 0 && (
           <section id="trending" className="space-y-4">
             <div className="flex items-center justify-between">
@@ -2130,87 +2587,6 @@ export default function Dashboard({ onSelectAnime }) {
                       <div className="flex items-center justify-between text-[10px] text-gray-400">
                         <span className="text-gray-300 font-medium truncate max-w-[65%]">{show.animeTitle}</span>
                         <span className="px-1.5 py-0.2 rounded bg-white/10 text-white font-mono text-[9px]">{show.episode}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* 4. CONTINUE WATCHING (USER'S ACTIVE TRACKED ANIME) */}
-        {continueWatchingList.length > 0 && (
-          <section id="continue-watching" className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-[#7c5cff]/10 border border-[#7c5cff]/20 text-[#7c5cff]">
-                  <Play size={20} />
-                </div>
-                <div>
-                  <h2 className="text-xl font-extrabold tracking-wide text-white">Continue Watching</h2>
-                  <p className="text-[11px] text-gray-400 font-medium">Resume your local playback progress</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {continueWatchingList.map((anime) => (
-                <div
-                  key={anime.id}
-                  onClick={() => onSelectAnime(anime.id)}
-                  className="glass-card p-4 rounded-2xl flex gap-4 items-center group cursor-pointer"
-                >
-                  <div className="relative w-20 h-24 rounded-xl overflow-hidden bg-[#181c24] flex-shrink-0">
-                    {anime.thumbnailBase64 ? (
-                      <CachedImage src={anime.thumbnailBase64} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                    ) : anime.thumbnailPath ? (
-                      <CachedImage src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                    ) : (
-                      <div className={`w-full h-full bg-gradient-to-br ${anime.coverGradient || 'from-violet-600 to-indigo-700'} flex items-center justify-center font-bold text-white/40 text-xl`}>
-                        {getInitials(anime.title)}
-                      </div>
-                    )}
-                    <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                      <div className="p-2 rounded-full bg-[#7c5cff] text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Play size={14} fill="white" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <h3 className="font-bold text-sm text-white truncate group-hover:text-[#7c5cff] transition-colors">
-                      {anime.title}
-                    </h3>
-                    <p className="text-[10px] text-gray-400 truncate">
-                      Last watched: {anime.lastWatchedEpisode ? `EP ${anime.lastWatchedEpisode}` : 'In progress'}
-                    </p>
-
-                    <div>
-                      <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
-                        <div className="flex items-center gap-1.5 truncate max-w-[70%]">
-                          {Boolean(anime.totalSeasons) && (
-                            <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-extrabold text-[9px] shrink-0">
-                              S{anime.totalSeasons}
-                            </span>
-                          )}
-                          <span className="truncate">
-                            {anime.totalEpisodes ? (
-                              anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
-                                ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
-                                : `${anime.totalEpisodes} Ep`
-                            ) : (
-                              `${anime.episodeCount || 0} Ep`
-                            )}
-                          </span>
-                        </div>
-                        <span className="font-bold text-[#7c5cff] shrink-0 ml-1">{Math.round(anime.progressPercent || 0)}%</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-[#7c5cff] to-[#a855f7] rounded-full transition-all duration-500"
-                          style={{ width: `${anime.progressPercent || 0}%` }}
-                        />
                       </div>
                     </div>
                   </div>
@@ -2443,41 +2819,82 @@ export default function Dashboard({ onSelectAnime }) {
           </section>
         )}
 
-        {/* 7. TOP RATED */}
-        {topRatedAnime.length > 0 && (
-          <section id="top-rated" className="space-y-4">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
-                <Star size={20} className="fill-amber-400" />
+        {/* 7. TOP RATED ANIME (ROW SCROLLABLE) */}
+        {topRatedWithLibrary.length > 0 && (
+          <section id="top-rated-masterpieces" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                  <Star size={20} className="fill-amber-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-extrabold tracking-wide text-white flex items-center gap-2">
+                    Top Rated Anime
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-black uppercase tracking-wider hidden sm:inline">
+                      Masterpieces
+                    </span>
+                  </h2>
+                  <p className="text-[11px] text-gray-400 font-medium">Highest score masterpieces of all time</p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-xl font-extrabold tracking-wide text-white">Top Rated Anime</h2>
-                <p className="text-[11px] text-gray-400 font-medium">Highest score masterpieces of all time</p>
+
+              {/* Arrow navigation controls */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => scrollLocalTopRated('left')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+                  title="Scroll Top Rated Left"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  onClick={() => scrollLocalTopRated('right')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+                  title="Scroll Top Rated Right"
+                >
+                  <ChevronRight size={18} />
+                </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-              {topRatedAnime.map((show, idx) => (
+            <div
+              ref={localTopRatedScrollRef}
+              className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth select-none"
+            >
+              {topRatedWithLibrary.map((show, idx) => (
                 <div
                   key={`top-${show.id}-${idx}`}
-                  onClick={() => onSelectAnime(show.id)}
-                  className="glass-card rounded-2xl p-3 flex flex-col justify-between group cursor-pointer relative overflow-hidden"
+                  onClick={() => {
+                    if (show.isUploaded && show.uploadedAnimeId) {
+                      onSelectAnime(show.uploadedAnimeId);
+                    } else if (show.id && !show.id.startsWith('ext-') && !show.id.startsWith('top-rated-')) {
+                      onSelectAnime(show.id);
+                    } else {
+                      handleAddAnimeToLibrary(null, show);
+                    }
+                  }}
+                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl p-3 flex flex-col justify-between group cursor-pointer relative overflow-hidden border border-white/10 hover:border-amber-500/30 transition-all duration-300"
                 >
-                  <div className="relative h-44 rounded-xl overflow-hidden mb-2 bg-[#181c24] flex items-center justify-center">
-                    <CachedImage src={show.image} alt={show.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded-lg bg-amber-500 text-black font-black text-xs">
+                  <div className="relative h-44 sm:h-48 rounded-xl overflow-hidden mb-2 bg-[#181c24] flex items-center justify-center">
+                    <CachedImage src={show.image} alt={show.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded-lg bg-amber-500 text-black font-black text-xs shadow-md">
                       #{idx + 1}
                     </div>
+                    {show.isUploaded && (
+                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-emerald-500/90 text-white font-extrabold text-[8px] uppercase tracking-wider backdrop-blur-md">
+                        In Library
+                      </div>
+                    )}
                   </div>
                   <div>
-                    <h4 className="font-bold text-xs text-white line-clamp-1 group-hover:text-[#7c5cff] transition-colors">
-                      {show.title}
+                    <h4 className="font-bold text-xs text-white line-clamp-1 group-hover:text-amber-400 transition-colors" title={show.seriesTitle || show.title}>
+                      {show.seriesTitle || show.title}
                     </h4>
                     <div className="flex items-center justify-between text-[10px] text-gray-400 mt-1">
                       <span className="text-amber-400 font-bold flex items-center gap-1">
                         <Star size={10} className="fill-amber-400" /> {show.rating}
                       </span>
-                      <span>{show.episode}</span>
+                      <span className="truncate max-w-[50%] text-gray-400">{show.studio || show.episodes || ''}</span>
                     </div>
                   </div>
                 </div>
@@ -2486,30 +2903,7 @@ export default function Dashboard({ onSelectAnime }) {
           </section>
         )}
 
-        {/* 8. GENRES CATEGORY CHIPS */}
-        <section id="genres" className="space-y-4">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-[#7c5cff]/10 border border-[#7c5cff]/20 text-[#a855f7]">
-              <Compass size={20} />
-            </div>
-            <div>
-              <h2 className="text-xl font-extrabold tracking-wide text-white">Explore Genres</h2>
-              <p className="text-[11px] text-gray-400 font-medium">Filter catalog by your favorite category</p>
-            </div>
-          </div>
 
-          <div className="flex flex-wrap gap-2.5">
-            {GENRES_LIST.map((genre) => (
-              <button
-                key={genre}
-                onClick={() => setSelectedGenre(genre)}
-                className={`px-4 py-2 rounded-full text-xs font-semibold glass-chip cursor-pointer transition ${selectedGenre === genre ? 'active text-white' : 'text-gray-300 hover:text-white'}`}
-              >
-                {genre}
-              </button>
-            ))}
-          </div>
-        </section>
 
         {/* 9. LATEST RELEASES & LOCAL LIBRARY CATALOG */}
         <section id="catalog" className="space-y-6 pt-4">
@@ -2663,15 +3057,18 @@ export default function Dashboard({ onSelectAnime }) {
 
                     {/* Status Badge */}
                     <div className="absolute top-2.5 left-2.5">
-                      {anime.progressPercent === 100 ? (
-                        <span className="px-2 py-0.5 rounded bg-emerald-500/90 text-[9px] uppercase font-bold text-white flex items-center gap-1">
-                          <CheckCircle2 size={10} /> Completed
-                        </span>
-                      ) : anime.progressPercent > 0 ? (
-                        <span className="px-2 py-0.5 rounded bg-[#7c5cff]/90 text-[9px] uppercase font-bold text-white">
-                          Watching
-                        </span>
-                      ) : null}
+                      {(() => {
+                        const pct = getAnimeProgressPercent(anime);
+                        return pct === 100 ? (
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/90 text-[9px] uppercase font-bold text-white flex items-center gap-1">
+                            <CheckCircle2 size={10} /> Completed
+                          </span>
+                        ) : pct > 0 ? (
+                          <span className="px-2 py-0.5 rounded bg-[#7c5cff]/90 text-[9px] uppercase font-bold text-white">
+                            Watching
+                          </span>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
 
@@ -2687,31 +3084,38 @@ export default function Dashboard({ onSelectAnime }) {
                     </div>
 
                     <div className="mt-2">
-                      <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
-                        <div className="flex items-center gap-1.5 truncate max-w-[70%]">
-                          {Boolean(anime.totalSeasons) && (
-                            <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-extrabold text-[9px] shrink-0">
-                              S{anime.totalSeasons}
-                            </span>
-                          )}
-                          <span className="truncate" title={anime.totalEpisodes ? `${anime.totalEpisodes} Total Episodes (${anime.episodeCount || 0} local)` : `${anime.episodeCount || 0} Episodes`}>
-                            {anime.totalEpisodes ? (
-                              anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
-                                ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
-                                : `${anime.totalEpisodes} Episodes`
-                            ) : (
-                              `${anime.episodeCount || 0} Episodes`
-                            )}
-                          </span>
-                        </div>
-                        <span className="font-bold text-white shrink-0 ml-1">{Math.round(anime.progressPercent || 0)}%</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-500 ${anime.progressPercent === 100 ? 'bg-emerald-500' : 'bg-gradient-to-r from-[#7c5cff] to-[#a855f7]'}`}
-                          style={{ width: `${anime.progressPercent || 0}%` }}
-                        />
-                      </div>
+                      {(() => {
+                        const pct = getAnimeProgressPercent(anime);
+                        return (
+                          <>
+                            <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
+                              <div className="flex items-center gap-1.5 truncate max-w-[70%]">
+                                {Boolean(anime.totalSeasons) && (
+                                  <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-extrabold text-[9px] shrink-0">
+                                    S{anime.totalSeasons}
+                                  </span>
+                                )}
+                                <span className="truncate" title={anime.totalEpisodes ? `${anime.totalEpisodes} Total Episodes (${anime.episodeCount || 0} local)` : `${anime.episodeCount || 0} Episodes`}>
+                                  {anime.totalEpisodes ? (
+                                    anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
+                                      ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
+                                      : `${anime.totalEpisodes} Episodes`
+                                  ) : (
+                                    `${anime.episodeCount || 0} Episodes`
+                                  )}
+                                </span>
+                              </div>
+                              <span className="font-bold text-white shrink-0 ml-1">{pct}%</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ${pct === 100 ? 'bg-emerald-500' : 'bg-gradient-to-r from-[#7c5cff] to-[#a855f7]'}`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -2736,6 +3140,203 @@ export default function Dashboard({ onSelectAnime }) {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+        </section>
+
+        {/* 10. TOP 20 TOP-RATED EPISODES (LAZY-LOADED, DAILY SYNC) */}
+        <section id="top-rated" ref={lazyTopRatedRef} className="space-y-4 pt-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                <Trophy size={20} />
+              </div>
+              <div>
+                <h2 className="text-xl font-extrabold tracking-wide text-white flex items-center gap-2">
+                  Top 20 Top-Rated Episodes
+                  <span className="px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-yellow-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-black uppercase tracking-wider hidden sm:inline">
+                    Top 20 Episodes
+                  </span>
+                </h2>
+                <p className="text-[11px] text-gray-400 font-medium">
+                  Highest rated anime episodes & landmark chapters · Compared with your personal library ratings
+                </p>
+              </div>
+            </div>
+
+            {/* Scroll Navigation Arrows */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => scrollTopRated('left')}
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+                title="Scroll Top Rated Left"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <button
+                onClick={() => scrollTopRated('right')}
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+                title="Scroll Top Rated Right"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          </div>
+
+          {/* Top Rated Cards Compact Horizontal Slider */}
+          {!hasScrolledToTopRated || loadingTopRated ? (
+            <div className="flex gap-3 overflow-x-auto no-scrollbar py-2">
+              {[1, 2, 3, 4, 5, 6, 7].map((idx) => (
+                <div key={idx} className="flex-none w-40 sm:w-44 md:w-48 h-56 sm:h-60 md:h-64 rounded-2xl bg-white/5 shimmer border border-white/5" />
+              ))}
+            </div>
+          ) : topRatedWithLibrary.length === 0 ? (
+            <div className="p-8 rounded-2xl glass-panel text-center text-xs text-gray-400 border border-white/10">
+              No top-rated data available at the moment.
+            </div>
+          ) : (
+            <div
+              ref={topRatedScrollRef}
+              onMouseDown={handleTopRatedMouseDown}
+              onMouseMove={handleTopRatedMouseMove}
+              onMouseUp={handleTopRatedMouseUp}
+              onMouseLeave={handleTopRatedMouseLeave}
+              className="flex gap-3 overflow-x-auto no-scrollbar py-2 scroll-smooth select-none cursor-grab active:cursor-grabbing"
+            >
+              {topRatedWithLibrary.map((show) => {
+                const isGold = show.rank === 1;
+                const isSilver = show.rank === 2;
+                const isBronze = show.rank === 3;
+
+                return (
+                  <div
+                    key={show.id}
+                    onClick={() => {
+                      if (topRatedHasDragged) return;
+                      if (show.isUploaded && show.uploadedAnimeId) {
+                        onSelectAnime(show.uploadedAnimeId);
+                      }
+                    }}
+                    className="flex-none w-40 sm:w-44 md:w-48 group cursor-pointer"
+                  >
+                    <div className="relative h-56 sm:h-60 md:h-64 rounded-2xl overflow-hidden glass-card border border-white/10 hover:border-amber-500/40 transition-all duration-300 shadow-md">
+                      <CachedImage
+                        src={show.image}
+                        alt={show.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#0b0d12] via-[#0b0d12]/30 to-transparent opacity-90 group-hover:opacity-95 transition-opacity" />
+
+                      {/* Rank Podium Badge */}
+                      <div className="absolute top-2 left-2 z-20">
+                        {isGold ? (
+                          <div className="px-2 py-0.5 rounded-lg bg-gradient-to-r from-amber-400 to-yellow-500 text-black font-black text-[11px] tracking-wider shadow-[0_0_12px_rgba(245,158,11,0.6)] ring-1 ring-yellow-200 flex items-center gap-1">
+                            <Trophy size={10} fill="black" /> #1
+                          </div>
+                        ) : isSilver ? (
+                          <div className="px-2 py-0.5 rounded-lg bg-gradient-to-r from-slate-200 to-gray-400 text-black font-black text-[11px] tracking-wider shadow-md ring-1 ring-white/50 flex items-center gap-1">
+                            <Award size={10} /> #2
+                          </div>
+                        ) : isBronze ? (
+                          <div className="px-2 py-0.5 rounded-lg bg-gradient-to-r from-amber-700 to-amber-900 text-amber-100 font-black text-[11px] tracking-wider shadow-md ring-1 ring-amber-500/50 flex items-center gap-1">
+                            <Award size={10} /> #3
+                          </div>
+                        ) : (
+                          <div className="px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md border border-white/10 text-amber-400 font-black text-[11px] tracking-wider shadow-lg">
+                            #{show.rank}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* In Library Badge / User Rated Tag */}
+                      <div className="absolute top-2 right-2 z-20">
+                        {show.isUploaded ? (
+                          <span className="px-1.5 py-0.5 rounded-full text-[8px] font-extrabold uppercase tracking-wider bg-emerald-500/90 text-white shadow-md flex items-center gap-0.5 backdrop-blur-md">
+                            <CheckCircle2 size={8} /> In Library
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenExternalAnime(e, show)}
+                            className="p-1 rounded-lg bg-black/80 hover:bg-amber-500 text-amber-300 hover:text-black border border-white/10 hover:border-amber-500/40 transition shadow-md backdrop-blur-md cursor-pointer"
+                            title="Open Online Details (AniList / MAL)"
+                          >
+                            <ExternalLink size={10} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Rating & Format Badges */}
+                      <div className="absolute bottom-14 inset-x-2 flex items-center justify-between pointer-events-none">
+                        <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider shadow-md backdrop-blur-md bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                          {show.type} {show.year ? `· ${show.year}` : ''}
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold flex items-center gap-0.5 border shadow-[0_0_8px_rgba(245,158,11,0.3)] backdrop-blur-md ${
+                          show.userCustomRating
+                            ? 'bg-amber-500 text-black border-amber-400 font-black ring-1 ring-yellow-200'
+                            : 'bg-black/70 text-amber-400 border-amber-500/20'
+                        }`}>
+                          <Star size={9} className={show.userCustomRating ? 'fill-black text-black' : 'fill-amber-400 text-amber-400'} />
+                          {show.rating}
+                          {show.userCustomRating && <span className="text-[7px] uppercase font-black ml-0.5">My Rating</span>}
+                        </span>
+                      </div>
+
+                      {/* Play / Add Hover Overlay */}
+                      <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col items-center justify-center gap-1.5 p-2 z-10 backdrop-blur-xs">
+                        {show.isUploaded ? (
+                          <div className="p-3 rounded-full bg-amber-500 text-black shadow-xl transform scale-75 group-hover:scale-100 transition-transform duration-300 flex items-center justify-center">
+                            <Play size={20} fill="black" />
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-1.5 w-full max-w-[130px]">
+                            <button
+                              type="button"
+                              onClick={(e) => handleAddAnimeToLibrary(e, show)}
+                              className="w-full px-2 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-black text-[10px] font-black uppercase tracking-wider shadow-lg flex items-center justify-center gap-1 transition-all transform active:scale-95 cursor-pointer"
+                            >
+                              <Plus size={12} /> Add to Library
+                            </button>
+                            <div className="flex items-center gap-1 w-full">
+                              <button
+                                type="button"
+                                onClick={(e) => handleOpenExternalAnime(e, show)}
+                                className="flex-1 px-1 py-1 rounded-lg bg-white/15 hover:bg-white/25 border border-white/20 text-cyan-300 hover:text-white text-[9px] font-bold shadow-md flex items-center justify-center gap-0.5 transition cursor-pointer backdrop-blur-md"
+                                title="View Details on AniList"
+                              >
+                                <Globe size={9} /> AniList
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => handleOpenMalSearch(e, show)}
+                                className="flex-1 px-1 py-1 rounded-lg bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/30 text-blue-300 hover:text-white text-[9px] font-bold shadow-md flex items-center justify-center gap-0.5 transition cursor-pointer backdrop-blur-md"
+                                title="View Details on MyAnimeList"
+                              >
+                                <ExternalLink size={9} /> MAL
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Bottom Text - Episode Name First, Series Name Subtitle */}
+                      <div className="absolute bottom-0 inset-x-0 p-2.5 space-y-0.5 bg-gradient-to-t from-black via-black/80 to-transparent">
+                        <h3 className="font-extrabold text-xs text-white line-clamp-1 group-hover:text-amber-400 transition-colors" title={show.episodeName || show.title}>
+                          {show.episodeName || show.title}
+                        </h3>
+                        <div className="flex items-center justify-between text-[9px] text-gray-400">
+                          <span className="text-gray-300 font-medium truncate max-w-[68%]" title={show.seriesTitle || show.animeTitle || show.subTitle || show.studio}>
+                            {show.seriesTitle || show.animeTitle || show.subTitle || show.studio}
+                          </span>
+                          <span className="px-1 py-0.2 rounded bg-white/10 text-white font-mono text-[8px] shrink-0">
+                            {show.episodes || show.episodeLabel || 'Ep'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
@@ -2766,9 +3367,10 @@ export default function Dashboard({ onSelectAnime }) {
             <h4 className="text-xs font-bold uppercase tracking-wider text-white mb-3">Quick Navigation</h4>
             <ul className="space-y-2 text-xs">
               <li><a href="#hero" className="hover:text-white transition">Home Spotlight</a></li>
-              <li><a href="#trending" className="hover:text-white transition">Trending Today</a></li>
               <li><a href="#continue-watching" className="hover:text-white transition">Continue Watching</a></li>
+              <li><a href="#trending" className="hover:text-white transition">Trending Today</a></li>
               <li><a href="#catalog" className="hover:text-white transition">Local Catalog</a></li>
+              <li><a href="#top-rated" className="hover:text-white transition flex items-center gap-1.5"><span className="text-amber-400">★</span> Top 20 Rated</a></li>
             </ul>
           </div>
 

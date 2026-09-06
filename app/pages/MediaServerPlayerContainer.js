@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, Server, HardDrive } from 'lucide-react';
 import MediaServerPlayer from '../components/player/MediaServerPlayer';
-import { getLocalAnime } from '../utils/localStore';
+import { getLocalAnime, getLocalEpisodes } from '../utils/localStore';
 
 export default function MediaServerPlayerContainer({
   animeId,
@@ -27,45 +27,56 @@ export default function MediaServerPlayerContainer({
     }
   }, [animeId]);
 
-  const currentEpisode = episodes.find((e) => e.id === currentEpisodeId) || episodes[0];
+  const storedEps = (typeof window !== 'undefined' && animeId) ? getLocalEpisodes(animeId) : [];
+  const mergedEpisodes = (episodes && episodes.length > 0)
+    ? episodes.map(ep => {
+        const s = storedEps?.find(x => x.id === ep.id);
+        return s ? { ...ep, ...s } : ep;
+      })
+    : (storedEps || []);
+
+  const currentEpisode = mergedEpisodes.find((e) => e.id === currentEpisodeId) || mergedEpisodes[0];
 
   return (
-    <div className="min-h-screen bg-[#07090f] text-white flex flex-col">
-      {/* ── Top Navigation Bar ───────────────────────────────── */}
-      <header className="h-14 px-4 md:px-6 bg-[#0c101c]/80 backdrop-blur-md border-b border-white/5 flex items-center justify-between z-10 shrink-0 sticky top-0">
-        <div className="flex items-center gap-3">
+    <div className="min-h-screen bg-[#07090f] text-white flex flex-col relative">
+      {/* ── Top Navigation Bar (Completely Transparent - No Blur / No Glass - Scrollable) ─────────────────── */}
+      <header
+        className="h-14 px-4 md:px-4 bg-transparent flex items-center justify-between z-20 shrink-0 absolute top-0 inset-x-0 pointer-events-none"
+        style={{ background: 'transparent', backgroundColor: 'transparent' }}
+      >
+        <div className="flex items-center gap-3 pointer-events-auto">
           <button
             onClick={onBack}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white text-xs font-bold transition cursor-pointer border border-white/5"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-transparent hover:bg-white/10 border border-white/15 text-gray-300 hover:text-white text-xs font-semibold transition-all cursor-pointer"
           >
             <ChevronLeft size={16} />
             <span>Back</span>
           </button>
 
           <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-lg bg-pink-500/20 text-pink-300 border border-pink-500/30 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+            <span className="px-2.5 py-0.5 rounded-lg bg-transparent border border-pink-500/30 text-pink-300 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5">
               <Server size={11} className="text-pink-400" />
               Windows Media Server
             </span>
             <span className="text-gray-600 hidden sm:inline">•</span>
-            <span className="text-xs font-bold text-gray-200 truncate max-w-[200px] md:max-w-md">
+            <span className="text-xs font-semibold text-gray-200 truncate max-w-[200px] md:max-w-md drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
               {animeDetails?.title || animeId}
             </span>
           </div>
         </div>
 
-        <div className="text-xs font-semibold text-gray-400 hidden sm:block">
-          Episode {currentEpisode?.episodeNumber || 1} of {episodes.length}
+        <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-transparent border border-white/15 text-[11px] font-mono text-gray-300 pointer-events-auto">
+          Episode <span className="text-pink-400 font-bold">{currentEpisode?.episodeNumber || 1}</span> of {episodes.length}
         </div>
       </header>
 
-      {/* ── Main Area ──────────────────────────────────────────────────────── */}
-      <main className="flex-1 w-full overflow-x-hidden">
+      {/* ── Main Area (Padded so player cards sit cleanly below nav bar without overlap) ── */}
+      <main className="flex-1 w-full overflow-x-hidden pt-14 sm:pt-16">
         {currentEpisode ? (
           <MediaServerPlayer
             animeId={animeId}
             episode={currentEpisode}
-            episodes={episodes}
+            episodes={mergedEpisodes}
             onBack={onBack}
             onEpisodeChange={(newEp) => setCurrentEpisodeId(newEp.id)}
             initialSpeed={initialSpeed}

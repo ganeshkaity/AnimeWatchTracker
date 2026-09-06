@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import fs from 'fs';
+import path from 'path';
 import { NextResponse } from 'next/server';
 import {
   getOrCreateSession,
@@ -76,14 +77,20 @@ export async function GET(request) {
     const targetUrl = videoId.startsWith('http') ? videoId : `https://www.youtube.com/watch?v=${videoId}`;
     const formatSpec = getFormatSpec(quality);
 
-    // Spawn yt-dlp with android,web client to completely prevent 403 Forbidden errors
-    const ytProcess = spawn('yt-dlp', [
+    // Spawn yt-dlp with android,web client and cookies to prevent 403 Forbidden / rate-limiting errors
+    const cookiesPath = path.join(process.cwd(), 'cookies.txt');
+    const ytArgs = [
       '--extractor-args', 'youtube:player_client=android,web',
       '-f', formatSpec,
       '-o', '-',
       '--no-warnings',
-      targetUrl
-    ]);
+    ];
+    if (fs.existsSync(cookiesPath)) {
+      ytArgs.push('--cookies', cookiesPath);
+    }
+    ytArgs.push(targetUrl);
+
+    const ytProcess = spawn('yt-dlp', ytArgs);
 
     // Spawn FFmpeg to remux on-the-fly into fragmented MP4
     const ffmpegArgs = [

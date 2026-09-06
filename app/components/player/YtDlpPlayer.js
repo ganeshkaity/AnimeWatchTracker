@@ -5,10 +5,10 @@ import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   RotateCcw, RotateCw, SkipForward, SkipBack, Settings,
   AlertTriangle, RefreshCw, Subtitles, Check, Server,
-  Sliders, Info, Activity, Radio, ChevronRight, X,
+  Sliders, Info, Activity, Radio, ChevronRight, ChevronLeft, X,
   Search, Menu, Lightbulb, CheckCircle2, Plus, FolderTree,
   Bookmark, Star, Sparkles, SlidersHorizontal, Clock,
-  FileVideo, Percent, StickyNote, Youtube
+  FileVideo, Percent, StickyNote, Youtube, Zap
 } from 'lucide-react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -112,6 +112,25 @@ function getFolderForEp(ep, rootPath) {
   return 'Main Episodes';
 }
 
+/**
+ * Extract natural episode number from filename / path for natural sorting
+ */
+function extractEpNumber(ep) {
+  if (!ep) return null;
+  const name = String(ep.fileName || ep.name || ep.title || ep.filePath || '');
+  // Match patterns: E05, EP 05, EP-05, Episode 5, S01E05, #05, - 05, [05]
+  const m = name.match(/(?:[Ee][Pp][Ii][Ss][Oo][Dd][Ee]|[Ee][Pp]|[Ss]\d{1,2}[Ee]|\b[Ee]|\b#)\s*(\d+(?:\.\d+)?)/i)
+         || name.match(/\[(\d+(?:\.\d+)?)\]/)
+         || name.match(/(?:^|\s|-|_|v\d)(\d{1,4})(?:\s|-|_|\.|\))/);
+  if (m && m[1]) {
+    const p = parseFloat(m[1]);
+    if (!isNaN(p)) return p;
+  }
+  const rawNum = typeof ep.episodeNumber === 'number' ? ep.episodeNumber : parseFloat(ep.episodeNumber);
+  if (!isNaN(rawNum)) return rawNum;
+  return null;
+}
+
 export default function YtDlpPlayer({
   animeId,
   episode,
@@ -160,9 +179,26 @@ export default function YtDlpPlayer({
 
   // ── Quick Controls ─────────────────────────────────────────────────────────
   const [lightOn, setLightOn] = useState(true);
+  const [ambientMode, setAmbientMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('watchanime_ambient_mode');
+      return saved !== null ? saved === 'true' : true;
+    }
+    return true;
+  });
   const [autoPlay, setAutoPlay] = useState(true);
   const [autoNext, setAutoNext] = useState(true);
   const [autoSkipIntro, setAutoSkipIntro] = useState(false);
+
+  const toggleAmbientMode = () => {
+    setAmbientMode((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('watchanime_ambient_mode', String(next));
+      }
+      return next;
+    });
+  };
 
   // ── Subtitles ─────────────────────────────────────────────────────────────
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
@@ -260,14 +296,107 @@ export default function YtDlpPlayer({
     return Math.min(100, Math.round((pos / dur) * 100));
   };
 
+  // ── Overlay Feedback Animations (Seek, Play/Pause, Speed) ──────────────────
+  const [seekFeedback, setSeekFeedback] = useState(null); // { side: 'left' | 'right', text: '10s', key: number }
+  const [playPauseFeedback, setPlayPauseFeedback] = useState(null); // { isPlaying: boolean, key: number }
+  const [speedToast, setSpeedToast] = useState(null); // { speed: number, key: number }
+
+  const seekFeedbackTimeoutRef = useRef(null);
+  const playPauseFeedbackTimeoutRef = useRef(null);
+  const speedToastTimeoutRef = useRef(null);
+
   // ── DOM References ─────────────────────────────────────────────────────────
   const videoRef = useRef(null);
   const videoContainerRef = useRef(null);
+  const ambientCanvasA = useRef(null);
+  const ambientCanvasB = useRef(null);
+  const activeAmbientLayerRef = useRef('A');
+  const ambientTransitionTimeoutRef = useRef(null);
   const controlsTimeoutRef = useRef(null);
   const lastSavedTimeRef = useRef(0);
   const isWatchedMarkedRef = useRef(false);
   const savedPositionRestoredRef = useRef(false);
+  const lastEpisodeIdRef = useRef(null);
   const knownDurationRef = useRef(episode?.durationSeconds || 0);
+
+  // ── YouTube-Style Two-Layer Ambient Crossfade (Flicker-Free Ping-Pong) ────
+  useEffect(() => {
+    if (!ambientMode || isFullscreen) return;
+
+    const cA = ambientCanvasA.current;
+    const cB = ambientCanvasB.current;
+    const video = videoRef.current;
+    if (!cA || !cB || !video) return;
+
+    const ctxA = cA.getContext('2d', { alpha: false, willReadFrequently: false });
+    const ctxB = cB.getContext('2d', { alpha: false, willReadFrequently: false });
+    if (!ctxA || !ctxB) return;
+
+    // Reset initial layer states: Layer A visible, Layer B hidden
+    cA.style.transition = 'none';
+    cB.style.transition = 'none';
+    cA.style.opacity = '1';
+    cA.style.zIndex = '1';
+    cB.style.opacity = '0';
+    cB.style.zIndex = '1';
+    activeAmbientLayerRef.current = 'A';
+
+    let intervalTimer = null;
+    let isTransitioning = false;
+
+    const crossfadeToNewFrame = () => {
+      if (!video || video.ended || video.readyState < 2 || isTransitioning) return;
+
+      const isCurrentA = activeAmbientLayerRef.current === 'A';
+      const hiddenCanvas = isCurrentA ? cB : cA;
+      const visibleCanvas = isCurrentA ? cA : cB;
+      const hiddenCtx = isCurrentA ? ctxB : ctxA;
+
+      try {
+        // 1. Render new downscaled frame completely into the hidden layer first (16x9 px for minimal CPU & RAM usage)
+        hiddenCtx.drawImage(video, 0, 0, 16, 9);
+
+        // 2. Prepare hidden layer on top (zIndex: 2, opacity: 0) while keeping visible layer underneath solid (zIndex: 1, opacity: 1)
+        hiddenCanvas.style.transition = 'none';
+        hiddenCanvas.style.opacity = '0';
+        hiddenCanvas.style.zIndex = '2';
+        visibleCanvas.style.zIndex = '1';
+
+        // Force reflow so zero opacity is committed before transition starts
+        void hiddenCanvas.offsetHeight;
+
+        // 3. Smoothly fade in hidden layer over 600ms (visible layer underneath stays at opacity: 1, preventing any brightness dip or gap)
+        isTransitioning = true;
+        hiddenCanvas.style.transition = 'opacity 600ms ease-in-out';
+        hiddenCanvas.style.opacity = '1';
+
+        // 4. When crossfade completes, reset previous layer to opacity 0 behind the top layer
+        if (ambientTransitionTimeoutRef.current) clearTimeout(ambientTransitionTimeoutRef.current);
+        ambientTransitionTimeoutRef.current = setTimeout(() => {
+          visibleCanvas.style.transition = 'none';
+          visibleCanvas.style.opacity = '0';
+          visibleCanvas.style.zIndex = '1';
+          hiddenCanvas.style.zIndex = '1';
+          activeAmbientLayerRef.current = isCurrentA ? 'B' : 'A';
+          isTransitioning = false;
+        }, 620);
+      } catch (e) {
+        // Silently ignore cross-origin or decode errors
+      }
+    };
+
+    if (playerState === 'playing') {
+      crossfadeToNewFrame();
+      intervalTimer = setInterval(crossfadeToNewFrame, 700);
+    } else if (playerState === 'ready' || playerState === 'paused') {
+      crossfadeToNewFrame();
+    }
+
+    return () => {
+      if (intervalTimer) clearInterval(intervalTimer);
+      if (ambientTransitionTimeoutRef.current) clearTimeout(ambientTransitionTimeoutRef.current);
+    };
+  }, [ambientMode, playerState, isFullscreen]);
 
   // Close remote YT-DLP stream on unmount or episode change
   const closeCurrentStream = useCallback(() => {
@@ -287,7 +416,7 @@ export default function YtDlpPlayer({
     };
   }, [closeCurrentStream]);
 
-  // ── Compute Grouped Episodes ───────────────────────────────────────────────
+  // ── Compute Grouped Episodes with Natural Sorting ──────────────────────────
   const folderGroups = useMemo(() => {
     if (!episodes || episodes.length === 0) return [];
 
@@ -306,18 +435,32 @@ export default function YtDlpPlayer({
       groupsMap.get(folderName).push(ep);
     });
 
+    // Natural sort folders (e.g. Main Episodes first, then Season 1, Season 2, Part 1, Part 2, etc.)
     const sortedFolders = Array.from(groupsMap.keys()).sort((a, b) => {
-      const na = a.match(/\d+/);
-      const nb = b.match(/\d+/);
-      if (na && nb) return parseInt(na[0], 10) - parseInt(nb[0], 10);
+      if (a === 'Main Episodes' && b !== 'Main Episodes') return -1;
+      if (b === 'Main Episodes' && a !== 'Main Episodes') return 1;
       return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
     });
 
+    // Compute continuous index across all folders (First folder Ep 1 = 1, Last folder Ep End = Total)
     let runningGlobalIndex = 1;
 
     return sortedFolders.map((folderName) => {
-      const folderEps = groupsMap.get(folderName);
-      const numberedEps = folderEps.map((ep, localIdx) => {
+      const rawFolderEps = groupsMap.get(folderName) || [];
+      
+      // Naturally sort episodes within this folder by parsed episode number or filename
+      const sortedFolderEps = [...rawFolderEps].sort((a, b) => {
+        const numA = extractEpNumber(a);
+        const numB = extractEpNumber(b);
+        if (numA !== null && numB !== null && numA !== numB) {
+          return numA - numB;
+        }
+        const nameA = String(a.fileName || a.name || a.filePath || a.title || '');
+        const nameB = String(b.fileName || b.name || b.filePath || b.title || '');
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+      });
+
+      const numberedEps = sortedFolderEps.map((ep, localIdx) => {
         const folderEpNum = localIdx + 1;
         const continuousNum = runningGlobalIndex++;
         return {
@@ -336,15 +479,27 @@ export default function YtDlpPlayer({
     });
   }, [episodes, animeId]);
 
+  // Determine active folder ONLY when the episode ID actually changes or on initial load
   useEffect(() => {
-    if (!episode || folderGroups.length === 0) return;
-    const activeGroup = folderGroups.find(g => g.episodes.some(e => e.id === episode.id));
-    if (activeGroup) {
-      setSelectedFolderKey(activeGroup.folderName);
-    } else {
-      setSelectedFolderKey(folderGroups[0].folderName);
+    if (!episode?.id || folderGroups.length === 0) return;
+    if (lastEpisodeIdRef.current !== episode.id) {
+      lastEpisodeIdRef.current = episode.id;
+      const activeGroup = folderGroups.find(g => g.episodes.some(e => e.id === episode.id));
+      if (activeGroup) {
+        setSelectedFolderKey(activeGroup.folderName);
+      } else if (!selectedFolderKey) {
+        setSelectedFolderKey(folderGroups[0].folderName);
+      }
     }
-  }, [episode?.id, folderGroups]);
+  }, [episode?.id]);
+
+  // Fallback initial selection on first render
+  useEffect(() => {
+    if (!selectedFolderKey && folderGroups.length > 0) {
+      const activeGroup = folderGroups.find(g => g.episodes.some(e => e.id === episode?.id));
+      setSelectedFolderKey(activeGroup ? activeGroup.folderName : folderGroups[0].folderName);
+    }
+  }, [folderGroups, episode?.id, selectedFolderKey]);
 
   const visibleEpisodes = useMemo(() => {
     let list = [];
@@ -519,14 +674,18 @@ export default function YtDlpPlayer({
             : e
         );
         setLocalEpisodes(animeId, updated);
-      }
 
-      upsertLocalAnime({
-        id: animeId,
-        lastWatchedEpisode: episode.episodeNumber || '',
-        lastOpenedAt: new Date().toISOString(),
-        progressPercent: progressPct,
-      });
+        const totalAnimeEps = updated.length;
+        const watchedAnimeEps = updated.filter((e) => e.isWatched).length;
+        const animeProgressPercent = totalAnimeEps > 0 ? Math.round((watchedAnimeEps / totalAnimeEps) * 100) : 0;
+
+        upsertLocalAnime({
+          id: animeId,
+          lastWatchedEpisode: episode.episodeNumber ? `EP-${episode.episodeNumber}` : '',
+          lastOpenedAt: new Date().toISOString(),
+          progressPercent: animeProgressPercent,
+        });
+      }
     } catch (e) {
       console.warn('[YtDlpPlayer] LocalStore sync error:', e);
     }
@@ -539,6 +698,18 @@ export default function YtDlpPlayer({
           durationSeconds: Math.floor(currentDuration),
           lastPositionSeconds: roundTime,
           isWatched: shouldMarkWatched,
+          updatedAt: new Date().toISOString(),
+        }).catch(() => {});
+
+        const animeRef = doc(db, 'users', currentUser.uid, 'anime', animeId);
+        const storedEps = getLocalEpisodes(animeId) || [];
+        const totalAnimeEps = storedEps.length;
+        const watchedAnimeEps = storedEps.filter((e) => e.isWatched).length;
+        const animeProgressPercent = totalAnimeEps > 0 ? Math.round((watchedAnimeEps / totalAnimeEps) * 100) : 0;
+        updateDoc(animeRef, {
+          progressPercent: animeProgressPercent,
+          lastWatchedEpisode: episode.episodeNumber ? `EP-${episode.episodeNumber}` : '',
+          lastOpenedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         }).catch(() => {});
       } catch (err) {
@@ -647,10 +818,18 @@ export default function YtDlpPlayer({
 
   const handlePlay = () => {
     setPlayerState('playing');
+    setShowControls(true);
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    controlsTimeoutRef.current = setTimeout(() => {
+      setShowControls(false);
+      setSpeedMenuOpen(false);
+    }, 3000);
   };
 
   const handlePause = () => {
     setPlayerState('paused');
+    setShowControls(true);
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     if (videoRef.current) {
       syncProgressToStore(videoRef.current.currentTime, duration);
     }
@@ -688,46 +867,79 @@ export default function YtDlpPlayer({
     );
   };
 
+  // ── Overlay Feedback Triggers ─────────────────────────────────────────────
+  const triggerSpeedToast = useCallback((spd) => {
+    if (speedToastTimeoutRef.current) clearTimeout(speedToastTimeoutRef.current);
+    setSpeedToast({ speed: spd, key: Date.now() });
+    speedToastTimeoutRef.current = setTimeout(() => {
+      setSpeedToast(null);
+    }, 850);
+  }, []);
+
+  const triggerSeekAnimation = useCallback((side, text = '10s') => {
+    if (seekFeedbackTimeoutRef.current) clearTimeout(seekFeedbackTimeoutRef.current);
+    setSeekFeedback({ side, text, key: Date.now() });
+    seekFeedbackTimeoutRef.current = setTimeout(() => {
+      setSeekFeedback(null);
+    }, 700);
+  }, []);
+
+  const triggerPlayPauseAnimation = useCallback((isPlaying) => {
+    if (playPauseFeedbackTimeoutRef.current) clearTimeout(playPauseFeedbackTimeoutRef.current);
+    setPlayPauseFeedback({ isPlaying, key: Date.now() });
+    playPauseFeedbackTimeoutRef.current = setTimeout(() => {
+      setPlayPauseFeedback(null);
+    }, 700);
+  }, []);
+
   // ── Playback Controls ──────────────────────────────────────────────────────
-  const togglePlay = () => {
+  const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
 
     if (video.paused) {
       video.play().catch(() => {});
+      triggerPlayPauseAnimation(true);
     } else {
       video.pause();
+      triggerPlayPauseAnimation(false);
     }
-  };
+  }, [triggerPlayPauseAnimation]);
 
-  const handleSeek = (newTime) => {
+  const handleSeek = useCallback((newTime) => {
     const video = videoRef.current;
     if (!video) return;
 
     const clamped = Math.max(0, Math.min(newTime, duration || 999999));
     video.currentTime = clamped;
     setCurrentTime(clamped);
-  };
+  }, [duration]);
 
-  const skipSeconds = (delta) => {
+  const skipSeconds = useCallback((delta) => {
     const video = videoRef.current;
     if (!video) return;
-    handleSeek(video.currentTime + delta);
-  };
 
-  const handleSpeedChange = (speed) => {
-    setPlaybackSpeed(speed);
-    setCustomSpeedInput(String(speed));
+    triggerSeekAnimation(delta > 0 ? 'right' : 'left', `${Math.abs(delta)}s`);
+    handleSeek(video.currentTime + delta);
+  }, [handleSeek, triggerSeekAnimation]);
+
+  const handleSpeedChange = useCallback((speed, showToast = false) => {
+    const clamped = Math.max(0.25, Math.min(10.0, Math.round((parseFloat(speed) || 1.0) * 100) / 100));
+    setPlaybackSpeed(clamped);
+    setCustomSpeedInput(String(clamped));
     if (videoRef.current) {
-      videoRef.current.playbackRate = speed;
+      videoRef.current.playbackRate = clamped;
     }
-  };
+    if (showToast) {
+      triggerSpeedToast(clamped);
+    }
+  }, [triggerSpeedToast]);
 
   const handleCustomSpeedSubmit = (e) => {
     e?.preventDefault();
     const parsed = parseFloat(customSpeedInput);
     if (!isNaN(parsed) && parsed >= 0.1 && parsed <= 10) {
-      handleSpeedChange(parsed);
+      handleSpeedChange(parsed, true);
     }
   };
 
@@ -771,6 +983,21 @@ export default function YtDlpPlayer({
     }
   };
 
+  // Picture in Picture
+  const togglePiP = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        await video.requestPictureInPicture();
+      }
+    } catch (e) {
+      console.warn('[YtDlpPlayer] PiP error:', e);
+    }
+  };
+
   // Next / Previous Episode Navigation
   const currentEpIndex = episodes.findIndex((e) => e.id === episode?.id);
   const hasNext = currentEpIndex !== -1 && currentEpIndex < episodes.length - 1;
@@ -789,22 +1016,44 @@ export default function YtDlpPlayer({
   };
 
   // Controls Visibility Auto-Hide
-  const handleMouseMove = () => {
+  const handleMouseMove = useCallback(() => {
     setShowControls(true);
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
     }
-    controlsTimeoutRef.current = setTimeout(() => {
-      if (playerState === 'playing') {
+    const video = videoRef.current;
+    const isPlaying = video ? !video.paused : playerState === 'playing';
+    if (isPlaying) {
+      controlsTimeoutRef.current = setTimeout(() => {
         setShowControls(false);
-      }
-    }, 3200);
-  };
+        setSpeedMenuOpen(false);
+      }, 3000);
+    }
+  }, [playerState]);
 
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+
+      // Speed Up: Shift + > or >
+      const isSpeedUp = (e.shiftKey && (e.key === '>' || e.key === '.' || e.code === 'Period')) || e.key === '>';
+      // Speed Down: Shift + < or <
+      const isSpeedDown = (e.shiftKey && (e.key === '<' || e.key === ',' || e.code === 'Comma')) || e.key === '<';
+
+      if (isSpeedUp) {
+        e.preventDefault();
+        const nextSpeed = Math.min(10.0, Math.round((playbackSpeed + 0.5) * 10) / 10);
+        handleSpeedChange(nextSpeed, true);
+        return;
+      }
+
+      if (isSpeedDown) {
+        e.preventDefault();
+        const nextSpeed = Math.max(0.25, Math.round((playbackSpeed - 0.5) * 10) / 10);
+        handleSpeedChange(nextSpeed, true);
+        return;
+      }
 
       switch (e.key.toLowerCase()) {
         case ' ':
@@ -848,12 +1097,14 @@ export default function YtDlpPlayer({
         case 'p':
           if (hasPrev) handlePrevEpisode();
           break;
+        default:
+          break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [playerState, volume, isMuted, hasNext, hasPrev, duration]);
+  }, [togglePlay, skipSeconds, volume, playbackSpeed, handleSpeedChange, hasNext, hasPrev]);
 
   // Scrubber percentage
   const currentPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -864,7 +1115,6 @@ export default function YtDlpPlayer({
       className={`min-h-screen flex flex-col lg:flex-row bg-[#07090f] text-white select-none transition-colors duration-500 ${
         lightOn ? '' : 'bg-black'
       }`}
-      onMouseMove={handleMouseMove}
     >
       {/* ── Ambient Glowing Backdrop ────────────────────────────────────────── */}
       {lightOn && (
@@ -982,9 +1232,9 @@ export default function YtDlpPlayer({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-black text-white">
-                        Ep {ep.continuousNum || ep.episodeNumber || 1}
+                        Ep {selectedFolderKey === 'ALL' ? (ep.continuousNum || ep.folderEpNum || ep.episodeNumber || 1) : (ep.folderEpNum || ep.episodeNumber || 1)}
                       </span>
-                      {ep.folderEpNum && folderGroups.length > 1 && (
+                      {ep.folderEpNum && selectedFolderKey === 'ALL' && folderGroups.length > 1 && (
                         <span className="text-[10px] text-gray-500 font-bold">
                           ({ep.folderName}: #{ep.folderEpNum})
                         </span>
@@ -1016,10 +1266,51 @@ export default function YtDlpPlayer({
       </aside>
 
       {/* ── RIGHT MAIN AREA: Video Viewport & Floating Controls ──────────────── */}
-      <main className="flex-1 flex flex-col order-1 lg:order-2 overflow-hidden">
+      <main className="flex-1 flex flex-col order-1 lg:order-2 overflow-hidden relative">
+        {/* Ambient Glow Canvas Backdrop (YouTube Style Two-Layer Ping-Pong Crossfade) */}
+        {ambientMode && !isFullscreen && (
+          <div
+            className="absolute -top-8 sm:-top-14 -inset-x-4 sm:-inset-x-8 -bottom-4 sm:-bottom-8 pointer-events-none -z-10 rounded-3xl overflow-hidden transition-opacity duration-700 ease-out"
+            style={{
+              opacity: playerState === 'playing' ? 0.75 : 0.3,
+              filter: 'blur(50px) saturate(2.0)',
+              transform: 'scale(1.08)',
+            }}
+          >
+            <canvas
+              ref={ambientCanvasA}
+              width={16}
+              height={9}
+              className="absolute inset-0 w-full h-full object-cover will-change-[opacity]"
+              style={{ opacity: 1, zIndex: 1 }}
+            />
+            <canvas
+              ref={ambientCanvasB}
+              width={16}
+              height={9}
+              className="absolute inset-0 w-full h-full object-cover will-change-[opacity]"
+              style={{ opacity: 0, zIndex: 1 }}
+            />
+          </div>
+        )}
+
         {/* Fullscreenable Video Wrapper */}
         <div
           ref={videoContainerRef}
+          onClick={(e) => {
+            if (e.target.closest('button, input, select, [role="slider"], [role="menu"], .custom-scrollbar')) return;
+            togglePlay();
+          }}
+          onMouseMove={handleMouseMove}
+          onMouseEnter={handleMouseMove}
+          onMouseLeave={() => {
+            const video = videoRef.current;
+            if (video && !video.paused) {
+              if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+              setShowControls(false);
+              setSpeedMenuOpen(false);
+            }
+          }}
           className="relative flex-1 flex items-center justify-center bg-black overflow-hidden group"
           style={{ minHeight: isFullscreen ? '100vh' : '58vh' }}
         >
@@ -1107,10 +1398,86 @@ export default function YtDlpPlayer({
             </div>
           )}
 
+          {/* ── Visual Overlays & Animations ─────────────────────────────── */}
+          {/* Left-side Rewind 10s Vignette & Chevron Animation */}
+          {seekFeedback && seekFeedback.side === 'left' && (
+            <div
+              key={`yt-seek-left-${seekFeedback.key}`}
+              className="absolute inset-y-0 left-0 w-2/5 sm:w-1/3 pointer-events-none z-30 flex items-center justify-start pl-6 sm:pl-12 animate-seek-left overflow-hidden"
+              style={{
+                background: 'radial-gradient(ellipse 100% 100% at 0% 50%, rgba(0, 240, 255, 0.25) 0%, rgba(0, 240, 255, 0.08) 50%, transparent 100%)',
+              }}
+            >
+              <div className="flex flex-col items-center gap-1 text-white select-none drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)]">
+                <div className="flex items-center text-cyan-300">
+                  <ChevronLeft size={30} strokeWidth={3} className="animate-chevron-left-3 -mr-3" />
+                  <ChevronLeft size={30} strokeWidth={3} className="animate-chevron-left-2 -mr-3" />
+                  <ChevronLeft size={30} strokeWidth={3} className="animate-chevron-left-1" />
+                </div>
+                <span className="text-xs sm:text-sm font-black tracking-wider uppercase bg-black/60 px-3 py-0.5 rounded-full border border-cyan-400/30 text-cyan-300 shadow-md">
+                  {seekFeedback.text}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Right-side Forward 10s Vignette & Chevron Animation */}
+          {seekFeedback && seekFeedback.side === 'right' && (
+            <div
+              key={`yt-seek-right-${seekFeedback.key}`}
+              className="absolute inset-y-0 right-0 w-2/5 sm:w-1/3 pointer-events-none z-30 flex items-center justify-end pr-6 sm:pr-12 animate-seek-right overflow-hidden"
+              style={{
+                background: 'radial-gradient(ellipse 100% 100% at 100% 50%, rgba(0, 240, 255, 0.25) 0%, rgba(0, 240, 255, 0.08) 50%, transparent 100%)',
+              }}
+            >
+              <div className="flex flex-col items-center gap-1 text-white select-none drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)]">
+                <div className="flex items-center text-cyan-300">
+                  <ChevronRight size={30} strokeWidth={3} className="animate-chevron-right-1 -mr-3" />
+                  <ChevronRight size={30} strokeWidth={3} className="animate-chevron-right-2 -mr-3" />
+                  <ChevronRight size={30} strokeWidth={3} className="animate-chevron-right-3" />
+                </div>
+                <span className="text-xs sm:text-sm font-black tracking-wider uppercase bg-black/60 px-3 py-0.5 rounded-full border border-cyan-400/30 text-cyan-300 shadow-md">
+                  {seekFeedback.text}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Center Screen Play / Pause Pop Animation Feedback */}
+          {playPauseFeedback && (
+            <div
+              key={`yt-playpause-${playPauseFeedback.key}`}
+              className="absolute inset-0 flex items-center justify-center pointer-events-none z-30 select-none"
+            >
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-black/65 backdrop-blur-md border border-cyan-400/30 flex items-center justify-center text-white shadow-[0_0_40px_rgba(0,0,0,0.8)] animate-play-pause-pop">
+                {playPauseFeedback.isPlaying ? (
+                  <Play size={32} fill="white" className="translate-x-0.5 text-white" />
+                ) : (
+                  <Pause size={32} fill="white" className="text-white" />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Top-Center Playback Speed Indicator Toast */}
+          {speedToast && (
+            <div
+              key={`yt-speed-${speedToast.key}`}
+              className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-none z-30 select-none animate-speed-toast"
+            >
+              <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-black/75 backdrop-blur-md border border-amber-400/40 text-amber-300 shadow-[0_0_25px_rgba(251,191,36,0.35)]">
+                <Zap size={14} className="text-amber-400 fill-amber-400 animate-pulse" />
+                <span className="text-xs sm:text-sm font-black tracking-wide font-mono">
+                  {speedToast.speed}x Speed
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Top Quick Bar (Lights, Intro Skip, Next, Ambient) */}
           <div
             className={`absolute top-4 inset-x-4 flex items-center justify-between pointer-events-none transition-opacity duration-300 z-30 ${
-              showControls || playerState === 'paused' ? 'opacity-100' : 'opacity-0'
+              showControls || playerState === 'paused' || playerState === 'idle' ? 'opacity-100' : 'opacity-0'
             }`}
           >
             <div className="flex items-center gap-2 pointer-events-auto">
@@ -1159,7 +1526,7 @@ export default function YtDlpPlayer({
           {/* ── Floating Controls Bar ────────────────────────────────────────── */}
           <div
             className={`absolute bottom-4 inset-x-4 max-w-5xl mx-auto rounded-2xl bg-black/80 backdrop-blur-xl border border-white/10 p-3 flex flex-col gap-2 shadow-2xl transition-all duration-300 z-30 ${
-              showControls || playerState === 'paused'
+              showControls || playerState === 'paused' || playerState === 'idle'
                 ? 'opacity-100 translate-y-0 pointer-events-auto'
                 : 'opacity-0 translate-y-4 pointer-events-none'
             }`}
@@ -1228,7 +1595,7 @@ export default function YtDlpPlayer({
                   <SkipForward size={16} />
                 </button>
 
-                {/* Volume Slider */}
+                {/* Volume Slider with Colored Fill */}
                 <div className="flex items-center gap-1.5 group/vol">
                   <button
                     onClick={toggleMute}
@@ -1243,7 +1610,10 @@ export default function YtDlpPlayer({
                     step={0.05}
                     value={isMuted ? 0 : volume}
                     onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                    className="w-16 h-1 accent-cyan-400 bg-white/20 rounded-full cursor-pointer hidden sm:block"
+                    style={{
+                      background: `linear-gradient(to right, #00f0ff ${(isMuted ? 0 : volume) * 100}%, rgba(255, 255, 255, 0.2) ${(isMuted ? 0 : volume) * 100}%)`,
+                    }}
+                    className="w-16 sm:w-20 h-1.5 accent-cyan-400 rounded-full cursor-pointer hidden sm:block appearance-none"
                   />
                 </div>
 
@@ -1253,7 +1623,7 @@ export default function YtDlpPlayer({
                 </div>
               </div>
 
-              {/* Right Actions (Quality, Speed, Subtitles, Fullscreen) */}
+              {/* Right Actions (Quality, Speed, Subtitles, Ambient, PiP, Fullscreen) */}
               <div className="flex items-center gap-2">
                 {/* Quality Selector */}
                 <div className="relative">
@@ -1288,8 +1658,8 @@ export default function YtDlpPlayer({
                   )}
                 </div>
 
-                {/* Subtitles Toggle & Settings */}
-                <div className="relative flex items-center gap-1">
+                {/* Subtitles Toggle & In-Player Settings Popover */}
+                <div className="relative group/subsettings flex items-center gap-1">
                   <button
                     onClick={() => setSubtitlesEnabled((s) => !s)}
                     className={`p-2 rounded-xl transition cursor-pointer border ${
@@ -1304,28 +1674,200 @@ export default function YtDlpPlayer({
 
                   <button
                     onClick={() => setSubSettingsOpen((o) => !o)}
-                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white transition cursor-pointer"
-                    title="Subtitle Settings"
+                    className={`p-2 rounded-xl border transition cursor-pointer ${
+                      subSettingsOpen
+                        ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+                        : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-400 hover:text-white'
+                    }`}
+                    title="Subtitle Settings (Size, Colors, Opacity, Sync)"
                   >
                     <Settings size={15} />
                   </button>
+
+                  {/* Subtitle In-Player Popover Menu */}
+                  {subSettingsOpen && (
+                    <div className="absolute bottom-full right-0 mb-3 w-72 sm:w-80 bg-[#0c101c]/95 backdrop-blur-xl border border-white/20 rounded-2xl p-3.5 shadow-2xl z-40 space-y-3 animate-in fade-in zoom-in-95 duration-150 text-xs max-h-[65vh] overflow-y-auto custom-scrollbar text-left">
+                      <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-gray-200 flex items-center gap-1.5">
+                          <Subtitles size={14} className="text-cyan-400" />
+                          Subtitle Appearance & Sync
+                        </span>
+                        <button
+                          onClick={() => setSubSettingsOpen(false)}
+                          className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 cursor-pointer"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+
+                      {/* Live Preview */}
+                      <div className="p-3 rounded-xl bg-black/80 border border-white/10 flex items-center justify-center min-h-[48px] relative overflow-hidden">
+                        <span
+                          style={{
+                            fontSize: `${subFontSize}px`,
+                            color: subTextColor,
+                            backgroundColor:
+                              subBgColor === 'transparent'
+                                ? 'transparent'
+                                : `${subBgColor}${Math.round(subBgOpacity * 255).toString(16).padStart(2, '0')}`,
+                            textShadow: '0 2px 4px rgba(0,0,0,0.9)',
+                          }}
+                          className={`font-bold px-3 py-1 rounded-lg text-center max-w-full text-[11px] leading-tight select-none transition-all ${
+                            subBoxBorder ? 'border border-white/20' : 'border-none'
+                          }`}
+                        >
+                          Sample YouTube Anime Subtitle
+                        </span>
+                      </div>
+
+                      {/* Font Size */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[10px] font-bold text-gray-300">
+                          <span>Font Size</span>
+                          <span className="text-cyan-400 font-mono">{subFontSize}px</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={12}
+                          max={36}
+                          value={subFontSize}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setSubFontSize(val);
+                            updateSubSetting('fontsize', val);
+                          }}
+                          className="w-full accent-cyan-400 h-1 bg-white/20 rounded cursor-pointer"
+                        />
+                      </div>
+
+                      {/* Colors */}
+                      <div className="grid grid-cols-2 gap-2 pt-1 border-t border-white/5">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-gray-300 block">Text Color</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={subTextColor}
+                              onChange={(e) => {
+                                setSubTextColor(e.target.value);
+                                updateSubSetting('textcolor', e.target.value);
+                              }}
+                              className="w-7 h-7 rounded-lg cursor-pointer bg-transparent border-0"
+                            />
+                            <span className="text-[10px] font-mono text-gray-300">{subTextColor}</span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-gray-300 block">Background</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={subBgColor}
+                              onChange={(e) => {
+                                setSubBgColor(e.target.value);
+                                updateSubSetting('bgcolor', e.target.value);
+                              }}
+                              className="w-7 h-7 rounded-lg cursor-pointer bg-transparent border-0"
+                            />
+                            <span className="text-[10px] font-mono text-gray-300">{subBgColor}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Background Opacity */}
+                      <div className="space-y-1 pt-1 border-t border-white/5">
+                        <div className="flex justify-between text-[10px] font-bold text-gray-300">
+                          <span>BG Opacity</span>
+                          <span className="text-cyan-400 font-mono">{Math.round(subBgOpacity * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={subBgOpacity}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            setSubBgOpacity(val);
+                            updateSubSetting('bgopacity', val);
+                          }}
+                          className="w-full accent-cyan-400 h-1 bg-white/20 rounded cursor-pointer"
+                        />
+                      </div>
+
+                      {/* Box Border Toggle */}
+                      <div className="flex items-center justify-between pt-1 border-t border-white/5 text-[10px] font-bold text-gray-300">
+                        <span>Box Outline (Border)</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = !subBoxBorder;
+                            setSubBoxBorder(next);
+                            updateSubSetting('box_border', next);
+                          }}
+                          className={`px-2.5 py-0.5 rounded-lg font-bold border transition cursor-pointer ${
+                            subBoxBorder ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40' : 'bg-[#181f30] text-gray-400 border-white/10'
+                          }`}
+                        >
+                          {subBoxBorder ? 'Enabled' : 'Disabled'}
+                        </button>
+                      </div>
+
+                      {/* Sync Delay */}
+                      <div className="p-2 rounded-xl bg-white/5 border border-white/10 space-y-1.5">
+                        <div className="flex items-center justify-between text-[10px] font-bold">
+                          <span className="text-gray-300">Subtitle Sync Offset</span>
+                          <span className={`font-mono ${subDelay !== 0 ? 'text-amber-400' : 'text-gray-400'}`}>
+                            {subDelay > 0 ? `+${subDelay.toFixed(1)}s` : `${subDelay.toFixed(1)}s`}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-5 gap-1">
+                          {[-0.5, -0.1, 0, 0.1, 0.5].map((val) => (
+                            <button
+                              key={val}
+                              onClick={() => {
+                                const next = val === 0 ? 0 : Math.round((subDelay + val) * 10) / 10;
+                                setSubDelay(next);
+                                updateSubSetting('delay', next);
+                              }}
+                              className={`py-1 rounded-lg text-[10px] font-bold transition border cursor-pointer ${
+                                val === 0
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                  : 'bg-[#181f30] text-gray-300 border-white/10 hover:text-white'
+                              }`}
+                            >
+                              {val === 0 ? 'Reset' : val > 0 ? `+${val}s` : `${val}s`}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Speed Selector (Presets + Custom up to 10x) */}
+                {/* Speed Selector (Presets + Custom Slider up to 4x/10x) */}
                 <div className="relative group/speed">
                   <button className="px-2.5 py-1 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-[11px] font-mono font-bold transition cursor-pointer">
                     {playbackSpeed}x
                   </button>
 
-                  <div className="absolute bottom-full right-0 mb-2 w-44 bg-[#0c101c] border border-white/10 rounded-2xl p-2.5 shadow-2xl hidden group-hover/speed:block z-40 space-y-2">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 block px-1">
-                      Playback Speed
-                    </span>
+                  <div className="absolute bottom-full right-0 mb-2 w-52 bg-[#0c101c]/95 backdrop-blur-xl border border-white/20 rounded-2xl p-3 shadow-2xl hidden group-hover/speed:block z-40 space-y-2.5">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-gray-300">
+                        Playback Speed
+                      </span>
+                      <span className="font-mono font-bold text-cyan-400 text-xs">
+                        {playbackSpeed}x
+                      </span>
+                    </div>
+
+                    {/* Presets with 0.5x gap */}
                     <div className="grid grid-cols-3 gap-1">
-                      {[0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3].map((s) => (
+                      {[0.5, 1.0, 1.5, 2.0, 2.5, 3.0].map((s) => (
                         <button
                           key={s}
-                          onClick={() => handleSpeedChange(s)}
+                          onClick={() => handleSpeedChange(s, true)}
                           className={`py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
                             playbackSpeed === s
                               ? 'bg-cyan-500 text-black font-black'
@@ -1337,27 +1879,52 @@ export default function YtDlpPlayer({
                       ))}
                     </div>
 
-                    {/* Custom Speed Selector up to 10x */}
-                    <form onSubmit={handleCustomSpeedSubmit} className="pt-2 border-t border-white/5 flex gap-1.5">
+                    {/* Smooth Slider */}
+                    <div className="space-y-1 pt-1.5 border-t border-white/5">
+                      <div className="flex justify-between text-[10px] text-gray-400 font-semibold">
+                        <span>Speed Slider</span>
+                        <span className="text-cyan-400 font-mono">{playbackSpeed.toFixed(2)}x</span>
+                      </div>
                       <input
-                        type="number"
-                        min="0.1"
-                        max="10"
-                        step="0.1"
-                        value={customSpeedInput}
-                        onChange={(e) => setCustomSpeedInput(e.target.value)}
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
-                        placeholder="Custom (max 10x)"
+                        type="range"
+                        min="0.25"
+                        max="4.0"
+                        step="0.05"
+                        value={playbackSpeed}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          handleSpeedChange(val, true);
+                        }}
+                        className="w-full accent-cyan-400 bg-white/20 h-1 rounded-lg cursor-pointer"
                       />
-                      <button
-                        type="submit"
-                        className="px-2.5 py-1 bg-cyan-500 hover:bg-cyan-400 text-black rounded-lg text-xs font-bold cursor-pointer transition"
-                      >
-                        Set
-                      </button>
-                    </form>
+                    </div>
                   </div>
                 </div>
+
+                {/* Ambient Light Mode Toggle (YouTube Style) */}
+                <button
+                  onClick={toggleAmbientMode}
+                  className={`p-2 rounded-xl transition cursor-pointer border flex items-center gap-1 ${
+                    ambientMode
+                      ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+                      : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'
+                  }`}
+                  title={ambientMode ? 'Disable YouTube Ambient Glow' : 'Enable YouTube Ambient Glow'}
+                >
+                  <Sparkles size={16} className={ambientMode ? 'text-cyan-300 animate-pulse' : 'text-gray-400'} />
+                </button>
+
+                {/* Picture-in-Picture (Real PiP SVG Icon) */}
+                <button
+                  onClick={togglePiP}
+                  className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer hidden sm:flex items-center justify-center"
+                  title="Picture in Picture"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="4" width="20" height="16" rx="2" />
+                    <rect x="12" y="10" width="8" height="7" rx="1" fill="currentColor" fillOpacity="0.35" />
+                  </svg>
+                </button>
 
                 {/* Fullscreen Button */}
                 <button
@@ -1372,152 +1939,6 @@ export default function YtDlpPlayer({
           </div>
         </div>
       </main>
-
-      {/* ── Subtitle Settings Modal ─────────────────────────────────────────── */}
-      {subSettingsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="w-full max-w-md bg-[#0c101c] border border-white/10 rounded-2xl p-5 shadow-2xl text-left space-y-4">
-            <div className="flex items-center justify-between border-b border-white/5 pb-3">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Subtitles size={18} className="text-cyan-400" />
-                Subtitle Styling & Settings
-              </h3>
-              <button
-                onClick={() => setSubSettingsOpen(false)}
-                className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Font Size */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-400">Font Size</span>
-                <span className="text-white font-mono">{subFontSize}px</span>
-              </div>
-              <input
-                type="range"
-                min={12}
-                max={36}
-                value={subFontSize}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  setSubFontSize(val);
-                  updateSubSetting('fontsize', val);
-                }}
-                className="w-full accent-cyan-400"
-              />
-            </div>
-
-            {/* Colors */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-[11px] text-gray-400">Text Color</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={subTextColor}
-                    onChange={(e) => {
-                      setSubTextColor(e.target.value);
-                      updateSubSetting('textcolor', e.target.value);
-                    }}
-                    className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
-                  />
-                  <span className="text-xs font-mono text-gray-300">{subTextColor}</span>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] text-gray-400">Background Color</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={subBgColor}
-                    onChange={(e) => {
-                      setSubBgColor(e.target.value);
-                      updateSubSetting('bgcolor', e.target.value);
-                    }}
-                    className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
-                  />
-                  <span className="text-xs font-mono text-gray-300">{subBgColor}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Background Opacity */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-400">Background Opacity</span>
-                <span className="text-white font-mono">{Math.round(subBgOpacity * 100)}%</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={subBgOpacity}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  setSubBgOpacity(val);
-                  updateSubSetting('bgopacity', val);
-                }}
-                className="w-full accent-cyan-400"
-              />
-            </div>
-
-            {/* Box Border Toggle */}
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-xs text-gray-300">Box Outline / Border</span>
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !subBoxBorder;
-                  setSubBoxBorder(next);
-                  updateSubSetting('box_border', next);
-                }}
-                className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer ${
-                  subBoxBorder ? 'bg-cyan-500 text-black' : 'bg-white/10 text-gray-400'
-                }`}
-              >
-                {subBoxBorder ? 'ON' : 'OFF'}
-              </button>
-            </div>
-
-            {/* Sync Delay */}
-            <div className="space-y-1.5 pt-2 border-t border-white/5">
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-400">Sync Offset Delay</span>
-                <span className="text-white font-mono">
-                  {subDelay > 0 ? `+${subDelay.toFixed(1)}s` : `${subDelay.toFixed(1)}s`}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setSubDelay((d) => Math.max(-5, d - 0.5))}
-                  className="px-2.5 py-1 rounded-lg bg-white/10 text-white font-bold text-xs hover:bg-white/20"
-                >
-                  -0.5s
-                </button>
-                <button
-                  onClick={() => setSubDelay(0)}
-                  className="flex-1 py-1 rounded-lg bg-white/5 text-gray-400 text-xs hover:text-white"
-                >
-                  Reset
-                </button>
-                <button
-                  onClick={() => setSubDelay((d) => Math.min(5, d + 0.5))}
-                  className="px-2.5 py-1 rounded-lg bg-white/10 text-white font-bold text-xs hover:bg-white/20"
-                >
-                  +0.5s
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Hover Tooltip Card (Identical to MediaServerPlayer) ─────────────── */}
       {hoveredEp && (
         <div
           className="fixed pointer-events-none z-50 w-64 p-3 rounded-2xl bg-[#0c101c]/95 border border-white/15 shadow-2xl backdrop-blur-xl space-y-2 text-left"

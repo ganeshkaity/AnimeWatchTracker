@@ -1,5 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
 import { NextResponse } from 'next/server';
 
 const execFileAsync = promisify(execFile);
@@ -28,14 +30,20 @@ export async function POST(request) {
 
     const cleanUrl = url.trim();
 
-    // Execute yt-dlp to extract flat playlist json metadata only
-    const { stdout } = await execFileAsync('yt-dlp', [
+    const cookiesPath = path.join(process.cwd(), 'cookies.txt');
+    const ytArgs = [
       '--extractor-args', 'youtube:player_client=android,web',
       '--dump-single-json',
       '--flat-playlist',
       '--no-warnings',
-      cleanUrl
-    ], { maxBuffer: 10 * 1024 * 1024 });
+    ];
+    if (fs.existsSync(cookiesPath)) {
+      ytArgs.push('--cookies', cookiesPath);
+    }
+    ytArgs.push(cleanUrl);
+
+    // Execute yt-dlp to extract flat playlist json metadata only
+    const { stdout } = await execFileAsync('yt-dlp', ytArgs, { maxBuffer: 10 * 1024 * 1024 });
 
     const rawData = JSON.parse(stdout);
 
