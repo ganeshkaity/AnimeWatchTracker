@@ -55,7 +55,7 @@ public/fallback-*.js
 
 #Other files
 /test_images
-
+/scratch
 #videos
 *.mp4
 *.mkv

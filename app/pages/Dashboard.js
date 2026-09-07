@@ -8,7 +8,10 @@ import { useOffline } from '../context/OfflineContext';
 import { parseEpisode, sortEpisodes, NAMING_PATTERNS, processScannedFiles } from '../utils/parser';
 import {
   getLocalAnimes, setLocalAnimes, upsertLocalAnime, deleteLocalAnime,
-  getLocalEpisodes, setLocalEpisodes, addToDirtyQueue, getUserId
+  getLocalEpisodes, setLocalEpisodes,
+  getLocalMangas, setLocalMangas, upsertLocalManga, deleteLocalManga,
+  getLocalChapters, setLocalChapters,
+  addToDirtyQueue, getUserId
 } from '../utils/localStore';
 import { 
   Plus, Search, Settings, FolderOpen, Loader2, Play, 
@@ -16,11 +19,14 @@ import {
   StickyNote, Download, Wifi, WifiOff, RefreshCw, ChevronLeft, ChevronRight,
   Star, Flame, TrendingUp, Clock, Sparkles, Film, Bookmark, Bell, Menu, X,
   Tv, Eye, ShieldCheck, Heart, User, Filter, Compass, Calendar, AlertTriangle,
-  Youtube, Video, CheckSquare, Square, ExternalLink, Globe, Trophy, Award
+  Youtube, Video, CheckSquare, Square, ExternalLink, Globe, Trophy, Award,
+  BookOpen, HardDrive
 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import AnimeCoverSearch from '../components/AnimeCoverSearch';
+import MangaCoverSearch from '../components/MangaCoverSearch';
 import CachedImage from '../utils/imageCache';
 
 const GRADIENTS = [
@@ -152,15 +158,28 @@ const GENRES_LIST = [
 ];
 
 export default function Dashboard({ onSelectAnime }) {
+  const router = useRouter();
   const { currentUser, updateVlcPath, updateDefaultPlayer } = useAuth();
   const { isOffline, isManualOffline, isSyncing, lastSyncedAt, setManualOffline, syncNow } = useOffline();
   
   const [animes, setAnimes] = useState([]);
+  const [mangas, setMangas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('recent'); // recent, alpha, progress
   const [filterBy, setFilterBy] = useState('all'); // all, active, completed
   const [selectedGenre, setSelectedGenre] = useState('All');
+
+  // Manga Modal & Form States
+  const [showAddMangaModal, setShowAddMangaModal] = useState(false);
+  const [mangaFolderPath, setMangaFolderPath] = useState('');
+  const [mangaTitle, setMangaTitle] = useState('');
+  const [mangaScanning, setMangaScanning] = useState(false);
+  const [mangaScanResult, setMangaScanResult] = useState([]);
+  const [mangaCoverUrl, setMangaCoverUrl] = useState('');
+  const [uploadingMangaCover, setUploadingMangaCover] = useState(false);
+  const [mangaGenres, setMangaGenres] = useState([]);
+  const [showMangaCoverSearch, setShowMangaCoverSearch] = useState(false);
 
   // Hero Carousel State
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -873,6 +892,12 @@ export default function Dashboard({ onSelectAnime }) {
     ? animes.filter(anime => (anime.title || '').toLowerCase().includes(search.toLowerCase()))
     : [];
 
+  const autocompleteMangaMatches = useMemo(() => {
+    if (!search || !search.trim()) return [];
+    const q = search.trim().toLowerCase();
+    return (mangas || []).filter(m => (m?.title || '').toLowerCase().includes(q));
+  }, [mangas, search]);
+
   // Auto Hero Slider Timer
   useEffect(() => {
     const timer = setInterval(() => {
@@ -890,7 +915,7 @@ export default function Dashboard({ onSelectAnime }) {
     }
   }, [currentUser]);
 
-  // Load animes: localStorage first, then Firestore
+  // Load animes & mangas: localStorage first, then Firestore
   useEffect(() => {
     if (!currentUser) return;
 
@@ -900,6 +925,11 @@ export default function Dashboard({ onSelectAnime }) {
       setLoading(false);
     }
 
+    const localMangas = getLocalMangas();
+    if (localMangas.length > 0) {
+      setMangas(localMangas);
+    }
+
     if (isOffline || !db) {
       setLoading(false);
       return;
@@ -907,25 +937,38 @@ export default function Dashboard({ onSelectAnime }) {
 
     const targetUserId = getUserId();
     const animeRef = collection(db, 'users', targetUserId, 'anime');
-    const q = query(animeRef);
+    const mangaRef = collection(db, 'users', targetUserId, 'mangas');
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribeAnime = onSnapshot(query(animeRef), (snapshot) => {
       const list = [];
       snapshot.forEach((d) => {
-        const animeUserId = targetUserId;
-        list.push({ id: d.id, userId: animeUserId, ...d.data() });
+        list.push({ id: d.id, userId: targetUserId, ...d.data() });
       });
       setAnimes(list);
       setLocalAnimes(list);
       setLoading(false);
     }, (err) => {
-      console.error('Firestore subscription error:', err);
-      const local = getLocalAnimes();
-      setAnimes(local);
+      console.error('Firestore anime subscription error:', err);
+      setAnimes(getLocalAnimes());
       setLoading(false);
     });
 
-    return unsubscribe;
+    const unsubscribeManga = onSnapshot(query(mangaRef), (snapshot) => {
+      const list = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, userId: targetUserId, ...d.data() });
+      });
+      setMangas(list);
+      setLocalMangas(list);
+    }, (err) => {
+      console.warn('Firestore manga subscription error:', err);
+      setMangas(getLocalMangas());
+    });
+
+    return () => {
+      unsubscribeAnime();
+      unsubscribeManga();
+    };
   }, [currentUser, isOffline]);
 
   // YouTube Playlist Handlers
@@ -1291,6 +1334,209 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
+  // ── Manga Actions ───────────────────────────────────────────────────────────
+  const handleBrowseMangaFolder = async () => {
+    setMangaScanning(true);
+    try {
+      const response = await fetch('/api/select-folder');
+      const data = await response.json();
+      if (data.success && data.path) {
+        const path = data.path;
+        setMangaFolderPath(path);
+        const folderName = path.split(/[\\/]/).pop();
+        setMangaTitle(folderName || '');
+
+        const scanRes = await fetch('/api/manga/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folderPath: path }),
+        });
+        const scanData = await scanRes.json();
+        if (scanData.success) {
+          setMangaScanResult(scanData.chapters);
+        } else {
+          alert("Error scanning folder: " + scanData.error);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Folder dialog error. Please paste the directory path directly.");
+    } finally {
+      setMangaScanning(false);
+    }
+  };
+
+  const handleScanManga = async () => {
+    if (!mangaFolderPath) return;
+    setMangaScanning(true);
+    try {
+      const res = await fetch('/api/manga/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderPath: mangaFolderPath.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMangaScanResult(data.chapters);
+        if (!mangaTitle) {
+          const folderName = mangaFolderPath.trim().split(/[\\/]/).pop();
+          setMangaTitle(folderName || '');
+        }
+      } else {
+        alert("Error scanning manga folder: " + data.error);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Scan request failed: " + err.message);
+    } finally {
+      setMangaScanning(false);
+    }
+  };
+
+  const handleAddManga = async (e) => {
+    e.preventDefault();
+    const cleanPath = mangaFolderPath.trim();
+    if (!cleanPath || !mangaTitle.trim() || mangaScanResult.length === 0) {
+      alert('Please select/enter a valid folder, input a title, and scan PDF files first.');
+      return;
+    }
+
+    setMangaScanning(true);
+    try {
+      let mangaId = slugify(mangaTitle.trim());
+      if (!mangaId) {
+        mangaId = `manga_${Date.now()}`;
+      } else {
+        const isDuplicate = mangas.some(m => m.id === mangaId);
+        if (isDuplicate) {
+          mangaId = `${mangaId}-${Math.floor(Math.random() * 1000)}`;
+        }
+      }
+      const randomGradient = GRADIENTS[Math.floor(Math.random() * GRADIENTS.length)];
+
+      const mangaData = {
+        title: mangaTitle.trim(),
+        folderPath: cleanPath,
+        chapterCount: mangaScanResult.length,
+        totalChapters: mangaScanResult.length,
+        progressPercent: 0,
+        coverGradient: randomGradient,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastReadChapter: '',
+        lastReadPage: 1,
+        lastOpenedAt: new Date().toISOString(),
+        userId: getUserId(),
+        thumbnailBase64: mangaCoverUrl || '',
+        genres: mangaGenres,
+        type: 'manga',
+      };
+
+      const parsedChapters = mangaScanResult.map((ch, idx) => ({
+        id: `chap_${idx + 1}_${encodeURIComponent(ch.name || ch.fileName)}`,
+        chapterNumber: ch.chapterNumber !== undefined ? ch.chapterNumber : idx + 1,
+        name: ch.name || ch.fileName,
+        fileName: ch.fileName || ch.name,
+        filePath: ch.filePath,
+        size: ch.size || 0,
+        createdAt: ch.createdAt || Date.now(),
+        lastPage: 1,
+        progress: 0,
+        isRead: false,
+        isFlagged: false,
+        flags: [],
+        note: '',
+        updatedAt: new Date().toISOString(),
+      }));
+
+      upsertLocalManga({ id: mangaId, ...mangaData });
+      setLocalChapters(mangaId, parsedChapters);
+      setMangas(prev => [{ id: mangaId, ...mangaData }, ...prev]);
+
+      if (!isOffline && db) {
+        const batch = writeBatch(db);
+        const mangaDocRef = doc(db, 'users', getUserId(), 'mangas', mangaId);
+        batch.set(mangaDocRef, mangaData);
+        parsedChapters.forEach((ch) => {
+          const chDocRef = doc(db, 'users', getUserId(), 'mangas', mangaId, 'chapters', ch.id);
+          batch.set(chDocRef, ch);
+        });
+        await batch.commit();
+      } else {
+        addToDirtyQueue({
+          type: 'SET_MANGA',
+          dedupeKey: `SET_MANGA_${mangaId}`,
+          payload: { id: mangaId, ...mangaData },
+        });
+        addToDirtyQueue({
+          type: 'SET_CHAPTERS_BATCH',
+          dedupeKey: `SET_CHAPTERS_BATCH_${mangaId}`,
+          payload: { mangaId, mangaUserId: getUserId(), chapters: parsedChapters },
+        });
+      }
+
+      setShowAddModal(false);
+      setShowAddMangaModal(false);
+      setMangaFolderPath('');
+      setMangaTitle('');
+      setMangaCoverUrl('');
+      setMangaGenres([]);
+      setMangaScanResult([]);
+    } catch (err) {
+      console.error(err);
+      alert('Error adding manga: ' + err.message);
+    } finally {
+      setMangaScanning(false);
+    }
+  };
+
+  const handleDeleteManga = async (mangaItem, e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!confirm('Are you sure you want to stop tracking this manga?')) return;
+    try {
+      const mangaId = mangaItem.id;
+      const targetUserId = mangaItem.userId || currentUser.uid;
+      deleteLocalManga(mangaId);
+      setMangas(prev => prev.filter(m => m.id !== mangaId));
+      if (!isOffline && db) {
+        await deleteDoc(doc(db, 'users', targetUserId, 'mangas', mangaId));
+      } else {
+        addToDirtyQueue({ type: 'DELETE_MANGA', dedupeKey: `DELETE_MANGA_${mangaId}`, payload: { id: mangaId, userId: targetUserId } });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleNewMangaCoverUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setUploadingMangaCover(true);
+    try {
+      const url = await uploadToImgBB(file);
+      setMangaCoverUrl(url);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to upload image: ' + err.message);
+    } finally {
+      setUploadingMangaCover(false);
+    }
+  };
+
+  const handleMangaCoverBrowse = async () => {
+    try {
+      const pickRes = await fetch('/api/select-image');
+      const pickData = await pickRes.json();
+      if (pickData.success && pickData.path) {
+        setMangaCoverUrl(pickData.path);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   // Compress Canvas
   const compressImageToBase64 = (dataUri, maxPx = 400, quality = 0.45) => {
     return new Promise((resolve, reject) => {
@@ -1629,6 +1875,16 @@ export default function Dashboard({ onSelectAnime }) {
     });
   }, [animes]);
 
+  // ── Manga List (Filtered by search & sorted new to old) ──────────────────────
+  const sortedMangas = useMemo(() => {
+    return mangas
+      .filter((m) => {
+        if (!search || !search.trim()) return true;
+        return (m?.title || '').toLowerCase().includes(search.trim().toLowerCase());
+      })
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }, [mangas, search]);
+
   // ── Lazy-Load Chunking for Anime Catalog (Initial 24, +24 on scroll) ───────
   const [visibleCount, setVisibleCount] = useState(24);
   const loadMoreRef = useRef(null);
@@ -1719,16 +1975,43 @@ export default function Dashboard({ onSelectAnime }) {
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 text-xs rounded-full glass-input placeholder-gray-500 focus:w-80 transition-all duration-300"
             />
-            {/* Search Recommendations Dropdown */}
+              {/* Search Recommendations Dropdown */}
             {search.trim().length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-[#111827]/95 backdrop-blur-md border border-white/10 rounded-2xl shadow-2xl z-50 max-h-80 overflow-y-auto no-scrollbar">
-                {autocompleteMatches.length === 0 ? (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-[#111827]/95 backdrop-blur-md border border-white/10 rounded-2xl shadow-2xl z-50 max-h-96 overflow-y-auto no-scrollbar">
+                {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 ? (
                   <div className="p-4 text-center text-xs text-gray-400">
-                    No matches found
+                    No anime or manga matches found
                   </div>
                 ) : (
                   <div className="p-2 space-y-1">
-                    {autocompleteMatches.slice(0, 5).map((anime) => (
+                    {autocompleteMangaMatches.slice(0, 3).map((m) => (
+                      <div
+                        key={`search-manga-${m.id}`}
+                        onClick={() => {
+                          router.push(`/manga/${m.id}`);
+                          setSearch('');
+                        }}
+                        className="flex items-center gap-3 p-2 rounded-xl hover:bg-purple-950/40 border border-purple-500/20 transition cursor-pointer"
+                      >
+                        <div className="w-9 h-12 rounded-lg overflow-hidden bg-purple-950/60 flex-shrink-0 relative flex items-center justify-center">
+                          {m.thumbnailBase64 ? (
+                            <img src={m.thumbnailBase64} alt={m.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <BookOpen size={16} className="text-purple-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-purple-600 text-[8px] font-bold text-white uppercase">Manga</span>
+                            <h4 className="font-bold text-xs text-white truncate">{m.title}</h4>
+                          </div>
+                          <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                            {m.chapterCount || m.totalChapters || 0} Chapters • Local PDF
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {autocompleteMatches.slice(0, 4).map((anime) => (
                       <div
                         key={anime.id}
                         onClick={() => {
@@ -1791,7 +2074,18 @@ export default function Dashboard({ onSelectAnime }) {
             title="Track Local Anime Folder"
           >
             <Plus size={15} />
-            <span>Add Folder</span>
+            <span>Add Anime</span>
+          </button>
+
+          {/* Add Manga CTA */}
+          <button
+            onClick={() => !isOffline && setShowAddMangaModal(true)}
+            disabled={isOffline}
+            className={`hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-lg shadow-purple-500/20 transition ${isOffline ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+            title="Track Local Manga PDF Folder"
+          >
+            <BookOpen size={15} />
+            <span>Add Manga</span>
           </button>
 
           {/* Local Hotspot Stream Link */}
@@ -1957,11 +2251,36 @@ export default function Dashboard({ onSelectAnime }) {
                     />
                     {/* Live Autocomplete Matches */}
                     {search.trim().length > 0 && (
-                      <div className="absolute top-full left-0 right-0 mt-2 bg-[#0f172a]/95 border border-white/15 rounded-xl shadow-2xl z-50 max-h-52 overflow-y-auto no-scrollbar">
-                        {autocompleteMatches.length === 0 ? (
+                      <div className="absolute top-full left-0 right-0 mt-2 bg-[#0f172a]/95 border border-white/15 rounded-xl shadow-2xl z-50 max-h-64 overflow-y-auto no-scrollbar">
+                        {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 ? (
                           <div className="p-3 text-center text-xs text-gray-400">No matches found</div>
                         ) : (
                           <div className="p-1 space-y-1">
+                            {autocompleteMangaMatches.slice(0, 3).map((m) => (
+                              <div
+                                key={`side-search-manga-${m.id}`}
+                                onClick={() => {
+                                  router.push(`/manga/${m.id}`);
+                                  setSearch('');
+                                  setMobileMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2 p-2 rounded-lg hover:bg-purple-950/40 border border-purple-500/20 transition cursor-pointer"
+                              >
+                                <div className="w-8 h-10 rounded overflow-hidden bg-purple-950/60 flex-shrink-0 relative flex items-center justify-center">
+                                  {m.thumbnailBase64 ? (
+                                    <img src={m.thumbnailBase64} alt={m.title} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <BookOpen size={14} className="text-purple-400" />
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1">
+                                    <span className="px-1 py-0.2 rounded bg-purple-600 text-[7px] font-bold text-white uppercase">Manga</span>
+                                    <h4 className="font-bold text-xs text-white truncate">{m.title}</h4>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
                             {autocompleteMatches.slice(0, 4).map((anime) => (
                               <div
                                 key={anime.id}
@@ -2006,6 +2325,9 @@ export default function Dashboard({ onSelectAnime }) {
                     </a>
                     <a href="#trending" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
                       <Flame size={15} className="text-amber-400" /> Trending Today
+                    </a>
+                    <a href="#manga-webtoons" onClick={() => setMobileMenuOpen(false)} className="hover:text-purple-400 p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
+                      <BookOpen size={15} className="text-purple-400" /> Manga / Webtoons
                     </a>
                     <a href="#catalog" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
                       <Film size={15} className="text-cyan-400" /> Local Catalog
@@ -2595,6 +2917,108 @@ export default function Dashboard({ onSelectAnime }) {
             </div>
           </section>
         )}
+
+        {/* MANGA OR WEBTOONS SECTION */}
+        <section id="manga-webtoons" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                <BookOpen size={20} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-extrabold tracking-wide text-white">Manga or Webtoons</h2>
+                  <span className="px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-300 text-[10px] font-mono font-bold">
+                    {sortedMangas.length}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400 font-medium">Local PDF chapters, volumes & comics (New to Old)</p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowAddMangaModal(true)}
+              className="px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <Plus size={14} />
+              <span>Add Manga</span>
+            </button>
+          </div>
+
+          {sortedMangas.length === 0 ? (
+            <div className="p-8 rounded-2xl glass-card border border-white/10 text-center space-y-3 bg-white/[0.01]">
+              <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center mx-auto">
+                <BookOpen size={24} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">No Manga or Webtoons Tracked Yet</h3>
+                <p className="text-xs text-gray-400 max-w-sm mx-auto mt-1">
+                  Connect any local folder with PDF manga chapters to start reading with the custom PDF viewer!
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddMangaModal(true)}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold text-xs uppercase tracking-wider inline-flex items-center gap-2 shadow-lg cursor-pointer"
+              >
+                <Plus size={14} />
+                <span>Track Manga Folder</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {sortedMangas.map((m) => (
+                <div
+                  key={`manga-${m.id}`}
+                  onClick={() => router.push(`/manga/${m.id}`)}
+                  className="glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-purple-500/50 transition duration-200"
+                >
+                  <div className="relative h-48 overflow-hidden bg-[#181c24] flex items-center justify-center">
+                    {m.thumbnailBase64 ? (
+                      <img
+                        src={m.thumbnailBase64}
+                        alt={m.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-purple-400/80 bg-purple-950/20 gap-1.5">
+                        <BookOpen size={32} />
+                        <span className="text-[9px] font-mono uppercase tracking-wider">PDF Manga</span>
+                      </div>
+                    )}
+
+                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur-md text-purple-300 font-bold text-[9px] border border-white/10">
+                      {m.chapterCount || m.totalChapters || 0} Ch
+                    </div>
+
+                    <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-purple-600 text-white font-extrabold text-[8px] shadow">
+                      PDF
+                    </div>
+
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center p-3">
+                      <div className="px-3 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg">
+                        <BookOpen size={14} />
+                        <span>Read Manga</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-black/30">
+                    <h4 className="font-bold text-xs text-white line-clamp-1 group-hover:text-purple-300 transition-colors">
+                      {m.title}
+                    </h4>
+                    <div className="flex justify-between items-center text-[9px] text-gray-400 mt-1">
+                      <span>Local PDF</span>
+                      <span className="text-purple-400 font-semibold">{m.progressPercent ? `${m.progressPercent}%` : 'Ready'}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         {/* 5. RECENTLY UPDATED */}
         {recentlyUpdated.length > 0 && (
@@ -4149,6 +4573,209 @@ export default function Dashboard({ onSelectAnime }) {
               </button>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Add Manga / Webtoon Modal */}
+      <AnimatePresence>
+        {showAddMangaModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-xl glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl modal-scroll space-y-4 bg-[#0d1117]/95 text-white"
+            >
+              <div className="flex justify-between items-center border-b border-white/10 pb-3">
+                <h2 className="text-lg font-extrabold flex items-center gap-2 text-white">
+                  <BookOpen className="text-purple-400" size={20} />
+                  <span>Track Local Manga / Webtoon Folder</span>
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setShowAddMangaModal(false)}
+                  className="p-1 rounded-lg text-gray-400 hover:text-white transition cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddManga} className="space-y-4">
+                {/* 1. Directory Path */}
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                    Select Manga Folder Directory *
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Browse your PC or paste manga directory path..."
+                      className="flex-grow px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={mangaFolderPath}
+                      onChange={(e) => setMangaFolderPath(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleBrowseMangaFolder}
+                      disabled={mangaScanning}
+                      className="px-3 py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-bold whitespace-nowrap transition cursor-pointer disabled:opacity-50"
+                    >
+                      {mangaScanning ? 'Scanning...' : 'Browse PC Folder'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleScanManga}
+                      disabled={mangaScanning || !mangaFolderPath}
+                      className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold whitespace-nowrap transition cursor-pointer disabled:opacity-50"
+                    >
+                      Scan
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scanned files alert */}
+                {mangaScanResult.length > 0 && (
+                  <div className="p-3 rounded-2xl bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-bold">
+                      <CheckCircle2 size={16} className="text-emerald-400" />
+                      <span>Found {mangaScanResult.length} PDF chapters</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-gray-400">Ready to track</span>
+                  </div>
+                )}
+
+                {/* 2. Manga Title */}
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                    Manga / Webtoon Title *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Berserk, Solo Leveling, One Piece..."
+                    className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                    value={mangaTitle}
+                    onChange={(e) => setMangaTitle(e.target.value)}
+                  />
+                </div>
+
+                {/* 3. Cover Picture */}
+                <div className="space-y-2">
+                  <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                    Cover Picture Artwork
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowMangaCoverSearch(true)}
+                      className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-md cursor-pointer"
+                    >
+                      <Sparkles size={14} />
+                      <span>Search Online Covers</span>
+                    </button>
+
+                    <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-gray-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border border-white/10">
+                      <ImagePlus size={14} />
+                      <span>Upload Image</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleNewMangaCoverUpload}
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={handleMangaCoverBrowse}
+                      className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-gray-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border border-white/10"
+                    >
+                      <HardDrive size={14} />
+                      <span>Browse PC</span>
+                    </button>
+                  </div>
+
+                  {mangaCoverUrl && (
+                    <div className="relative w-24 h-32 rounded-xl overflow-hidden border border-white/20 shadow-lg mt-2">
+                      <img
+                        src={mangaCoverUrl}
+                        alt="Cover Preview"
+                        className="w-full h-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setMangaCoverUrl('')}
+                        className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white hover:bg-red-500 transition cursor-pointer"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* 4. Genres */}
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                    Select Genres
+                  </label>
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto custom-scrollbar p-1">
+                    {GENRES_LIST.filter(g => g !== 'All').map((g) => {
+                      const isSel = mangaGenres.includes(g);
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => {
+                            if (isSel) setMangaGenres(mangaGenres.filter((item) => item !== g));
+                            else setMangaGenres([...mangaGenres, g]);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer border ${
+                            isSel
+                              ? 'bg-purple-600 border-purple-500 text-white'
+                              : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
+                          }`}
+                        >
+                          {g}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Submit / Cancel buttons */}
+                <div className="flex justify-end gap-3 pt-4 border-t border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddMangaModal(false)}
+                    className="px-4 py-2 text-xs text-gray-400 hover:text-white transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={mangaScanning || !mangaFolderPath || !mangaTitle || mangaScanResult.length === 0}
+                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-40 text-white text-xs font-bold uppercase tracking-wider transition shadow-lg cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    {mangaScanning ? 'Processing...' : 'Track Manga Folder'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Online Manga Cover Search Modal */}
+      <AnimatePresence>
+        {showMangaCoverSearch && (
+          <MangaCoverSearch
+            initialQuery={mangaTitle}
+            uploadToImgBB={uploadToImgBB}
+            onSelectCover={(url) => {
+              setMangaCoverUrl(url);
+              setShowMangaCoverSearch(false);
+            }}
+            onClose={() => setShowMangaCoverSearch(false)}
+          />
         )}
       </AnimatePresence>
 

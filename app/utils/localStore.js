@@ -14,6 +14,8 @@ const KEYS = {
   SETTINGS: 'watchanime_settings',
   ANIMES: 'watchanime_animes',
   EPISODES: (animeId) => `watchanime_episodes_${animeId}`,
+  MANGAS: 'watchanime_mangas',
+  CHAPTERS: (mangaId) => `watchanime_chapters_${mangaId}`,
   NOTES: 'watchanime_notes',
   DIRTY_QUEUE: 'watchanime_dirty_queue',
 };
@@ -146,6 +148,66 @@ export function upsertLocalNote(note) {
 export function deleteLocalNote(noteId) {
   const notes = getLocalNotes().filter(n => n.id !== noteId);
   setLocalNotes(notes);
+}
+
+// ─── Manga Library ────────────────────────────────────────────────────────────
+
+export function getLocalMangas() {
+  return read(KEYS.MANGAS) || [];
+}
+
+export function setLocalMangas(mangas) {
+  write(KEYS.MANGAS, mangas);
+}
+
+export function getLocalManga(mangaId) {
+  const mangas = getLocalMangas();
+  return mangas.find(m => m.id === mangaId) || null;
+}
+
+export function upsertLocalManga(manga) {
+  const mangas = getLocalMangas();
+  const idx = mangas.findIndex(m => m.id === manga.id);
+  if (idx >= 0) {
+    mangas[idx] = { ...mangas[idx], ...manga };
+  } else {
+    mangas.unshift(manga);
+  }
+  setLocalMangas(mangas);
+}
+
+export function deleteLocalManga(mangaId) {
+  const mangas = getLocalMangas().filter(m => m.id !== mangaId);
+  setLocalMangas(mangas);
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(KEYS.CHAPTERS(mangaId));
+  }
+}
+
+// ─── Manga Chapters ───────────────────────────────────────────────────────────
+
+export function getLocalChapters(mangaId) {
+  return read(KEYS.CHAPTERS(mangaId)) || [];
+}
+
+export function setLocalChapters(mangaId, chapters) {
+  write(KEYS.CHAPTERS(mangaId), chapters);
+}
+
+export function upsertLocalChapter(mangaId, chapter) {
+  const chapters = getLocalChapters(mangaId);
+  const idx = chapters.findIndex(c => c.id === chapter.id);
+  if (idx >= 0) {
+    chapters[idx] = { ...chapters[idx], ...chapter };
+  } else {
+    chapters.push(chapter);
+  }
+  setLocalChapters(mangaId, chapters);
+}
+
+export function deleteLocalChapter(mangaId, chapterId) {
+  const chapters = getLocalChapters(mangaId).filter(c => c.id !== chapterId);
+  setLocalChapters(mangaId, chapters);
 }
 
 // ─── Dirty Queue (pending Firestore writes) ────────────────────────────────────

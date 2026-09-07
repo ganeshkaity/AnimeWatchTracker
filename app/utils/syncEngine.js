@@ -12,6 +12,8 @@ import {
 import {
   getLocalAnimes, setLocalAnimes,
   getLocalEpisodes, setLocalEpisodes,
+  getLocalMangas, setLocalMangas,
+  getLocalChapters, setLocalChapters,
   getLocalNotes, setLocalNotes,
   getLocalSettings, setLocalSettings,
   getDirtyQueue, clearDirtyQueue,
@@ -67,7 +69,24 @@ export async function pullFromFirestore(db) {
       const noteUserId = userId;
       notes.push({ id: d.id, userId: noteUserId, ...d.data() });
     });
-    setLocalNotes(notes);
+    // Pull manga list from user
+    const mangaSnap = await getDocs(collection(db, 'users', userId, 'mangas'));
+    const mangas = [];
+    const chapterPromises = [];
+    mangaSnap.forEach(d => {
+      const manga = { id: d.id, userId, ...d.data() };
+      mangas.push(manga);
+      chapterPromises.push(
+        getDocs(collection(db, 'users', userId, 'mangas', d.id, 'chapters'))
+          .then(cSnap => {
+            const chapters = [];
+            cSnap.forEach(cd => chapters.push({ id: cd.id, ...cd.data() }));
+            setLocalChapters(d.id, chapters);
+          })
+      );
+    });
+    setLocalMangas(mangas);
+    await Promise.all(chapterPromises);
 
   } catch (err) {
     console.error('pullFromFirestore error:', err);
@@ -139,6 +158,36 @@ export async function pushToFirestore(db) {
       } else if (op.type === 'SET_SETTINGS') {
         const ref = doc(db, 'users', userId);
         batch.set(ref, op.payload, { merge: true });
+        batchCount++;
+      } else if (op.type === 'SET_MANGA') {
+        const { id, userId: targetUserId, ...data } = op.payload;
+        const ref = doc(db, 'users', targetUserId || userId, 'mangas', id);
+        batch.set(ref, data, { merge: true });
+        batchCount++;
+      } else if (op.type === 'DELETE_MANGA') {
+        const ref = doc(db, 'users', op.payload.userId || userId, 'mangas', op.payload.id);
+        batch.delete(ref);
+        batchCount++;
+      } else if (op.type === 'SET_CHAPTER') {
+        const { mangaId, id, mangaUserId, ...data } = op.payload;
+        const ref = doc(db, 'users', mangaUserId || userId, 'mangas', mangaId, 'chapters', id);
+        batch.set(ref, data, { merge: true });
+        batchCount++;
+      } else if (op.type === 'SET_CHAPTERS_BATCH') {
+        const { mangaId, mangaUserId, chapters } = op.payload;
+        for (const ch of chapters) {
+          const { id, ...data } = ch;
+          const ref = doc(db, 'users', mangaUserId || userId, 'mangas', mangaId, 'chapters', id);
+          batch.set(ref, data, { merge: true });
+          batchCount++;
+          if (batchCount >= 490) {
+            await flushBatch();
+          }
+        }
+      } else if (op.type === 'DELETE_CHAPTER') {
+        const { mangaId, id, mangaUserId } = op.payload;
+        const ref = doc(db, 'users', mangaUserId || userId, 'mangas', mangaId, 'chapters', id);
+        batch.delete(ref);
         batchCount++;
       }
 
