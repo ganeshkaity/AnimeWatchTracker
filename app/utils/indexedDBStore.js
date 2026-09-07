@@ -57,11 +57,15 @@ function getDB() {
 
 export async function saveReadingProgress(documentId, data) {
   if (!documentId) return;
+  const computedProgress = data.progress !== undefined ? data.progress : Math.round(((data.lastPage || 1) / (data.totalPages || 1)) * 100);
+  const isRead = data.isRead !== undefined ? Boolean(data.isRead) : (computedProgress >= 95);
+
   const payload = {
     documentId,
     lastPage: data.lastPage || 1,
     totalPages: data.totalPages || 1,
-    progress: data.progress !== undefined ? data.progress : Math.round(((data.lastPage || 1) / (data.totalPages || 1)) * 100),
+    progress: computedProgress,
+    isRead,
     lastReadAt: new Date().toISOString(),
     zoom: data.zoom || 1.0,
     rotation: data.rotation || 0,

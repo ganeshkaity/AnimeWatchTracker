@@ -7,7 +7,7 @@ import {
   getLocalChapters, setLocalChapters, upsertLocalChapter, deleteLocalChapter,
   addToDirtyQueue, getUserId
 } from '../utils/localStore';
-import { getReadingProgress } from '../utils/indexedDBStore';
+import { getReadingProgress, saveReadingProgress } from '../utils/indexedDBStore';
 import { useAuth } from '../context/AuthContext';
 import { useOffline } from '../context/OfflineContext';
 import { doc, getDocs, collection, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
@@ -17,7 +17,7 @@ import {
   StickyNote, Star, RefreshCw, FolderPlus, FolderTree, Search,
   ChevronDown, ChevronUp, Trash2, Edit3, Check, ExternalLink, HardDrive,
   FileText, Sparkles, Heart, SlidersHorizontal, ImagePlus, X, FilePlus,
-  Move, CornerDownRight, ArrowRight, Layers, Loader2
+  Move, CornerDownRight, ArrowRight, Layers, Loader2, RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MangaCoverSearch from '../components/MangaCoverSearch';
@@ -144,6 +144,10 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
   const [showOnlineSearchEdit, setShowOnlineSearchEdit] = useState(false);
   const [uploadingEditCover, setUploadingEditCover] = useState(false);
 
+  // ── Mark Entire Manga Complete State ─────────────────────────────────────
+  const [showMarkAllModal, setShowMarkAllModal] = useState(false);
+  const [markingAll, setMarkingAll] = useState(false);
+
   // ── Load Manga & Chapters ──────────────────────────────────────────────────
   const loadData = async () => {
     setLoading(true);
@@ -176,17 +180,24 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
       const enrichedChapters = await Promise.all(
         localChapters.map(async (ch) => {
           const docId = ch.id || `manga_${mangaId}_${encodeURIComponent(ch.name)}`;
-          const prog = await getReadingProgress(docId);
+          let prog = await getReadingProgress(docId);
+          if (!prog && ch.name) {
+            prog = await getReadingProgress(`manga_${mangaId}_${encodeURIComponent(ch.name)}`) || await getReadingProgress(ch.name);
+          }
           if (prog) {
+            const isReadVal = prog.isRead !== undefined ? Boolean(prog.isRead) : ((prog.progress || 0) >= 95 || Boolean(ch.isRead));
             return {
               ...ch,
               lastPage: prog.lastPage,
               totalPages: prog.totalPages,
-              progress: prog.progress,
-              isRead: prog.progress >= 95,
+              progress: prog.progress !== undefined ? prog.progress : (isReadVal ? 100 : 0),
+              isRead: isReadVal,
             };
           }
-          return ch;
+          return {
+            ...ch,
+            isRead: Boolean(ch.isRead || (ch.progress && ch.progress >= 95)),
+          };
         })
       );
 
@@ -827,9 +838,188 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
     setNoteText('');
   };
 
+  // ── Toggle Individual Chapter Completed / Unwatched ───────────────────────
+  const handleToggleChapterComplete = async (chapter) => {
+    const docId = chapter.id || `manga_${mangaId}_${encodeURIComponent(chapter.name)}`;
+    const currentlyRead = Boolean(chapter.isRead || (chapter.progress && chapter.progress >= 95));
+    const willBeRead = !currentlyRead;
+
+    const totalP = chapter.totalPages || 1;
+    const updatedProgress = willBeRead ? 100 : 0;
+    const updatedLastPage = willBeRead ? totalP : 1;
+
+    const progressPayload = {
+      documentId: docId,
+      lastPage: updatedLastPage,
+      totalPages: totalP,
+      progress: updatedProgress,
+      isRead: willBeRead,
+      lastReadAt: new Date().toISOString(),
+    };
+
+    // 1. Save to IndexedDB & localStorage
+    await saveReadingProgress(docId, progressPayload);
+    if (chapter.name) {
+      await saveReadingProgress(`manga_${mangaId}_${encodeURIComponent(chapter.name)}`, progressPayload);
+    }
+
+    // 2. Update React State & localStore
+    const updatedChapters = chapters.map((c) => {
+      const match = (c.id && chapter.id && c.id === chapter.id) || (c.name && chapter.name && c.name === chapter.name);
+      if (match) {
+        return {
+          ...c,
+          isRead: willBeRead,
+          progress: updatedProgress,
+          lastPage: updatedLastPage,
+          totalPages: totalP,
+        };
+      }
+      return c;
+    });
+    setChapters(updatedChapters);
+    setLocalChapters(mangaId, updatedChapters);
+
+    // 3. Recalculate Manga Progress
+    const newCompletedCount = updatedChapters.filter((c) => c.isRead || (c.progress && c.progress >= 95)).length;
+    const newOverallPct = updatedChapters.length > 0 ? Math.round((newCompletedCount / updatedChapters.length) * 100) : 0;
+    const updatedManga = {
+      ...manga,
+      progressPercent: newOverallPct,
+      completedChapters: newCompletedCount,
+      status: newOverallPct === 100 ? 'completed' : (newCompletedCount > 0 ? 'reading' : manga?.status || 'ready'),
+      updatedAt: new Date().toISOString(),
+    };
+    setManga(updatedManga);
+    upsertLocalManga(updatedManga);
+
+    // 4. Sync to Firestore if user logged in
+    const uid = currentUser?.uid || getUserId();
+    if (!isOffline && db && uid) {
+      try {
+        await setDoc(doc(db, 'users', uid, 'mangas', mangaId, 'progress', docId), progressPayload, { merge: true });
+        await updateDoc(doc(db, 'users', uid, 'mangas', mangaId), {
+          progressPercent: newOverallPct,
+          completedChapters: newCompletedCount,
+          status: updatedManga.status,
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        addToDirtyQueue({
+          type: 'SET_MANGA_PROGRESS',
+          dedupeKey: `PROGRESS_${mangaId}_${docId}`,
+          payload: { mangaId, documentId: docId, ...progressPayload },
+        });
+        addToDirtyQueue({
+          type: 'SET_MANGA',
+          dedupeKey: `SET_MANGA_${mangaId}`,
+          payload: updatedManga,
+        });
+      }
+    } else {
+      addToDirtyQueue({
+        type: 'SET_MANGA_PROGRESS',
+        dedupeKey: `PROGRESS_${mangaId}_${docId}`,
+        payload: { mangaId, documentId: docId, ...progressPayload },
+      });
+      addToDirtyQueue({
+        type: 'SET_MANGA',
+        dedupeKey: `SET_MANGA_${mangaId}`,
+        payload: updatedManga,
+      });
+    }
+  };
+
+  // ── Mark Entire Manga Complete (or Unread) ─────────────────────────────────
+  const handleMarkEntireMangaComplete = async (shouldComplete = true) => {
+    if (!chapters || chapters.length === 0) {
+      setShowMarkAllModal(false);
+      return;
+    }
+    setMarkingAll(true);
+
+    try {
+      const updatedChapters = [];
+
+      for (const ch of chapters) {
+        const docId = ch.id || `manga_${mangaId}_${encodeURIComponent(ch.name)}`;
+        const totalP = ch.totalPages || 1;
+        const prog = shouldComplete ? 100 : 0;
+        const lastP = shouldComplete ? totalP : 1;
+
+        const progressPayload = {
+          documentId: docId,
+          lastPage: lastP,
+          totalPages: totalP,
+          progress: prog,
+          isRead: shouldComplete,
+          lastReadAt: new Date().toISOString(),
+        };
+
+        await saveReadingProgress(docId, progressPayload);
+        if (ch.name) {
+          await saveReadingProgress(`manga_${mangaId}_${encodeURIComponent(ch.name)}`, progressPayload);
+        }
+
+        updatedChapters.push({
+          ...ch,
+          isRead: shouldComplete,
+          progress: prog,
+          lastPage: lastP,
+          totalPages: totalP,
+        });
+      }
+
+      setChapters(updatedChapters);
+      setLocalChapters(mangaId, updatedChapters);
+
+      const newCompletedCount = shouldComplete ? updatedChapters.length : 0;
+      const newOverallPct = shouldComplete ? 100 : 0;
+      const updatedManga = {
+        ...manga,
+        progressPercent: newOverallPct,
+        completedChapters: newCompletedCount,
+        status: shouldComplete ? 'completed' : 'ready',
+        updatedAt: new Date().toISOString(),
+      };
+      setManga(updatedManga);
+      upsertLocalManga(updatedManga);
+
+      // Firestore sync
+      const uid = currentUser?.uid || getUserId();
+      if (!isOffline && db && uid) {
+        try {
+          await updateDoc(doc(db, 'users', uid, 'mangas', mangaId), {
+            progressPercent: newOverallPct,
+            completedChapters: newCompletedCount,
+            status: updatedManga.status,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (err) {
+          addToDirtyQueue({
+            type: 'SET_MANGA',
+            dedupeKey: `SET_MANGA_${mangaId}`,
+            payload: updatedManga,
+          });
+        }
+      } else {
+        addToDirtyQueue({
+          type: 'SET_MANGA',
+          dedupeKey: `SET_MANGA_${mangaId}`,
+          payload: updatedManga,
+        });
+      }
+    } catch (err) {
+      console.error('[MangaDetail] Error marking all complete:', err);
+    } finally {
+      setMarkingAll(false);
+      setShowMarkAllModal(false);
+    }
+  };
+
   // Calculate Overall Progress
   const completedCount = chapters.filter((c) => c.isRead || (c.progress && c.progress >= 95)).length;
-  const overallProgressPct = chapters.length > 0 ? Math.round((completedCount / chapters.length) * 100) : 0;
+  const overallProgressPct = manga.totalChapters > 0 ? Math.round((completedCount / manga.totalChapters) * 100) : 0;
   const currentRatingNum = manga?.rating ? parseFloat(manga.rating) : 0;
 
   if (loading) {
@@ -856,6 +1046,21 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
         </button>
 
         <div className="flex items-center gap-2">
+          {/* Mark Manga Complete Button */}
+          <button
+            type="button"
+            onClick={() => setShowMarkAllModal(true)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
+              overallProgressPct === 100
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.25)]'
+                : 'bg-emerald-600/15 hover:bg-emerald-600/25 border-emerald-500/30 text-emerald-400 hover:text-emerald-300'
+            }`}
+            title={overallProgressPct === 100 ? "Manga Fully Completed (click to review or mark unread)" : "Mark Entire Manga as Completed"}
+          >
+            <CheckCircle2 size={14} className="text-emerald-400" />
+            <span>{overallProgressPct === 100 ? 'Fully Read' : 'Mark Complete'}</span>
+          </button>
+
           {/* Rating Button */}
           <button
             type="button"
@@ -977,11 +1182,11 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
               <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
                 <span className="text-[10px] text-gray-400 font-bold uppercase block">Chapters</span>
-                <span className="text-lg font-black text-white">{chapters.length}</span>
+                <span className="text-lg font-black text-white">{chapters.length} / {manga.totalChapters}</span>
               </div>
               <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
                 <span className="text-[10px] text-gray-400 font-bold uppercase block">Completed</span>
-                <span className="text-lg font-black text-emerald-400">{completedCount}</span>
+                <span className="text-lg font-black text-emerald-400">{completedCount} / {manga.totalChapters}</span>
               </div>
               <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
                 <span className="text-[10px] text-gray-400 font-bold uppercase block">Reading Progress</span>
@@ -1309,20 +1514,31 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                           </div>
                         </div>
 
-                        {isRead && (
-                          <div className="p-1 rounded-full bg-emerald-500/20 text-emerald-400" title="Completed">
-                            <Check size={13} />
-                          </div>
-                        )}
+                        {/* Toggle Chapter Complete Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleChapterComplete(chapter);
+                          }}
+                          className={`p-1.5 rounded-full transition-all duration-200 cursor-pointer shrink-0 ${
+                            isRead
+                              ? 'bg-emerald-500/25 text-emerald-400 hover:bg-emerald-500/40 hover:text-emerald-300 ring-1 ring-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.25)]'
+                              : 'bg-white/5 text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10 border border-white/10 hover:border-emerald-500/30'
+                          }`}
+                          title={isRead ? "Mark as unread (click to mark unwatched)" : "Mark as complete"}
+                        >
+                          <Check size={13} strokeWidth={isRead ? 2.8 : 2} />
+                        </button>
                       </div>
 
                       {/* Reading Progress Indicator */}
                       <div className="space-y-1 pt-1">
                         <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
                           <span>
-                            {hasStarted ? `Page ${chapter.lastPage}` : 'Unread'}
+                            {isRead ? 'Completed' : (hasStarted ? `Page ${chapter.lastPage}` : 'Unread')}
                           </span>
-                          <span>{chapter.progress ? `${chapter.progress}%` : ''}</span>
+                          <span>{isRead ? '100%' : (chapter.progress ? `${chapter.progress}%` : '')}</span>
                         </div>
                         <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
                           <div
@@ -1848,6 +2064,80 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                 >
                   Save Note
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Confirmation Modal: Mark Entire Manga Complete / Unread ───────── */}
+      <AnimatePresence>
+        {showMarkAllModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-md glass-panel p-6 rounded-3xl border border-white/15 shadow-2xl bg-[#0d1117]/95 text-white"
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                  <CheckCircle2 size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">
+                    {overallProgressPct === 100 ? 'Manga Reading Status' : 'Mark Entire Manga Complete'}
+                  </h3>
+                  <p className="text-xs text-gray-400 font-mono truncate">{manga?.title}</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 py-2 text-xs text-gray-300">
+                {overallProgressPct === 100 ? (
+                  <p>
+                    All <span className="text-emerald-400 font-bold">{chapters.length} chapters</span> of this manga are currently marked as completed. Would you like to mark them all as unread?
+                  </p>
+                ) : (
+                  <p>
+                    Are you sure you want to mark all <span className="text-emerald-400 font-bold">{chapters.length} chapters</span> of <span className="text-white font-semibold">{manga?.title}</span> as fully read and completed?
+                  </p>
+                )}
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between text-[11px] text-gray-400 font-mono">
+                  <span>Current Progress:</span>
+                  <span className="text-emerald-400 font-bold">{completedCount} / {manga.totalChapters} chapters ({overallProgressPct}%)</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-4 mt-3 border-t border-white/10">
+                <button
+                  type="button"
+                  disabled={markingAll}
+                  onClick={() => setShowMarkAllModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-gray-400 hover:text-white transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                {overallProgressPct === 100 ? (
+                  <button
+                    type="button"
+                    disabled={markingAll}
+                    onClick={() => handleMarkEntireMangaComplete(false)}
+                    className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold uppercase tracking-wider transition cursor-pointer shadow-lg disabled:opacity-50"
+                  >
+                    {markingAll ? <Loader2 className="animate-spin" size={14} /> : <RotateCcw size={14} />}
+                    <span>Mark All Unread</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={markingAll}
+                    onClick={() => handleMarkEntireMangaComplete(true)}
+                    className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase tracking-wider transition cursor-pointer shadow-lg shadow-emerald-600/30 disabled:opacity-50"
+                  >
+                    {markingAll ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} strokeWidth={2.5} />}
+                    <span>Mark All Complete</span>
+                  </button>
+                )}
               </div>
             </motion.div>
           </div>

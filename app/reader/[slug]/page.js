@@ -81,10 +81,11 @@ export default function ReaderPage() {
 
   // Compute current chapter index to determine previous and next chapters
   const currentChapterIndex = chapters.findIndex((c) => 
-    (chapterIdParam && c.id === chapterIdParam) || 
+    (chapterIdParam && (c.id === chapterIdParam || c.name === chapterIdParam || encodeURIComponent(c.name || '') === chapterIdParam)) || 
     (resolvedPath && (c.filePath === resolvedPath || c.filePath?.replace(/\\/g, '/') === resolvedPath?.replace(/\\/g, '/')))
   );
 
+  const currentChapter = currentChapterIndex >= 0 ? chapters[currentChapterIndex] : null;
   const prevChapter = currentChapterIndex > 0 ? chapters[currentChapterIndex - 1] : null;
   const nextChapter = currentChapterIndex >= 0 && currentChapterIndex < chapters.length - 1 ? chapters[currentChapterIndex + 1] : null;
 
@@ -106,7 +107,7 @@ export default function ReaderPage() {
   }
 
   const streamUrl = `/api/manga/stream?path=${encodeURIComponent(resolvedPath)}`;
-  const docId = chapterIdParam || `manga_${mangaId}_${encodeURIComponent(resolvedPath.split(/[\\/]/).pop())}`;
+  const docId = currentChapter?.id || chapterIdParam || `manga_${mangaId}_${encodeURIComponent(resolvedPath.split(/[\\/]/).pop())}`;
 
   return (
     <div className="fixed inset-0 bg-[#0d1117] overflow-hidden">
@@ -114,9 +115,10 @@ export default function ReaderPage() {
         key={resolvedPath}
         sourceUrl={streamUrl}
         documentId={docId}
+        chapterId={currentChapter?.id || chapterIdParam}
         mangaId={mangaId}
         title={resolvedTitle || 'Manga Reader'}
-        chapterTitle={resolvedChapterTitle}
+        chapterTitle={resolvedChapterTitle || currentChapter?.name || currentChapter?.title || ''}
         onPrevChapter={prevChapter ? () => handleOpenChapter(prevChapter) : undefined}
         onNextChapter={nextChapter ? () => handleOpenChapter(nextChapter) : undefined}
         hasPrevChapter={!!prevChapter}

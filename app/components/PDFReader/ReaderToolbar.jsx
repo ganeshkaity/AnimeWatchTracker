@@ -49,6 +49,9 @@ export default function ReaderToolbar({
   readingMode,
   onChangeReadingMode,
   downloadUrl,
+  // Chapter completion toggle
+  isChapterCompleted = false,
+  onToggleChapterRead,
 }) {
   const [showZoomMenu, setShowZoomMenu] = useState(false);
   const [customZoom, setCustomZoom] = useState('');
@@ -164,6 +167,25 @@ export default function ReaderToolbar({
 
         {/* Right Side: Tool Toggles */}
         <div className="flex items-center gap-1 sm:gap-1.5">
+          {/* Mark Complete / Read Toggle */}
+          {onToggleChapterRead && (
+            <button
+              type="button"
+              onClick={onToggleChapterRead}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                isChapterCompleted
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.25)] hover:bg-emerald-500/30 hover:text-emerald-300'
+                  : 'bg-white/5 text-gray-300 hover:text-emerald-400 hover:bg-emerald-500/10 border-white/10 hover:border-emerald-500/30'
+              }`}
+              title={isChapterCompleted ? "Mark Chapter Unread" : "Mark Chapter Completed"}
+            >
+              <Check size={14} strokeWidth={isChapterCompleted ? 3 : 2} className={isChapterCompleted ? 'text-emerald-400' : 'text-gray-400'} />
+              <span className="hidden sm:inline text-[11px]">
+                {isChapterCompleted ? 'Completed' : 'Mark Read'}
+              </span>
+            </button>
+          )}
+
           {/* Annotations Toggle */}
           <button
             onClick={onToggleAnnotations}
