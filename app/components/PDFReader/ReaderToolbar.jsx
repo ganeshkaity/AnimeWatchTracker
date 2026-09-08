@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize, Minimize,
   RotateCw, Search, Bookmark, Layers, BookOpen, Settings, Download,
-  Columns, Square, Rows, Edit3, Check, X
+  Columns, Square, Rows, Edit3, Check, X, Lock
 } from 'lucide-react';
 
 export default function ReaderToolbar({
@@ -21,6 +21,7 @@ export default function ReaderToolbar({
   onFitWidth,
   onFitPage,
   onRotate,
+  onLock,
   isFullscreen,
   onToggleFullscreen,
   onBack,
@@ -426,33 +427,43 @@ export default function ReaderToolbar({
             )}
           </div>
 
-          {/* Quick Fit Width / Page */}
+          {/* Quick Fit Width (SVG only) */}
           <button
+            type="button"
             onClick={onFitWidth}
-            className="hidden sm:flex px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/15 text-[10px] font-bold text-gray-200 hover:text-white border border-white/10 transition cursor-pointer"
+            className="p-1.5 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
             title="Fit to Width"
           >
-            Fit W
-          </button>
-          <button
-            onClick={onFitPage}
-            className="hidden sm:flex px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/15 text-[10px] font-bold text-gray-200 hover:text-white border border-white/10 transition cursor-pointer"
-            title="Fit to Page"
-          >
-            Fit Page
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 4v16M22 4v16M17 12H7M11 8l-4 4 4 4M13 8l4 4-4 4" />
+            </svg>
           </button>
 
-          {/* Rotate Clockwise */}
+          {/* Quick Fit Page (SVG only) */}
           <button
+            type="button"
+            onClick={onFitPage}
+            className="p-1.5 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
+            title="Fit to Page"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 2h16M4 22h16M12 17V7M8 11l4-4 4 4M8 13l4 4-4 4" />
+            </svg>
+          </button>
+
+          {/* Rotate Clockwise (Current page only, SVG only) */}
+          <button
+            type="button"
             onClick={onRotate}
             className="p-1.5 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
-            title="Rotate Clockwise 90° (R)"
+            title="Rotate Page 90° (R)"
           >
             <RotateCw size={15} />
           </button>
 
-          {/* Layout Mode quick toggle */}
+          {/* Layout Mode quick toggle (SVG only) */}
           <button
+            type="button"
             onClick={() => {
               const nextMode = readingMode === 'single' ? 'double' : readingMode === 'double' ? 'vertical' : 'single';
               onChangeReadingMode(nextMode);
@@ -467,6 +478,16 @@ export default function ReaderToolbar({
             ) : (
               <Rows size={15} />
             )}
+          </button>
+
+          {/* Lock Controls (SVG only, no text) */}
+          <button
+            type="button"
+            onClick={onLock}
+            className="p-1.5 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
+            title="Lock Controls (Hide UI)"
+          >
+            <Lock size={15} />
           </button>
         </div>
       </footer>

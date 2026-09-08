@@ -22,7 +22,7 @@ import { useOffline } from '../../context/OfflineContext';
 import { addToDirtyQueue, getUserId, getLocalChapters, setLocalChapters, getLocalManga, upsertLocalManga } from '../../utils/localStore';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { Loader2, AlertCircle, RotateCcw } from 'lucide-react';
+import { Loader2, AlertCircle, RotateCcw, Lock, Unlock } from 'lucide-react';
 
 export default function PDFReader({
   sourceUrl,
@@ -57,11 +57,12 @@ export default function PDFReader({
 
   // Viewport & Transform state
   const [scale, setScale] = useState(1.0);
-  const [rotation, setRotation] = useState(0);
+  const [pageRotations, setPageRotations] = useState({}); // Per-page temporary rotation: { [pageNum]: deg }
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [centerAlign, setCenterAlign] = useState(true);
 
-  // Auto-hide toolbar state
+  // Lock state & Auto-hide toolbar state
+  const [isLocked, setIsLocked] = useState(false);
   const [showToolbars, setShowToolbars] = useState(true);
   const hideTimerRef = useRef(null);
 
@@ -102,11 +103,48 @@ export default function PDFReader({
   const [bookmarks, setBookmarks] = useState([]);
   const [pageNotes, setPageNotes] = useState([]);
 
+  // Temporary current page rotation (not saved to DB / storage)
+  const handleRotateCurrentPage = useCallback(() => {
+    setPageRotations((prev) => {
+      const cur = prev[currentPage] || 0;
+      const next = (cur + 90) % 360;
+      if (next === 0) {
+        const copy = { ...prev };
+        delete copy[currentPage];
+        return copy;
+      }
+      return { ...prev, [currentPage]: next };
+    });
+  }, [currentPage]);
+
+  // Lock controls: hide all controls and sidebars
+  const handleLock = useCallback(() => {
+    setIsLocked(true);
+    setShowToolbars(false);
+    setShowThumbnails(false);
+    setShowOutline(false);
+    setShowBookmarks(false);
+    setShowSearch(false);
+    setShowSettings(false);
+    setShowAnnotationsToolbar(false);
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  }, []);
+
+  // Unlock controls: restore toolbars
+  const handleUnlock = useCallback(() => {
+    setIsLocked(false);
+    setShowToolbars(true);
+  }, []);
+
   // Track when mouse is hovering any controls/buttons
   const isHoveringControlsRef = useRef(false);
 
   // Auto-hide toolbar timer reset
   const resetAutoHideTimer = useCallback(() => {
+    if (isLocked) return;
     setShowToolbars(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
 
@@ -122,21 +160,23 @@ export default function PDFReader({
         }
       }, 3500);
     }
-  }, [settings.toolbarAutoHide, showAnnotationsToolbar, activeTool, showThumbnails, showOutline, showBookmarks, showSearch, showSettings]);
+  }, [isLocked, settings.toolbarAutoHide, showAnnotationsToolbar, activeTool, showThumbnails, showOutline, showBookmarks, showSearch, showSettings]);
 
   const handleControlsMouseEnter = useCallback(() => {
+    if (isLocked) return;
     isHoveringControlsRef.current = true;
     setShowToolbars(true);
     if (hideTimerRef.current) {
       clearTimeout(hideTimerRef.current);
       hideTimerRef.current = null;
     }
-  }, []);
+  }, [isLocked]);
 
   const handleControlsMouseLeave = useCallback(() => {
+    if (isLocked) return;
     isHoveringControlsRef.current = false;
     resetAutoHideTimer();
-  }, [resetAutoHideTimer]);
+  }, [isLocked, resetAutoHideTimer]);
 
   // ── 1. Initialize Document & Stored State ──────────────────────────────────
   useEffect(() => {
@@ -242,7 +282,7 @@ export default function PDFReader({
         isRead: isAutoRead,
         isWatched: isAutoRead,
         zoom: scale,
-        rotation,
+        rotation: 0,
         readingMode: settings.readingMode,
         direction: settings.direction,
       };
@@ -377,7 +417,7 @@ export default function PDFReader({
         }
       }
     }, 600);
-  }, [documentId, totalPages, scale, rotation, settings.readingMode, settings.direction, currentUser, isOffline, mangaId, onProgressUpdate, isChapterCompleted, chapterId, chapterTitle]);
+  }, [documentId, totalPages, scale, settings.readingMode, settings.direction, currentUser, isOffline, mangaId, onProgressUpdate, isChapterCompleted, chapterId, chapterTitle]);
 
   // ── Explicit Toggle Chapter Complete in Reader ───────────────────────────────
   const handleToggleChapterRead = useCallback(async () => {
@@ -396,7 +436,7 @@ export default function PDFReader({
       isRead: nextReadState,
       isWatched: nextReadState,
       zoom: scale,
-      rotation,
+      rotation: 0,
       readingMode: settings.readingMode,
       direction: settings.direction,
       lastReadAt: new Date().toISOString(),
@@ -532,7 +572,7 @@ export default function PDFReader({
         });
       }
     }
-  }, [documentId, chapterId, isChapterCompleted, totalPages, scale, rotation, settings.readingMode, settings.direction, mangaId, chapterTitle, onProgressUpdate, currentUser, isOffline]);
+  }, [documentId, chapterId, isChapterCompleted, totalPages, scale, settings.readingMode, settings.direction, mangaId, chapterTitle, onProgressUpdate, currentUser, isOffline]);
 
   // ── 3. Page Navigation ───────────────────────────────────────────────────────
   const handlePageChange = useCallback((newPage, isExplicitJump = false) => {
@@ -635,15 +675,29 @@ export default function PDFReader({
 
   // ── 6. Prevent Browser-level Window Zoom & Global Wheel/Gesture Handler ──
   useEffect(() => {
+    let isGlobalZoomingRecent = false;
+    let globalZoomTimer = null;
+
     const handleGlobalWheel = (e) => {
       // If user holds Ctrl or Cmd while wheeling anywhere on screen, zoom ONLY the PDF page
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
+        isGlobalZoomingRecent = true;
+        if (globalZoomTimer) clearTimeout(globalZoomTimer);
+        globalZoomTimer = setTimeout(() => {
+          isGlobalZoomingRecent = false;
+        }, 350);
+
         setScale((prev) => {
           const change = -e.deltaY * 0.003 * prev;
           const next = Math.max(0.1, Math.min(1000, Number((prev + change).toFixed(2))));
           return next;
         });
+        return;
+      }
+
+      if (isGlobalZoomingRecent) {
+        e.preventDefault();
       }
     };
 
@@ -792,7 +846,7 @@ export default function PDFReader({
         case 'r':
         case 'R':
           e.preventDefault();
-          setRotation((r) => (r + 90) % 360);
+          handleRotateCurrentPage();
           break;
 
         default:
@@ -802,7 +856,7 @@ export default function PDFReader({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentPage, totalPages, settings.direction, handlePageChange, handleUndo, handleRedo, resetAutoHideTimer]);
+  }, [currentPage, totalPages, settings.direction, handlePageChange, handleUndo, handleRedo, resetAutoHideTimer, handleRotateCurrentPage]);
 
   // ── 7. Fullscreen Toggle ────────────────────────────────────────────────────
   const handleToggleFullscreen = () => {
@@ -921,11 +975,11 @@ export default function PDFReader({
         </div>
       )}
 
-      {/* Top Header Toolbar */}
+      {/* Top Header & Bottom Toolbar */}
       <div
         onMouseEnter={handleControlsMouseEnter}
         onMouseLeave={handleControlsMouseLeave}
-        className={`transition-opacity duration-300 ${showToolbars ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        className={`transition-opacity duration-300 ${!isLocked && showToolbars ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
       >
         <ReaderToolbar
           title={title}
@@ -958,7 +1012,8 @@ export default function PDFReader({
           onToggleCenterAlign={setCenterAlign}
           onFitWidth={() => setScale(1.0)}
           onFitPage={() => setScale(0.85)}
-          onRotate={() => setRotation((r) => (r + 90) % 360)}
+          onRotate={handleRotateCurrentPage}
+          onLock={handleLock}
           isFullscreen={isFullscreen}
           onToggleFullscreen={handleToggleFullscreen}
           onBack={onBack}
@@ -1029,7 +1084,8 @@ export default function PDFReader({
           onPageChange={handlePageChange}
           scale={scale}
           onScaleChange={setScale}
-          rotation={rotation}
+          rotation={0}
+          pageRotations={pageRotations}
           settings={settings}
           activeTool={activeTool}
           toolColor={toolColor}
@@ -1045,7 +1101,7 @@ export default function PDFReader({
       </div>
 
       {/* Floating Annotation Toolbar Dock */}
-      {showAnnotationsToolbar && (
+      {!isLocked && showAnnotationsToolbar && (
         <div onMouseEnter={handleControlsMouseEnter} onMouseLeave={handleControlsMouseLeave}>
           <AnnotationToolbar
             activeTool={activeTool}
@@ -1070,7 +1126,7 @@ export default function PDFReader({
       )}
 
       {/* Sidebars & Overlays */}
-      {showThumbnails && (
+      {!isLocked && showThumbnails && (
         <ThumbnailSidebar
           pdfDoc={pdfDoc}
           totalPages={totalPages}
@@ -1083,7 +1139,7 @@ export default function PDFReader({
         />
       )}
 
-      {showOutline && (
+      {!isLocked && showOutline && (
         <OutlineSidebar
           pdfDoc={pdfDoc}
           onSelectPage={(p) => {
@@ -1094,7 +1150,7 @@ export default function PDFReader({
         />
       )}
 
-      {showBookmarks && (
+      {!isLocked && showBookmarks && (
         <BookmarkPanel
           currentPage={currentPage}
           bookmarks={bookmarks}
@@ -1111,7 +1167,7 @@ export default function PDFReader({
         />
       )}
 
-      {showSearch && (
+      {!isLocked && showSearch && (
         <SearchPanel
           pdfDoc={pdfDoc}
           totalPages={totalPages}
@@ -1122,12 +1178,26 @@ export default function PDFReader({
         />
       )}
 
-      {showSettings && (
+      {!isLocked && showSettings && (
         <SettingsPanel
           settings={settings}
           onUpdateSettings={handleUpdateSettings}
           onClose={() => setShowSettings(false)}
         />
+      )}
+
+      {/* Floating Unlock Button in bottom corner when locked */}
+      {isLocked && (
+        <button
+          type="button"
+          onClick={handleUnlock}
+          className="fixed bottom-6 right-6 z-50 flex items-center justify-center p-3.5 rounded-2xl bg-black/85 hover:bg-purple-600/90 text-white border border-white/20 shadow-2xl backdrop-blur-xl transition-all duration-200 hover:scale-110 active:scale-95 group cursor-pointer"
+          title="Unlock Controls"
+          aria-label="Unlock controls"
+        >
+          <Lock size={20} className="group-hover:hidden transition-transform text-white/90" />
+          <Unlock size={20} className="hidden group-hover:block transition-transform text-purple-200" />
+        </button>
       )}
     </div>
   );

@@ -42,6 +42,8 @@ export function attachGestureListeners(element, options = {}) {
   let isMouseDragging = false;
   let lastMouseX = 0;
   let lastMouseY = 0;
+  let isZoomingRecent = false;
+  let zoomRecentTimer = null;
 
   // ── Mouse Drag Panning (when zoomed or in free placement mode) ───────────
   function handleMouseDown(e) {
@@ -62,13 +64,9 @@ export function attachGestureListeners(element, options = {}) {
       lastMouseX = e.clientX;
       lastMouseY = e.clientY;
 
-      const currentPan = getPan ? getPan() : { x: 0, y: 0 };
-      if (onPanChange) {
-        onPanChange({
-          x: currentPan.x + dx,
-          y: currentPan.y + dy,
-        });
-      }
+      // Directly scroll the element container for rock-solid, conflict-free panning
+      element.scrollLeft -= dx;
+      element.scrollTop -= dy;
     }
   }
 
@@ -81,22 +79,31 @@ export function attachGestureListeners(element, options = {}) {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       e.stopPropagation();
+
+      isZoomingRecent = true;
+      if (zoomRecentTimer) clearTimeout(zoomRecentTimer);
+      zoomRecentTimer = setTimeout(() => {
+        isZoomingRecent = false;
+      }, 350);
+
       const currentZoom = getZoom ? getZoom() : 1.0;
       const change = -e.deltaY * 0.003 * currentZoom;
       const newZoom = Math.min(1000.0, Math.max(0.1, Number((currentZoom + change).toFixed(2))));
       if (onZoomChange) {
         onZoomChange(newZoom, { clientX: e.clientX, clientY: e.clientY });
       }
-    } else if (isZoomed && isZoomed()) {
-      // Pan with 2-finger trackpad scroll when zoomed
-      const currentPan = getPan ? getPan() : { x: 0, y: 0 };
-      if (onPanChange) {
-        onPanChange({
-          x: currentPan.x - e.deltaX,
-          y: currentPan.y - e.deltaY,
-        });
-      }
-    } else if (onWheelScroll) {
+      return;
+    }
+
+    if (isZoomingRecent) {
+      // Absorb residual trackpad/wheel inertial events immediately following a zoom gesture
+      // to completely prevent unwanted accidental auto-scroll jumps
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
+    if (onWheelScroll) {
       if (Math.abs(e.deltaY) > 20) {
         if (!wheelTimeout) {
           if (e.deltaY > 0) {

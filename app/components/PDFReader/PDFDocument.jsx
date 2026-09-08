@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import PageRenderer from './PageRenderer';
 import { attachGestureListeners } from './GestureManager';
 
@@ -11,7 +11,8 @@ export default function PDFDocument({
   onPageChange,
   scale,
   onScaleChange,
-  rotation,
+  rotation = 0,
+  pageRotations = {},
   settings,
   activeTool,
   toolColor,
@@ -26,6 +27,9 @@ export default function PDFDocument({
 }) {
   const containerRef = useRef(null);
   const isProgrammaticScrollRef = useRef(false);
+  const pendingZoomAnchorRef = useRef(null);
+  const currentCenterSnapshotRef = useRef(null);
+  const prevScaleRef = useRef(scale);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [pageDimensions, setPageDimensions] = useState({});
   const [baseAspectRatio, setBaseAspectRatio] = useState(1.414);
@@ -110,15 +114,39 @@ export default function PDFDocument({
     }
   }, [totalPages, currentPage, settings.readingMode, scale, onPageChange]);
 
-  // In vertical webtoon mode, track active page based on viewport center smoothly with requestAnimationFrame
+  // Keep track of the page and fraction at the center of the viewport during reading
+  const updateCenterSnapshot = useCallback(() => {
+    if (isProgrammaticScrollRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const centerX = containerRect.left + containerRect.width / 2;
+    const centerY = containerRect.top + containerRect.height / 2;
+
+    const pageEls = container.querySelectorAll('[data-page-number]');
+    for (let i = 0; i < pageEls.length; i++) {
+      const rect = pageEls[i].getBoundingClientRect();
+      if (rect.top <= centerY && rect.bottom >= centerY) {
+        currentCenterSnapshotRef.current = {
+          pageNum: pageEls[i].getAttribute('data-page-number'),
+          fractionY: rect.height > 0 ? (centerY - rect.top) / rect.height : 0.5,
+          fractionX: rect.width > 0 ? (centerX - rect.left) / rect.width : 0.5,
+          anchorScreenX: centerX,
+          anchorScreenY: centerY,
+        };
+        break;
+      }
+    }
+  }, []);
+
+  // Track active page and update viewport center snapshot on scroll
   useEffect(() => {
-    if (settings.readingMode !== 'vertical') return;
     const container = containerRef.current;
     if (!container) return;
 
     let ticking = false;
     const handleScroll = () => {
-      // Ignore scroll events during smooth programmatic jump to target page
       if (isProgrammaticScrollRef.current) return;
 
       if (!ticking) {
@@ -127,23 +155,28 @@ export default function PDFDocument({
             ticking = false;
             return;
           }
-          const containerRect = container.getBoundingClientRect();
-          const targetY = containerRect.top + containerRect.height * 0.45;
 
-          const pageEls = container.querySelectorAll('[data-page-number]');
-          let foundPage = null;
+          updateCenterSnapshot();
 
-          for (let i = 0; i < pageEls.length; i++) {
-            const el = pageEls[i];
-            const rect = el.getBoundingClientRect();
-            if (rect.top <= targetY && rect.bottom >= targetY) {
-              foundPage = parseInt(el.getAttribute('data-page-number'), 10);
-              break;
+          if (settings.readingMode === 'vertical') {
+            const containerRect = container.getBoundingClientRect();
+            const targetY = containerRect.top + containerRect.height * 0.45;
+
+            const pageEls = container.querySelectorAll('[data-page-number]');
+            let foundPage = null;
+
+            for (let i = 0; i < pageEls.length; i++) {
+              const el = pageEls[i];
+              const rect = el.getBoundingClientRect();
+              if (rect.top <= targetY && rect.bottom >= targetY) {
+                foundPage = parseInt(el.getAttribute('data-page-number'), 10);
+                break;
+              }
             }
-          }
 
-          if (foundPage && foundPage !== currentPage) {
-            onPageChange(foundPage);
+            if (foundPage && foundPage !== currentPage) {
+              onPageChange(foundPage);
+            }
           }
           ticking = false;
         });
@@ -155,7 +188,7 @@ export default function PDFDocument({
     return () => {
       container.removeEventListener('scroll', handleScroll);
     };
-  }, [settings.readingMode, currentPage, onPageChange]);
+  }, [settings.readingMode, currentPage, onPageChange, updateCenterSnapshot]);
 
   // Handle explicit jump requests (from top pill input, thumbnails, bookmarks, search)
   useEffect(() => {
@@ -222,6 +255,88 @@ export default function PDFDocument({
   const centerAlignRef = useRef(centerAlign);
   centerAlignRef.current = centerAlign;
 
+  // Capture anchor point before zoom (either mouse position or current center of viewport)
+  const captureZoomAnchor = useCallback((center = null) => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const anchorX = (center && typeof center.clientX === 'number') ? center.clientX : (containerRect.left + containerRect.width / 2);
+    const anchorY = (center && typeof center.clientY === 'number') ? center.clientY : (containerRect.top + containerRect.height / 2);
+
+    const pageEls = container.querySelectorAll('[data-page-number]');
+    if (pageEls.length === 0) return;
+
+    let targetPage = null;
+    let targetRect = null;
+
+    for (let i = 0; i < pageEls.length; i++) {
+      const rect = pageEls[i].getBoundingClientRect();
+      if (rect.top <= anchorY && rect.bottom >= anchorY) {
+        targetPage = pageEls[i];
+        targetRect = rect;
+        break;
+      }
+    }
+
+    if (!targetPage) {
+      let closestDist = Infinity;
+      for (let i = 0; i < pageEls.length; i++) {
+        const rect = pageEls[i].getBoundingClientRect();
+        const dist = Math.abs((rect.top + rect.bottom) / 2 - anchorY);
+        if (dist < closestDist) {
+          closestDist = dist;
+          targetPage = pageEls[i];
+          targetRect = rect;
+        }
+      }
+    }
+
+    if (targetPage && targetRect) {
+      pendingZoomAnchorRef.current = {
+        pageNum: targetPage.getAttribute('data-page-number'),
+        fractionY: targetRect.height > 0 ? (anchorY - targetRect.top) / targetRect.height : 0.5,
+        fractionX: targetRect.width > 0 ? (anchorX - targetRect.left) / targetRect.width : 0.5,
+        anchorScreenX: anchorX,
+        anchorScreenY: anchorY,
+      };
+    }
+  }, []);
+
+  // Synchronously adjust scroll position during zoom changes so the image stays locked on screen
+  useLayoutEffect(() => {
+    if (prevScaleRef.current === scale) return;
+    prevScaleRef.current = scale;
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Use specific cursor anchor if available, otherwise fall back to viewport center snapshot
+    const anchor = pendingZoomAnchorRef.current || currentCenterSnapshotRef.current;
+    pendingZoomAnchorRef.current = null;
+
+    if (anchor && anchor.pageNum) {
+      const targetEl = container.querySelector(`[data-page-number="${anchor.pageNum}"]`);
+      if (targetEl) {
+        isProgrammaticScrollRef.current = true;
+
+        const newRect = targetEl.getBoundingClientRect();
+        const currentPointY = newRect.top + anchor.fractionY * newRect.height;
+        const currentPointX = newRect.left + anchor.fractionX * newRect.width;
+
+        const diffY = currentPointY - anchor.anchorScreenY;
+        const diffX = currentPointX - anchor.anchorScreenX;
+
+        container.scrollTop += diffY;
+        container.scrollLeft += diffX;
+
+        setTimeout(() => {
+          isProgrammaticScrollRef.current = false;
+        }, 120);
+      }
+    }
+  }, [scale]);
+
   // Gestures setup — attached once per container, never reset during pinch/drag gestures
   useEffect(() => {
     const el = containerRef.current;
@@ -232,7 +347,8 @@ export default function PDFDocument({
       getPan: () => panRef.current,
       isZoomed: () => !centerAlignRef.current || scaleRef.current > 1.05,
       onZoomChange: (newZoom, center) => {
-        onScaleChangeRef.current(newZoom, center);
+        captureZoomAnchor(center);
+        onScaleChangeRef.current(newZoom);
       },
       onPanChange: (newPan) => {
         if (!centerAlignRef.current || settingsRef.current.readingMode !== 'vertical') {
@@ -257,6 +373,7 @@ export default function PDFDocument({
         }
       },
       onDoubleTap: () => {
+        captureZoomAnchor();
         if (scaleRef.current > 1.2) {
           onScaleChangeRef.current(1.0);
           setPan({ x: 0, y: 0 });
@@ -267,7 +384,7 @@ export default function PDFDocument({
     });
 
     return cleanup;
-  }, [handleWheelScroll]);
+  }, [handleWheelScroll, captureZoomAnchor]);
 
   // Edge click zones on mobile/desktop for navigation when select tool active
   const handleEdgeClick = (zone) => {
@@ -335,7 +452,7 @@ export default function PDFDocument({
             : settings.readingMode === 'double'
             ? 'm-auto flex flex-row items-center justify-center flex-wrap gap-4 pt-16 sm:pt-20 pb-20 px-6'
             : 'm-auto flex flex-col items-center justify-center pt-16 sm:pt-20 pb-20 px-6'
-        } ${settings.pageTransition && settings.readingMode !== 'vertical' && centerAlign ? 'duration-150 transition-transform' : 'duration-0'}`}
+        } ${settings.pageTransition && settings.readingMode !== 'vertical' && centerAlign && scale <= 1.05 ? 'duration-150 transition-transform' : 'duration-0 transition-none'}`}
         style={{
           transform: (!centerAlign || settings.readingMode !== 'vertical') ? `translate(${pan.x}px, ${pan.y}px)` : 'none',
         }}
@@ -345,13 +462,15 @@ export default function PDFDocument({
           const isWithinActiveWindow = settings.readingMode !== 'vertical' || (pageNum >= minActive && pageNum <= maxActive);
           const isPriority = pageNum >= currentPage && pageNum <= currentPage + 2;
 
+          const pageRotation = (((pageRotations && pageRotations[pageNum]) || 0) + (rotation || 0)) % 360;
+
           return (
             <PageRenderer
               key={`page-${pageNum}`}
               pdfDoc={pdfDoc}
               pageNumber={pageNum}
               scale={scale}
-              rotation={rotation}
+              rotation={pageRotation}
               isVisible={isWithinActiveWindow}
               isPriority={isPriority}
               readingMode={settings.readingMode}

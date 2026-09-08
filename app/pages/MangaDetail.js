@@ -289,6 +289,32 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
     return list.sort((a, b) => naturalChapterSort(a, b, sortAscending));
   }, [chapters, search, selectedSubfolder, manga, sortAscending]);
 
+  // Target chapter for "Start / Continue Reading": first unread chapter in natural ascending order
+  const targetReadingChapter = useMemo(() => {
+    if (!chapters || chapters.length === 0) return null;
+    const sortedAsc = [...chapters].sort((a, b) => naturalChapterSort(a, b, true));
+    const firstUnread = sortedAsc.find((c) => !c.isRead && !c.isWatched && !(c.progress && c.progress >= 95));
+    return firstUnread || sortedAsc[0];
+  }, [chapters]);
+
+  const targetReadingChapterNum = useMemo(() => {
+    if (!targetReadingChapter) return '';
+    const num = extractChapterNumber(targetReadingChapter.name || targetReadingChapter.fileName || targetReadingChapter.title);
+    if (num !== 0 && num !== null && num !== undefined && !isNaN(num)) return num;
+    if (targetReadingChapter.chapterNumber !== undefined && Number(targetReadingChapter.chapterNumber) > 0) {
+      return targetReadingChapter.chapterNumber;
+    }
+    return '';
+  }, [targetReadingChapter]);
+
+  const hasAnyChaptersRead = useMemo(() => {
+    return chapters.some((c) => c.isRead || c.isWatched || (c.progress && c.progress >= 95));
+  }, [chapters]);
+
+  const areAllChaptersRead = useMemo(() => {
+    return chapters.length > 0 && chapters.every((c) => c.isRead || c.isWatched || (c.progress && c.progress >= 95));
+  }, [chapters]);
+
   // Handle open chapter in reader
   const handleOpenChapter = (chapter) => {
     if (manga) {
@@ -1536,36 +1562,22 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
 
             {/* Action Buttons Row */}
             <div className="pt-2 flex flex-wrap gap-3 items-center">
-              {chapters.length > 0 && (
+              {chapters.length > 0 && targetReadingChapter && (
                 <button
                   type="button"
-                  onClick={() => handleOpenChapter(chapters[0])}
+                  onClick={() => handleOpenChapter(targetReadingChapter)}
                   className="px-6 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-2 shadow-xl shadow-purple-500/25 transition transform active:scale-95 cursor-pointer"
                 >
                   <BookOpen size={16} />
-                  <span>Start Reading (Ch. 1)</span>
+                  <span>
+                    {areAllChaptersRead
+                      ? 'Start Reading (Ch. 1)'
+                      : hasAnyChaptersRead
+                        ? `Continue Reading ${targetReadingChapterNum !== '' ? `(Ch. ${targetReadingChapterNum})` : ''}`
+                        : `Start Reading ${targetReadingChapterNum !== '' ? `(Ch. ${targetReadingChapterNum})` : '(Ch. 1)'}`}
+                  </span>
                 </button>
               )}
-
-              <button
-                type="button"
-                onClick={handleSyncWithDb}
-                disabled={isSyncingWithDb}
-                className="px-4 py-3 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-blue-300 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
-                title="Fetch DB and reconcile watched chapters"
-              >
-                <RefreshCw size={15} className={isSyncingWithDb ? "animate-spin text-blue-400" : "text-blue-400"} />
-                <span>{isSyncingWithDb ? 'Syncing...' : 'Sync with DB'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={openEditModal}
-                className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition cursor-pointer"
-              >
-                <SlidersHorizontal size={15} className="text-purple-400" />
-                <span>Edit Manga</span>
-              </button>
 
               <button
                 type="button"
