@@ -81,37 +81,8 @@ export const getAnimeProgressPercent = (anime) => {
   return Math.round(anime.progressPercent || 0);
 };
 
-const getHeroSlides = (animesList) => {
-  if (animesList.length === 0) {
-    return [{
-      id: 'placeholder',
-      title: 'WELCOME TO WATCHANIME',
-      japaneseTitle: 'トラッカーへようこそ',
-      banner: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop',
-      rating: '10.0',
-      episodes: '0 / 0',
-      year: '2026',
-      quality: '4K Ultra HD',
-      language: 'LOCAL',
-      studio: 'Antigravity',
-      genres: ['Library', 'Media', 'System'],
-      description: 'Your premium personal anime tracking workspace. Add your local anime folder directory to get started parsing episodes and tracking your watch history!'
-    }];
-  }
-  const watching = animesList.filter(a => {
-    const pct = getAnimeProgressPercent(a);
-    return pct > 0 && pct < 100;
-  });
-  const others = animesList
-    .filter(a => {
-      const pct = getAnimeProgressPercent(a);
-      return !(pct > 0 && pct < 100);
-    })
-    .sort((a, b) => parseFloat(b.rating || 0) - parseFloat(a.rating || 0));
-
-  const sortedForHero = [...watching, ...others].slice(0, 4);
-
-  return sortedForHero.map(anime => {
+const getHeroSlides = (animesList = [], mangasList = []) => {
+  const formattedAnimes = (animesList || []).map(anime => {
     let genres = [];
     if (Array.isArray(anime.genres)) {
       genres = [...anime.genres];
@@ -127,9 +98,12 @@ const getHeroSlides = (animesList) => {
     if (scannedCount > 0 && scannedCount !== totalEpisodes) {
       epDisplay = `${scannedCount}/${totalEpisodes} EP`;
     }
+    const pct = getAnimeProgressPercent(anime);
 
     return {
       id: anime.id,
+      mediaType: 'anime',
+      isManga: false,
       title: (anime?.title || 'UNTITLED ANIME').toString().toUpperCase(),
       japaneseTitle: anime.japaneseTitle || 'LOCAL LIBRARY',
       banner: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop',
@@ -142,9 +116,83 @@ const getHeroSlides = (animesList) => {
       language: anime.language || 'SUB / DUB',
       studio: anime.studio || 'Tracked Folder',
       genres: validGenres.length > 0 ? validGenres : ['Anime'],
-      description: anime.description || `Local tracked anime folder from path: ${anime.folderPath}`
+      description: anime.description || `Local tracked anime folder from path: ${anime.folderPath || ''}`,
+      progressPercent: pct,
+      inProgress: pct > 0 && pct < 100,
+      lastActivity: new Date(anime.lastOpenedAt || anime.updatedAt || anime.createdAt || 0).getTime(),
     };
   });
+
+  const formattedMangas = (mangasList || []).map(manga => {
+    let genres = [];
+    if (Array.isArray(manga.genres)) {
+      genres = [...manga.genres];
+    } else if (typeof manga.genres === 'string' && manga.genres.trim()) {
+      genres = manga.genres.split(',').map(g => g.trim());
+    }
+    const validGenres = genres.filter(g => GENRES_LIST.includes(g) && g !== 'All');
+
+    const totalChapters = manga.totalChapters ? Number(manga.totalChapters) : (manga.chapterCount || 0);
+    const completedChapters = manga.completedChapters || 0;
+    let chDisplay = `${totalChapters} Chapters`;
+    if (completedChapters > 0 && completedChapters !== totalChapters) {
+      chDisplay = `${completedChapters}/${totalChapters} Ch.`;
+    }
+    const pct = Number(manga.progressPercent || 0);
+    const inProgress = (pct > 0 && pct < 100) || manga.status === 'reading' || (completedChapters > 0 && !manga.isWatched);
+
+    return {
+      id: manga.id,
+      mediaType: 'manga',
+      isManga: true,
+      title: (manga?.title || 'UNTITLED MANGA').toString().toUpperCase(),
+      japaneseTitle: manga.japaneseTitle || 'LOCAL MANGA',
+      banner: manga.thumbnailBase64 || (manga.thumbnailPath ? `/api/image?path=${encodeURIComponent(manga.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=1600&auto=format&fit=crop',
+      rating: getDeterministicRating(manga.id, manga.rating),
+      episodes: chDisplay,
+      totalSeasons: 0,
+      totalEpisodes: totalChapters,
+      year: manga.year || new Date(manga.createdAt || Date.now()).getFullYear().toString(),
+      quality: 'Digital Manga',
+      language: 'Reader PDF',
+      studio: 'Manga Library',
+      genres: validGenres.length > 0 ? validGenres : ['Manga', 'Comics'],
+      description: manga.description || `Local tracked manga directory from path: ${manga.folderPath || ''}`,
+      progressPercent: pct,
+      inProgress,
+      lastActivity: new Date(manga.lastOpenedAt || manga.updatedAt || manga.createdAt || 0).getTime(),
+    };
+  });
+
+  if (formattedAnimes.length === 0 && formattedMangas.length === 0) {
+    return [{
+      id: 'placeholder',
+      mediaType: 'anime',
+      isManga: false,
+      title: 'WELCOME TO WATCHANIME',
+      japaneseTitle: 'トラッカーへようこそ',
+      banner: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop',
+      rating: '10.0',
+      episodes: '0 / 0',
+      year: '2026',
+      quality: '4K Ultra HD',
+      language: 'LOCAL',
+      studio: 'Antigravity',
+      genres: ['Library', 'Media', 'System'],
+      description: 'Your premium personal anime & manga tracking workspace. Add your local anime and manga folder directories to get started!'
+    }];
+  }
+
+  // Prioritize in-progress anime and manga, followed by top-rated
+  const inProgressItems = [...formattedAnimes, ...formattedMangas]
+    .filter(item => item.inProgress)
+    .sort((a, b) => b.lastActivity - a.lastActivity);
+
+  const otherItems = [...formattedAnimes, ...formattedMangas]
+    .filter(item => !item.inProgress)
+    .sort((a, b) => parseFloat(b.rating || 0) - parseFloat(a.rating || 0));
+
+  return [...inProgressItems, ...otherItems].slice(0, 6);
 };
 
 const GENRES_LIST = [
@@ -172,6 +220,7 @@ export default function Dashboard({ onSelectAnime }) {
 
   // Manga Modal & Form States
   const [showAddMangaModal, setShowAddMangaModal] = useState(false);
+  const [mangaCompleteConfirm, setMangaCompleteConfirm] = useState(null);
   const [mangaFolderPath, setMangaFolderPath] = useState('');
   const [mangaTitle, setMangaTitle] = useState('');
   const [mangaScanning, setMangaScanning] = useState(false);
@@ -730,8 +779,8 @@ export default function Dashboard({ onSelectAnime }) {
     return combined;
   }, [topRatedAnime, animes]);
 
-  // Get dynamic lists from database animes
-  const heroSlides = getHeroSlides(animes);
+  // Get dynamic lists from database animes and mangas
+  const heroSlides = useMemo(() => getHeroSlides(animes, mangas), [animes, mangas]);
 
   const trendingShows = useMemo(() => {
     if (internetTrending.length === 0) {
@@ -956,7 +1005,9 @@ export default function Dashboard({ onSelectAnime }) {
     const unsubscribeManga = onSnapshot(query(mangaRef), (snapshot) => {
       const list = [];
       snapshot.forEach((d) => {
-        list.push({ id: d.id, userId: targetUserId, ...d.data() });
+        const mData = d.data();
+        const isWatched = Boolean(mData.isWatched || mData.progressPercent === 100 || mData.status === 'completed');
+        list.push({ id: d.id, userId: targetUserId, ...mData, isWatched });
       });
       setMangas(list);
       setLocalMangas(list);
@@ -1509,6 +1560,90 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
+  const handleToggleMangaWatched = async (mangaItem, e) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    try {
+      const isCurrentlyWatched = Boolean(mangaItem.isWatched || mangaItem.progressPercent === 100);
+      const shouldComplete = !isCurrentlyWatched;
+      const mangaId = mangaItem.id;
+      const targetUserId = mangaItem.userId || currentUser?.uid || getUserId();
+
+      const localChs = getLocalChapters(mangaId);
+      const updatedChapters = (localChs || []).map(ch => ({
+        ...ch,
+        isRead: shouldComplete,
+        isWatched: shouldComplete,
+        progress: shouldComplete ? 100 : 0,
+        lastPage: shouldComplete ? (ch.totalPages || 1) : 1,
+        updatedAt: new Date().toISOString(),
+      }));
+      setLocalChapters(mangaId, updatedChapters);
+
+      const updatedManga = {
+        ...mangaItem,
+        isWatched: shouldComplete,
+        isCompleted: shouldComplete,
+        progressPercent: shouldComplete ? 100 : 0,
+        completedChapters: shouldComplete ? updatedChapters.length : 0,
+        status: shouldComplete ? 'completed' : 'ready',
+        updatedAt: new Date().toISOString(),
+      };
+      upsertLocalManga(updatedManga);
+      setMangas(prev => prev.map(m => m.id === mangaId ? updatedManga : m));
+
+      if (!isOffline && db && targetUserId) {
+        let batch = writeBatch(db);
+        let bCount = 0;
+
+        for (const ch of updatedChapters) {
+          const chId = ch.id || `manga_${mangaId}_${encodeURIComponent(ch.name || ch.fileName || '')}`;
+          const chRef = doc(db, 'users', targetUserId, 'mangas', mangaId, 'chapters', chId);
+          batch.set(chRef, {
+            ...ch,
+            isRead: shouldComplete,
+            isWatched: shouldComplete,
+            progress: shouldComplete ? 100 : 0,
+            lastPage: shouldComplete ? (ch.totalPages || 1) : 1,
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+          bCount++;
+          if (bCount >= 450) {
+            await batch.commit();
+            batch = writeBatch(db);
+            bCount = 0;
+          }
+        }
+
+        const mRef = doc(db, 'users', targetUserId, 'mangas', mangaId);
+        batch.set(mRef, {
+          progressPercent: shouldComplete ? 100 : 0,
+          completedChapters: shouldComplete ? updatedChapters.length : 0,
+          isWatched: shouldComplete,
+          isCompleted: shouldComplete,
+          status: updatedManga.status,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        await batch.commit();
+      } else {
+        addToDirtyQueue({
+          type: 'SET_CHAPTERS_BATCH',
+          dedupeKey: `SET_CHAPTERS_BATCH_${mangaId}`,
+          payload: { mangaId, mangaUserId: targetUserId, chapters: updatedChapters },
+        });
+        addToDirtyQueue({
+          type: 'SET_MANGA',
+          dedupeKey: `SET_MANGA_${mangaId}`,
+          payload: { id: mangaId, userId: targetUserId, ...updatedManga },
+        });
+      }
+    } catch (err) {
+      console.error('Error toggling manga watched:', err);
+    }
+  };
+
   const handleNewMangaCoverUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -1867,13 +2002,39 @@ export default function Dashboard({ onSelectAnime }) {
       return new Date(b.lastOpenedAt || 0) - new Date(a.lastOpenedAt || 0);
     });
 
-  // Continue Watching items (watching status)
+  // Continue Watching & Reading items (user's active tracked anime & manga)
   const continueWatchingList = useMemo(() => {
-    return animes.filter(a => {
-      const pct = getAnimeProgressPercent(a);
-      return pct > 0 && pct < 100;
-    });
-  }, [animes]);
+    const activeAnimes = (animes || [])
+      .filter(a => {
+        const pct = getAnimeProgressPercent(a);
+        return pct > 0 && pct < 100;
+      })
+      .map(a => ({
+        ...a,
+        mediaType: 'anime',
+        progressPct: getAnimeProgressPercent(a),
+        lastActivity: new Date(a.lastOpenedAt || a.updatedAt || a.createdAt || 0).getTime(),
+      }));
+
+    const activeMangas = (mangas || [])
+      .filter(m => {
+        const pct = Number(m.progressPercent || 0);
+        const isCompleted = Boolean(m.isWatched || m.isCompleted || pct === 100);
+        if (isCompleted) return false;
+        return (pct > 0 && pct < 100) || m.status === 'reading' || (m.completedChapters > 0);
+      })
+      .map(m => {
+        const pct = Number(m.progressPercent || 0);
+        return {
+          ...m,
+          mediaType: 'manga',
+          progressPct: pct,
+          lastActivity: new Date(m.lastOpenedAt || m.updatedAt || m.createdAt || 0).getTime(),
+        };
+      });
+
+    return [...activeAnimes, ...activeMangas].sort((a, b) => b.lastActivity - a.lastActivity);
+  }, [animes, mangas]);
 
   // ── Manga List (Filtered by search & sorted new to old) ──────────────────────
   const sortedMangas = useMemo(() => {
@@ -2518,7 +2679,12 @@ export default function Dashboard({ onSelectAnime }) {
                     {currentHero.title}
                   </h1>
                   {/* Genres Tag Pills */}
-                  <div className="flex flex-wrap gap-1.5 mt-2">
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                    {currentHero.isManga && (
+                      <span className="px-2.5 py-0.5 rounded-full bg-purple-500/30 border border-purple-400 text-purple-200 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm">
+                        <BookOpen size={10} /> Manga
+                      </span>
+                    )}
                     {currentHero.genres && currentHero.genres.slice(0, 2).map((genre, idx) => (
                       <span 
                         key={idx} 
@@ -2536,12 +2702,19 @@ export default function Dashboard({ onSelectAnime }) {
                     <Star size={14} className="fill-amber-400 text-amber-400" />
                     <span className="text-amber-400 font-extrabold">{currentHero.rating}</span>
                   </span>
-                  <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-[#a855f7]/15 border border-[#a855f7]/30 text-[#c084fc]">
-                    <Tv size={13} className="text-[#a855f7]" />
-                    {currentHero.totalSeasons ? (currentHero.totalSeasons > 1 ? `${currentHero.totalSeasons} Seasons` : 'Season 1') : 'TV'}
-                  </span>
+                  {currentHero.isManga ? (
+                    <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-purple-500/15 border border-purple-500/30 text-purple-300">
+                      <BookOpen size={13} className="text-purple-400" />
+                      <span>{currentHero.episodes}</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-[#a855f7]/15 border border-[#a855f7]/30 text-[#c084fc]">
+                      <Tv size={13} className="text-[#a855f7]" />
+                      {currentHero.totalSeasons ? (currentHero.totalSeasons > 1 ? `${currentHero.totalSeasons} Seasons` : 'Season 1') : 'TV'}
+                    </span>
+                  )}
                   <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-pink-500/15 border border-pink-500/30 text-pink-300">
-                    <Clock size={13} className="text-pink-400" /> {currentHero.episodes}
+                    <Clock size={13} className="text-pink-400" /> {currentHero.isManga ? currentHero.quality : currentHero.episodes}
                   </span>
                   <span className="flex items-center gap-1.5">
                     <Calendar size={14} className="text-cyan-400" /> {currentHero.year}
@@ -2555,20 +2728,34 @@ export default function Dashboard({ onSelectAnime }) {
 
                 {/* CTA Buttons */}
                 <div className="flex flex-wrap items-center gap-3 pt-2">
-                  <button
-                    onClick={() => {
-                      if (animes.length > 0 && currentHero?.id !== 'placeholder') onSelectAnime(currentHero.id);
-                      else setShowAddModal(true);
-                    }}
-                    className="px-6 py-2.5 rounded-full font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-pink-500 to-[#a855f7] hover:brightness-110 text-white flex items-center gap-2 cursor-pointer shadow-lg shadow-pink-500/20 transition-all duration-300"
-                  >
-                    <Play size={14} fill="currentColor" />
-                    <span>Watch Now</span>
-                  </button>
+                  {currentHero.isManga ? (
+                    <button
+                      onClick={() => router.push(`/manga/${currentHero.id}`)}
+                      className="px-6 py-2.5 rounded-full font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:brightness-110 text-white flex items-center gap-2 cursor-pointer shadow-lg shadow-purple-500/30 transition-all duration-300"
+                    >
+                      <BookOpen size={14} />
+                      <span>Read Manga</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        if (animes.length > 0 && currentHero?.id !== 'placeholder') onSelectAnime(currentHero.id);
+                        else setShowAddModal(true);
+                      }}
+                      className="px-6 py-2.5 rounded-full font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-pink-500 to-[#a855f7] hover:brightness-110 text-white flex items-center gap-2 cursor-pointer shadow-lg shadow-pink-500/20 transition-all duration-300"
+                    >
+                      <Play size={14} fill="currentColor" />
+                      <span>Watch Now</span>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => {
-                      if (animes.length > 0 && currentHero?.id !== 'placeholder') onSelectAnime(currentHero.id);
+                      if (currentHero.isManga) {
+                        router.push(`/manga/${currentHero.id}`);
+                      } else if (animes.length > 0 && currentHero?.id !== 'placeholder') {
+                        onSelectAnime(currentHero.id);
+                      }
                     }}
                     className="px-6 py-2.5 rounded-full font-bold text-xs uppercase tracking-wider bg-white/10 hover:bg-white/20 border border-white/10 text-white transition flex items-center gap-1 cursor-pointer"
                   >
@@ -2677,7 +2864,7 @@ export default function Dashboard({ onSelectAnime }) {
           </div>
         </section>
 
-        {/* 4. CONTINUE WATCHING (USER'S ACTIVE TRACKED ANIME) */}
+        {/* 4. CONTINUE WATCHING & READING (USER'S ACTIVE TRACKED ANIME & MANGA) */}
         {continueWatchingList.length > 0 && (
           <section id="continue-watching" className="space-y-4">
             <div className="flex items-center justify-between">
@@ -2686,81 +2873,162 @@ export default function Dashboard({ onSelectAnime }) {
                   <Play size={20} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-extrabold tracking-wide text-white">Continue Watching</h2>
-                  <p className="text-[11px] text-gray-400 font-medium">Resume your local playback progress</p>
+                  <h2 className="text-xl font-extrabold tracking-wide text-white flex items-center gap-2">
+                    <span>Continue Watching & Reading</span>
+                  </h2>
+                  <p className="text-[11px] text-gray-400 font-medium">Resume your local playback and reading progress</p>
                 </div>
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {continueWatchingList.map((anime) => (
-                <div
-                  key={anime.id}
-                  onClick={() => onSelectAnime(anime.id)}
-                  className="glass-card p-4 rounded-2xl flex gap-4 items-center group cursor-pointer"
-                >
-                  <div className="relative w-20 h-24 rounded-xl overflow-hidden bg-[#181c24] flex-shrink-0">
-                    {anime.thumbnailBase64 ? (
-                      <CachedImage src={anime.thumbnailBase64} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                    ) : anime.thumbnailPath ? (
-                      <CachedImage src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                    ) : (
-                      <div className={`w-full h-full bg-gradient-to-br ${anime.coverGradient || 'from-violet-600 to-indigo-700'} flex items-center justify-center font-bold text-white/40 text-xl`}>
-                        {getInitials(anime.title)}
+              {continueWatchingList.map((item) => {
+                if (item.mediaType === 'manga') {
+                  const mPct = item.progressPct || 0;
+                  return (
+                    <div
+                      key={`continue-manga-${item.id}`}
+                      onClick={() => router.push(`/manga/${item.id}`)}
+                      className="glass-card p-4 rounded-2xl flex gap-4 items-center group cursor-pointer border border-purple-500/20 hover:border-purple-500/50 hover:bg-purple-950/20 transition-all duration-300"
+                    >
+                      <div className="relative w-20 h-24 rounded-xl overflow-hidden bg-[#181c24] flex-shrink-0">
+                        {item.thumbnailBase64 ? (
+                          <CachedImage src={item.thumbnailBase64} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                        ) : item.thumbnailPath ? (
+                          <CachedImage src={`/api/image?path=${encodeURIComponent(item.thumbnailPath)}`} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-purple-700 to-indigo-900 flex items-center justify-center font-bold text-white/40 text-xl">
+                            <BookOpen size={24} className="text-purple-300/60" />
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                          <div className="p-2 rounded-full bg-purple-600 text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-lg shadow-purple-600/50">
+                            <BookOpen size={14} />
+                          </div>
+                        </div>
                       </div>
-                    )}
-                    <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                      <div className="p-2 rounded-full bg-[#7c5cff] text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Play size={14} fill="white" />
+
+                      <div className="flex-1 min-w-0 space-y-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.5 rounded bg-purple-600 text-white font-extrabold text-[8px] uppercase tracking-wider shrink-0">
+                            Manga
+                          </span>
+                          <h3 className="font-bold text-sm text-white truncate group-hover:text-purple-300 transition-colors">
+                            {item.title}
+                          </h3>
+                        </div>
+                        <p className="text-[10px] text-gray-400 truncate">
+                          Last read: {item.lastWatchedChapter || (item.completedChapters ? `Chapter ${item.completedChapters}` : 'In progress')}
+                        </p>
+
+                        <div>
+                          <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
+                            <span className="truncate">
+                              {item.completedChapters || 0}/{item.totalChapters || item.chapterCount || '?'} Chapters
+                            </span>
+                            <span className="font-bold text-purple-400 shrink-0 ml-1">{mPct}%</span>
+                          </div>
+                          <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-purple-500 to-indigo-500 rounded-full transition-all duration-500"
+                              style={{ width: `${mPct}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setMangaCompleteConfirm(item);
+                        }}
+                        className="p-2 rounded-xl bg-white/5 hover:bg-emerald-600/30 border border-white/10 hover:border-emerald-500/40 text-gray-400 hover:text-emerald-300 transition cursor-pointer self-center shrink-0"
+                        title="Mark Manga Complete"
+                      >
+                        <CheckCircle2 size={15} />
+                      </button>
+                    </div>
+                  );
+                }
+
+                // Anime Card
+                const anime = item;
+                const pct = getAnimeProgressPercent(anime);
+                return (
+                  <div
+                    key={`continue-anime-${anime.id}`}
+                    onClick={() => onSelectAnime(anime.id)}
+                    className="glass-card p-4 rounded-2xl flex gap-4 items-center group cursor-pointer"
+                  >
+                    <div className="relative w-20 h-24 rounded-xl overflow-hidden bg-[#181c24] flex-shrink-0">
+                      {anime.thumbnailBase64 ? (
+                        <CachedImage src={anime.thumbnailBase64} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      ) : anime.thumbnailPath ? (
+                        <CachedImage src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      ) : (
+                        <div className={`w-full h-full bg-gradient-to-br ${anime.coverGradient || 'from-violet-600 to-indigo-700'} flex items-center justify-center font-bold text-white/40 text-xl`}>
+                          {getInitials(anime.title)}
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                        <div className="p-2 rounded-full bg-[#7c5cff] text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Play size={14} fill="white" />
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <h3 className="font-bold text-sm text-white truncate group-hover:text-[#7c5cff] transition-colors">
-                      {anime.title}
-                    </h3>
-                    <p className="text-[10px] text-gray-400 truncate">
-                      Last watched: {anime.lastWatchedEpisode ? `EP ${anime.lastWatchedEpisode}` : 'In progress'}
-                    </p>
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-1.5 py-0.5 rounded bg-[#7c5cff]/20 text-[#c084fc] font-extrabold text-[8px] uppercase tracking-wider shrink-0">
+                          Anime
+                        </span>
+                        <h3 className="font-bold text-sm text-white truncate group-hover:text-[#7c5cff] transition-colors">
+                          {anime.title}
+                        </h3>
+                      </div>
+                      <p className="text-[10px] text-gray-400 truncate">
+                        Last watched: {anime.lastWatchedEpisode ? `EP ${anime.lastWatchedEpisode}` : 'In progress'}
+                      </p>
 
-                    <div>
-                      {(() => {
-                        const pct = getAnimeProgressPercent(anime);
-                        return (
-                          <>
-                            <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
-                              <div className="flex items-center gap-1.5 truncate max-w-[70%]">
-                                {Boolean(anime.totalSeasons) && (
-                                  <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-extrabold text-[9px] shrink-0">
-                                    S{anime.totalSeasons}
-                                  </span>
-                                )}
-                                <span className="truncate">
-                                  {anime.totalEpisodes ? (
-                                    anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
-                                      ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
-                                      : `${anime.totalEpisodes} Ep`
-                                  ) : (
-                                    `${anime.episodeCount || 0} Ep`
+                      <div>
+                        {(() => {
+                          return (
+                            <>
+                              <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
+                                <div className="flex items-center gap-1.5 truncate max-w-[70%]">
+                                  {Boolean(anime.totalSeasons) && (
+                                    <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-extrabold text-[9px] shrink-0">
+                                      S{anime.totalSeasons}
+                                    </span>
                                   )}
-                                </span>
+                                  <span className="truncate">
+                                    {anime.totalEpisodes ? (
+                                      anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
+                                        ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
+                                        : `${anime.totalEpisodes} Ep`
+                                    ) : (
+                                      `${anime.episodeCount || 0} Ep`
+                                    )}
+                                  </span>
+                                </div>
+                                <span className="font-bold text-[#7c5cff] shrink-0 ml-1">{pct}%</span>
                               </div>
-                              <span className="font-bold text-[#7c5cff] shrink-0 ml-1">{pct}%</span>
-                            </div>
-                            <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-gradient-to-r from-[#7c5cff] to-[#a855f7] rounded-full transition-all duration-500"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                          </>
-                        );
-                      })()}
+                              <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-gradient-to-r from-[#7c5cff] to-[#a855f7] rounded-full transition-all duration-500"
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}
@@ -2968,54 +3236,90 @@ export default function Dashboard({ onSelectAnime }) {
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              {sortedMangas.map((m) => (
-                <div
-                  key={`manga-${m.id}`}
-                  onClick={() => router.push(`/manga/${m.id}`)}
-                  className="glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-purple-500/50 transition duration-200"
-                >
-                  <div className="relative h-48 overflow-hidden bg-[#181c24] flex items-center justify-center">
-                    {m.thumbnailBase64 ? (
-                      <img
-                        src={m.thumbnailBase64}
-                        alt={m.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-purple-400/80 bg-purple-950/20 gap-1.5">
-                        <BookOpen size={32} />
-                        <span className="text-[9px] font-mono uppercase tracking-wider">PDF Manga</span>
+              {sortedMangas.map((m) => {
+                const isWatched = Boolean(m.isWatched || m.progressPercent === 100 || m.status === 'completed');
+                return (
+                  <div
+                    key={`manga-${m.id}`}
+                    onClick={() => router.push(`/manga/${m.id}`)}
+                    className="glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-purple-500/50 transition duration-200"
+                  >
+                    <div className="relative h-48 overflow-hidden bg-[#181c24] flex items-center justify-center">
+                      {m.thumbnailBase64 ? (
+                        <img
+                          src={m.thumbnailBase64}
+                          alt={m.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-purple-400/80 bg-purple-950/20 gap-1.5">
+                          <BookOpen size={32} />
+                          <span className="text-[9px] font-mono uppercase tracking-wider">PDF Manga</span>
+                        </div>
+                      )}
+
+                      {/* Status / Chapter Badge */}
+                      <div className="absolute top-2 left-2 flex items-center gap-1">
+                        {isWatched ? (
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/90 backdrop-blur-md text-[9px] uppercase font-bold text-white flex items-center gap-1 shadow">
+                            <CheckCircle2 size={10} /> Completed
+                          </span>
+                        ) : (
+                          <div className="px-2 py-0.5 rounded bg-black/70 backdrop-blur-md text-purple-300 font-bold text-[9px] border border-white/10">
+                            {m.chapterCount || m.totalChapters || 0} Ch
+                          </div>
+                        )}
                       </div>
-                    )}
 
-                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur-md text-purple-300 font-bold text-[9px] border border-white/10">
-                      {m.chapterCount || m.totalChapters || 0} Ch
+                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-purple-600 text-white font-extrabold text-[8px] shadow">
+                        PDF
+                      </div>
+
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center p-3 gap-2">
+                        <div className="px-3 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg">
+                          <BookOpen size={14} />
+                          <span>Read Manga</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setMangaCompleteConfirm(m);
+                          }}
+                          className={`p-2 rounded-xl border transition cursor-pointer ${
+                            isWatched
+                              ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
+                              : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
+                          }`}
+                          title={isWatched ? 'Mark Manga Unread' : 'Mark Manga Complete (Watched)'}
+                        >
+                          <CheckCircle2 size={14} />
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-purple-600 text-white font-extrabold text-[8px] shadow">
-                      PDF
-                    </div>
-
-                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center p-3">
-                      <div className="px-3 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg">
-                        <BookOpen size={14} />
-                        <span>Read Manga</span>
+                    <div className="p-3 bg-black/30">
+                      <h4 className="font-bold text-xs text-white line-clamp-1 group-hover:text-purple-300 transition-colors">
+                        {m.title}
+                      </h4>
+                      <div className="flex justify-between items-center text-[9px] text-gray-400 mt-1">
+                        <span>Local PDF</span>
+                        <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-1" : "text-purple-400 font-semibold"}>
+                          {isWatched ? (
+                            <>
+                              <CheckCircle2 size={10} /> Completed
+                            </>
+                          ) : (
+                            m.progressPercent ? `${m.progressPercent}%` : 'Ready'
+                          )}
+                        </span>
                       </div>
                     </div>
                   </div>
-
-                  <div className="p-3 bg-black/30">
-                    <h4 className="font-bold text-xs text-white line-clamp-1 group-hover:text-purple-300 transition-colors">
-                      {m.title}
-                    </h4>
-                    <div className="flex justify-between items-center text-[9px] text-gray-400 mt-1">
-                      <span>Local PDF</span>
-                      <span className="text-purple-400 font-semibold">{m.progressPercent ? `${m.progressPercent}%` : 'Ready'}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
@@ -4571,6 +4875,55 @@ export default function Dashboard({ onSelectAnime }) {
               >
                 Okay
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Manga Complete Confirmation Modal */}
+      <AnimatePresence>
+        {mangaCompleteConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl text-center space-y-4 bg-[#0d1117]/95 text-white"
+            >
+              <div className="mx-auto w-12 h-12 rounded-full bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                <CheckCircle2 size={24} />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                  {Boolean(mangaCompleteConfirm.isWatched || mangaCompleteConfirm.progressPercent === 100)
+                    ? 'Mark Manga as Unread?'
+                    : 'Mark Manga as Completed?'}
+                </h3>
+                <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+                  Are you sure you want to {Boolean(mangaCompleteConfirm.isWatched || mangaCompleteConfirm.progressPercent === 100) ? 'reset reading progress for' : 'mark all chapters as watched/completed for'}{' '}
+                  <span className="text-purple-300 font-semibold font-mono">"{mangaCompleteConfirm.title}"</span>?
+                </p>
+              </div>
+              <div className="flex gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setMangaCompleteConfirm(null)}
+                  className="flex-1 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-gray-300 text-xs font-bold uppercase tracking-wider transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = mangaCompleteConfirm;
+                    setMangaCompleteConfirm(null);
+                    handleToggleMangaWatched(target);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-[#7c5cff] hover:bg-[#6b4eeb] text-white text-xs font-bold uppercase tracking-wider transition cursor-pointer shadow-lg shadow-purple-600/30"
+                >
+                  Yes, Confirm
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

@@ -74,13 +74,24 @@ export async function pullFromFirestore(db) {
     const mangas = [];
     const chapterPromises = [];
     mangaSnap.forEach(d => {
-      const manga = { id: d.id, userId, ...d.data() };
+      const mData = d.data();
+      const isWatched = Boolean(mData.isWatched || mData.progressPercent === 100 || mData.status === 'completed');
+      const manga = { id: d.id, userId, ...mData, isWatched };
       mangas.push(manga);
       chapterPromises.push(
         getDocs(collection(db, 'users', userId, 'mangas', d.id, 'chapters'))
           .then(cSnap => {
             const chapters = [];
-            cSnap.forEach(cd => chapters.push({ id: cd.id, ...cd.data() }));
+            cSnap.forEach(cd => {
+              const cData = cd.data();
+              const isWatched = Boolean(cData.isWatched || cData.isRead || (cData.progress && cData.progress >= 95));
+              chapters.push({
+                id: cd.id,
+                ...cData,
+                isWatched,
+                isRead: isWatched,
+              });
+            });
             setLocalChapters(d.id, chapters);
           })
       );
@@ -94,11 +105,83 @@ export async function pullFromFirestore(db) {
   }
 }
 
+// ─── Reconcile locally watched mangas to Firestore ───────────────────────────
+
+export async function syncLocalWatchedMangasToFirestore(db, userId) {
+  if (!db || !userId) return;
+  try {
+    const localMangas = getLocalMangas();
+    if (!localMangas || localMangas.length === 0) return;
+
+    let batch = writeBatch(db);
+    let batchCount = 0;
+
+    for (const manga of localMangas) {
+      const localChapters = getLocalChapters(manga.id);
+      const watchedChapters = (localChapters || []).filter(
+        c => Boolean(c.isWatched || c.isRead || (c.progress && c.progress >= 95))
+      );
+      const isMangaWatched = Boolean(
+        manga.isWatched ||
+        manga.progressPercent === 100 ||
+        (localChapters.length > 0 && watchedChapters.length === localChapters.length)
+      );
+
+      // If manga or any of its chapters has watched progress
+      if (isMangaWatched || watchedChapters.length > 0 || (manga.progressPercent && manga.progressPercent > 0)) {
+        const mRef = doc(db, 'users', userId, 'mangas', manga.id);
+        const mangaPayload = {
+          ...manga,
+          isWatched: isMangaWatched,
+          isCompleted: isMangaWatched,
+          completedChapters: watchedChapters.length,
+          progressPercent: localChapters.length > 0
+            ? Math.round((watchedChapters.length / localChapters.length) * 100)
+            : (manga.progressPercent || 0),
+          status: isMangaWatched ? 'completed' : (watchedChapters.length > 0 ? 'reading' : manga.status || 'ready'),
+          updatedAt: manga.updatedAt || new Date().toISOString(),
+        };
+        batch.set(mRef, mangaPayload, { merge: true });
+        batchCount++;
+
+        for (const ch of watchedChapters) {
+          const chId = ch.id || `manga_${manga.id}_${encodeURIComponent(ch.name || ch.fileName || '')}`;
+          const chRef = doc(db, 'users', userId, 'mangas', manga.id, 'chapters', chId);
+          batch.set(chRef, {
+            ...ch,
+            isWatched: true,
+            isRead: true,
+            progress: ch.progress !== undefined ? ch.progress : 100,
+            lastPage: ch.lastPage || ch.totalPages || 1,
+            updatedAt: ch.updatedAt || new Date().toISOString(),
+          }, { merge: true });
+          batchCount++;
+
+          if (batchCount >= 450) {
+            await batch.commit();
+            batch = writeBatch(db);
+            batchCount = 0;
+          }
+        }
+      }
+    }
+
+    if (batchCount > 0) {
+      await batch.commit();
+    }
+  } catch (err) {
+    console.warn('[syncEngine] Error reconciling local watched mangas to Firestore:', err);
+  }
+}
+
 // ─── Push dirty queue to Firestore ───────────────────────────────────────────
 
 export async function pushToFirestore(db) {
   const userId = getUserId();
   if (!db || !userId) return;
+
+  // First reconcile any locally stored watched mangas so they are guaranteed in Firestore
+  await syncLocalWatchedMangasToFirestore(db, userId);
 
   const queue = getDirtyQueue();
   if (queue.length === 0) return;
@@ -189,6 +272,17 @@ export async function pushToFirestore(db) {
         const ref = doc(db, 'users', mangaUserId || userId, 'mangas', mangaId, 'chapters', id);
         batch.delete(ref);
         batchCount++;
+      } else if (op.type === 'SET_MANGA_PROGRESS') {
+        const { mangaId, documentId, id, mangaUserId, ...data } = op.payload;
+        const targetId = id || documentId;
+        if (targetId) {
+          const chRef = doc(db, 'users', mangaUserId || userId, 'mangas', mangaId, 'chapters', targetId);
+          batch.set(chRef, data, { merge: true });
+          batchCount++;
+          const progRef = doc(db, 'users', mangaUserId || userId, 'mangas', mangaId, 'progress', targetId);
+          batch.set(progRef, data, { merge: true });
+          batchCount++;
+        }
       }
 
       if (batchCount >= 490) {

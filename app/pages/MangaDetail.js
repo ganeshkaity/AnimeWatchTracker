@@ -10,7 +10,7 @@ import {
 import { getReadingProgress, saveReadingProgress } from '../utils/indexedDBStore';
 import { useAuth } from '../context/AuthContext';
 import { useOffline } from '../context/OfflineContext';
-import { doc, getDocs, collection, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDocs, collection, setDoc, deleteDoc, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
   ArrowLeft, BookOpen, Clock, Folder, CheckCircle2, Bookmark,
@@ -148,6 +148,10 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
   const [showMarkAllModal, setShowMarkAllModal] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
 
+  // ── Sync with DB State ───────────────────────────────────────────────────
+  const [isSyncingWithDb, setIsSyncingWithDb] = useState(false);
+  const [syncDbMessage, setSyncDbMessage] = useState('');
+
   // ── Load Manga & Chapters ──────────────────────────────────────────────────
   const loadData = async () => {
     setLoading(true);
@@ -179,24 +183,29 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
       // Enrich chapters with latest IndexedDB reading progress
       const enrichedChapters = await Promise.all(
         localChapters.map(async (ch) => {
-          const docId = ch.id || `manga_${mangaId}_${encodeURIComponent(ch.name)}`;
+          const docId = ch.id || `manga_${mangaId}_${encodeURIComponent(ch.name || ch.fileName || '')}`;
           let prog = await getReadingProgress(docId);
           if (!prog && ch.name) {
             prog = await getReadingProgress(`manga_${mangaId}_${encodeURIComponent(ch.name)}`) || await getReadingProgress(ch.name);
           }
           if (prog) {
-            const isReadVal = prog.isRead !== undefined ? Boolean(prog.isRead) : ((prog.progress || 0) >= 95 || Boolean(ch.isRead));
+            const isReadVal = prog.isRead !== undefined
+              ? Boolean(prog.isRead)
+              : ((prog.progress || 0) >= 95 || Boolean(ch.isRead || ch.isWatched));
             return {
               ...ch,
               lastPage: prog.lastPage,
               totalPages: prog.totalPages,
               progress: prog.progress !== undefined ? prog.progress : (isReadVal ? 100 : 0),
               isRead: isReadVal,
+              isWatched: isReadVal,
             };
           }
+          const isReadVal = Boolean(ch.isRead || ch.isWatched || (ch.progress && ch.progress >= 95));
           return {
             ...ch,
-            isRead: Boolean(ch.isRead || (ch.progress && ch.progress >= 95)),
+            isRead: isReadVal,
+            isWatched: isReadVal,
           };
         })
       );
@@ -204,8 +213,40 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
       // Sort in natural ascending order (small to big)
       enrichedChapters.sort((a, b) => naturalChapterSort(a, b, true));
 
-      setManga(localManga);
+      const watchedChsCount = enrichedChapters.filter((c) => c.isWatched || c.isRead).length;
+      const totalChsCount = (localManga?.totalChapters && Number(localManga.totalChapters) > 0)
+        ? Number(localManga.totalChapters)
+        : enrichedChapters.length;
+      const overallPct = totalChsCount > 0 ? Math.round((watchedChsCount / totalChsCount) * 100) : (localManga?.progressPercent || 0);
+      const isMangaWatched = overallPct === 100 || Boolean(localManga?.isWatched);
+
+      const normalizedManga = localManga ? {
+        ...localManga,
+        progressPercent: overallPct,
+        completedChapters: watchedChsCount,
+        isWatched: isMangaWatched,
+        isCompleted: isMangaWatched,
+        status: isMangaWatched ? 'completed' : (watchedChsCount > 0 ? 'reading' : localManga.status || 'ready'),
+      } : null;
+
+      if (normalizedManga) {
+        upsertLocalManga(normalizedManga);
+      }
+
+      setManga(normalizedManga);
       setChapters(enrichedChapters);
+
+      // If user is online and logged in, sync any local watched status to Firestore
+      if (!isOffline && db && currentUser?.uid && normalizedManga && (isMangaWatched || watchedChsCount > 0)) {
+        setDoc(doc(db, 'users', currentUser.uid, 'mangas', mangaId), {
+          isWatched: isMangaWatched,
+          isCompleted: isMangaWatched,
+          progressPercent: overallPct,
+          completedChapters: watchedChsCount,
+          status: normalizedManga.status,
+          updatedAt: normalizedManga.updatedAt || new Date().toISOString(),
+        }, { merge: true }).catch(() => {});
+      }
     } catch (err) {
       console.error('[MangaDetail] Error loading manga:', err);
     } finally {
@@ -250,6 +291,16 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
 
   // Handle open chapter in reader
   const handleOpenChapter = (chapter) => {
+    if (manga) {
+      const updated = {
+        ...manga,
+        lastWatchedChapter: chapter.name || chapter.fileName || '',
+        lastOpenedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      setManga(updated);
+      upsertLocalManga(updated);
+    }
     if (onReadChapter) {
       onReadChapter(chapter);
     } else {
@@ -840,8 +891,8 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
 
   // ── Toggle Individual Chapter Completed / Unwatched ───────────────────────
   const handleToggleChapterComplete = async (chapter) => {
-    const docId = chapter.id || `manga_${mangaId}_${encodeURIComponent(chapter.name)}`;
-    const currentlyRead = Boolean(chapter.isRead || (chapter.progress && chapter.progress >= 95));
+    const docId = chapter.id || `manga_${mangaId}_${encodeURIComponent(chapter.name || chapter.fileName || '')}`;
+    const currentlyRead = Boolean(chapter.isWatched || chapter.isRead || (chapter.progress && chapter.progress >= 95));
     const willBeRead = !currentlyRead;
 
     const totalP = chapter.totalPages || 1;
@@ -854,6 +905,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
       totalPages: totalP,
       progress: updatedProgress,
       isRead: willBeRead,
+      isWatched: willBeRead,
       lastReadAt: new Date().toISOString(),
     };
 
@@ -870,6 +922,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
         return {
           ...c,
           isRead: willBeRead,
+          isWatched: willBeRead,
           progress: updatedProgress,
           lastPage: updatedLastPage,
           totalPages: totalP,
@@ -881,13 +934,18 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
     setLocalChapters(mangaId, updatedChapters);
 
     // 3. Recalculate Manga Progress
-    const newCompletedCount = updatedChapters.filter((c) => c.isRead || (c.progress && c.progress >= 95)).length;
-    const newOverallPct = updatedChapters.length > 0 ? Math.round((newCompletedCount / updatedChapters.length) * 100) : 0;
+    const newCompletedCount = updatedChapters.filter((c) => c.isWatched || c.isRead || (c.progress && c.progress >= 95)).length;
+    const totalCount = (manga?.totalChapters && Number(manga.totalChapters) > 0) ? Number(manga.totalChapters) : updatedChapters.length;
+    const newOverallPct = totalCount > 0 ? Math.round((newCompletedCount / totalCount) * 100) : 0;
+    const isMangaWatched = newOverallPct === 100;
     const updatedManga = {
       ...manga,
       progressPercent: newOverallPct,
       completedChapters: newCompletedCount,
+      isWatched: isMangaWatched,
+      isCompleted: isMangaWatched,
       status: newOverallPct === 100 ? 'completed' : (newCompletedCount > 0 ? 'reading' : manga?.status || 'ready'),
+      lastWatchedChapter: chapter.name || chapter.fileName || '',
       updatedAt: new Date().toISOString(),
     };
     setManga(updatedManga);
@@ -895,37 +953,56 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
 
     // 4. Sync to Firestore if user logged in
     const uid = currentUser?.uid || getUserId();
+    const chDocId = chapter.id || docId;
+    const chapterDbPayload = {
+      id: chDocId,
+      isRead: willBeRead,
+      isWatched: willBeRead,
+      progress: updatedProgress,
+      lastPage: updatedLastPage,
+      totalPages: totalP,
+      updatedAt: new Date().toISOString(),
+    };
+
     if (!isOffline && db && uid) {
       try {
+        // 1. Update the chapter doc in Firestore chapters collection
+        await setDoc(doc(db, 'users', uid, 'mangas', mangaId, 'chapters', chDocId), chapterDbPayload, { merge: true });
+        // 2. Backward compatibility: also store in progress subcollection
         await setDoc(doc(db, 'users', uid, 'mangas', mangaId, 'progress', docId), progressPayload, { merge: true });
-        await updateDoc(doc(db, 'users', uid, 'mangas', mangaId), {
+        // 3. Update the parent manga doc with watched status and progress
+        await setDoc(doc(db, 'users', uid, 'mangas', mangaId), {
+          isWatched: isMangaWatched,
+          isCompleted: isMangaWatched,
           progressPercent: newOverallPct,
           completedChapters: newCompletedCount,
           status: updatedManga.status,
+          lastWatchedChapter: updatedManga.lastWatchedChapter || '',
           updatedAt: new Date().toISOString(),
-        });
+        }, { merge: true });
       } catch (err) {
+        console.error('[MangaDetail] Firestore chapter sync error:', err);
         addToDirtyQueue({
-          type: 'SET_MANGA_PROGRESS',
-          dedupeKey: `PROGRESS_${mangaId}_${docId}`,
-          payload: { mangaId, documentId: docId, ...progressPayload },
+          type: 'SET_CHAPTER',
+          dedupeKey: `SET_CHAPTER_${mangaId}_${chDocId}`,
+          payload: { mangaId, mangaUserId: uid, ...chapterDbPayload },
         });
         addToDirtyQueue({
           type: 'SET_MANGA',
           dedupeKey: `SET_MANGA_${mangaId}`,
-          payload: updatedManga,
+          payload: { id: mangaId, userId: uid, ...updatedManga },
         });
       }
     } else {
       addToDirtyQueue({
-        type: 'SET_MANGA_PROGRESS',
-        dedupeKey: `PROGRESS_${mangaId}_${docId}`,
-        payload: { mangaId, documentId: docId, ...progressPayload },
+        type: 'SET_CHAPTER',
+        dedupeKey: `SET_CHAPTER_${mangaId}_${chDocId}`,
+        payload: { mangaId, mangaUserId: uid, ...chapterDbPayload },
       });
       addToDirtyQueue({
         type: 'SET_MANGA',
         dedupeKey: `SET_MANGA_${mangaId}`,
-        payload: updatedManga,
+        payload: { id: mangaId, userId: uid, ...updatedManga },
       });
     }
   };
@@ -940,9 +1017,10 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
 
     try {
       const updatedChapters = [];
+      const chaptersForDb = [];
 
       for (const ch of chapters) {
-        const docId = ch.id || `manga_${mangaId}_${encodeURIComponent(ch.name)}`;
+        const docId = ch.id || `manga_${mangaId}_${encodeURIComponent(ch.name || ch.fileName || '')}`;
         const totalP = ch.totalPages || 1;
         const prog = shouldComplete ? 100 : 0;
         const lastP = shouldComplete ? totalP : 1;
@@ -953,6 +1031,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
           totalPages: totalP,
           progress: prog,
           isRead: shouldComplete,
+          isWatched: shouldComplete,
           lastReadAt: new Date().toISOString(),
         };
 
@@ -961,12 +1040,29 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
           await saveReadingProgress(`manga_${mangaId}_${encodeURIComponent(ch.name)}`, progressPayload);
         }
 
-        updatedChapters.push({
+        const chData = {
           ...ch,
+          id: docId,
           isRead: shouldComplete,
+          isWatched: shouldComplete,
           progress: prog,
           lastPage: lastP,
           totalPages: totalP,
+          updatedAt: new Date().toISOString(),
+        };
+
+        updatedChapters.push(chData);
+        chaptersForDb.push({
+          id: docId,
+          name: ch.name || ch.fileName || '',
+          fileName: ch.fileName || ch.name || '',
+          filePath: ch.filePath || '',
+          isRead: shouldComplete,
+          isWatched: shouldComplete,
+          progress: prog,
+          lastPage: lastP,
+          totalPages: totalP,
+          updatedAt: new Date().toISOString(),
         });
       }
 
@@ -979,6 +1075,8 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
         ...manga,
         progressPercent: newOverallPct,
         completedChapters: newCompletedCount,
+        isWatched: shouldComplete,
+        isCompleted: shouldComplete,
         status: shouldComplete ? 'completed' : 'ready',
         updatedAt: new Date().toISOString(),
       };
@@ -989,24 +1087,53 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
       const uid = currentUser?.uid || getUserId();
       if (!isOffline && db && uid) {
         try {
-          await updateDoc(doc(db, 'users', uid, 'mangas', mangaId), {
+          let batch = writeBatch(db);
+          let bCount = 0;
+
+          for (const ch of chaptersForDb) {
+            const chRef = doc(db, 'users', uid, 'mangas', mangaId, 'chapters', ch.id);
+            batch.set(chRef, ch, { merge: true });
+            bCount++;
+            if (bCount >= 450) {
+              await batch.commit();
+              batch = writeBatch(db);
+              bCount = 0;
+            }
+          }
+
+          const mangaDocRef = doc(db, 'users', uid, 'mangas', mangaId);
+          batch.set(mangaDocRef, {
             progressPercent: newOverallPct,
             completedChapters: newCompletedCount,
+            isWatched: shouldComplete,
+            isCompleted: shouldComplete,
             status: updatedManga.status,
             updatedAt: new Date().toISOString(),
-          });
+          }, { merge: true });
+          await batch.commit();
         } catch (err) {
+          console.error('[MangaDetail] Firestore batch error:', err);
+          addToDirtyQueue({
+            type: 'SET_CHAPTERS_BATCH',
+            dedupeKey: `SET_CHAPTERS_BATCH_${mangaId}`,
+            payload: { mangaId, mangaUserId: uid, chapters: chaptersForDb },
+          });
           addToDirtyQueue({
             type: 'SET_MANGA',
             dedupeKey: `SET_MANGA_${mangaId}`,
-            payload: updatedManga,
+            payload: { id: mangaId, userId: uid, ...updatedManga },
           });
         }
       } else {
         addToDirtyQueue({
+          type: 'SET_CHAPTERS_BATCH',
+          dedupeKey: `SET_CHAPTERS_BATCH_${mangaId}`,
+          payload: { mangaId, mangaUserId: uid, chapters: chaptersForDb },
+        });
+        addToDirtyQueue({
           type: 'SET_MANGA',
           dedupeKey: `SET_MANGA_${mangaId}`,
-          payload: updatedManga,
+          payload: { id: mangaId, userId: uid, ...updatedManga },
         });
       }
     } catch (err) {
@@ -1017,9 +1144,190 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
     }
   };
 
+  // ── Sync with Firestore DB (Bidirectional watched reconciliation) ──────────
+  const handleSyncWithDb = async () => {
+    const uid = currentUser?.uid || getUserId();
+    if (!uid) {
+      setSyncDbMessage('Please log in to sync with the database.');
+      setTimeout(() => setSyncDbMessage(''), 4000);
+      return;
+    }
+    if (isOffline || !db) {
+      setSyncDbMessage('Cannot sync with database while offline.');
+      setTimeout(() => setSyncDbMessage(''), 4000);
+      return;
+    }
+
+    setIsSyncingWithDb(true);
+    setSyncDbMessage('Fetching watched chapters from Firestore database...');
+
+    try {
+      // 1. Fetch DB manga document
+      const mangaDocRef = doc(db, 'users', uid, 'mangas', mangaId);
+      const mangaDocSnap = await getDoc(mangaDocRef);
+      const dbMangaData = mangaDocSnap.exists() ? mangaDocSnap.data() : null;
+
+      // 2. Fetch DB chapters subcollection
+      const chaptersRef = collection(db, 'users', uid, 'mangas', mangaId, 'chapters');
+      const chaptersSnap = await getDocs(chaptersRef);
+      const dbChaptersMap = new Map();
+      chaptersSnap.forEach((cd) => {
+        dbChaptersMap.set(cd.id, { id: cd.id, ...cd.data() });
+      });
+
+      // 3. Also check progress subcollection for fallback
+      const progRef = collection(db, 'users', uid, 'mangas', mangaId, 'progress');
+      const progSnap = await getDocs(progRef);
+      const dbProgMap = new Map();
+      progSnap.forEach((pd) => {
+        dbProgMap.set(pd.id, pd.data());
+      });
+
+      // 4. Get current local chapters
+      const currentLocalChapters = getLocalChapters(mangaId).length > 0 ? getLocalChapters(mangaId) : chapters;
+
+      let uploadedCount = 0;
+      let downloadedCount = 0;
+      const chaptersToUpload = [];
+      const mergedChapters = [];
+
+      for (const ch of currentLocalChapters) {
+        const docId = ch.id || `manga_${mangaId}_${encodeURIComponent(ch.name || ch.fileName || '')}`;
+
+        // Match DB chapter
+        let dbCh = dbChaptersMap.get(ch.id) || dbChaptersMap.get(docId);
+        if (!dbCh && (ch.name || ch.fileName)) {
+          for (const [, v] of dbChaptersMap.entries()) {
+            if (
+              (ch.name && (v.name === ch.name || v.fileName === ch.name)) ||
+              (ch.fileName && (v.name === ch.fileName || v.fileName === ch.fileName)) ||
+              (ch.title && v.title === ch.title)
+            ) {
+              dbCh = v;
+              break;
+            }
+          }
+        }
+
+        const dbProg = dbProgMap.get(docId) || dbProgMap.get(ch.id);
+
+        const localIsWatched = Boolean(ch.isWatched || ch.isRead || (ch.progress && ch.progress >= 95));
+        const dbIsWatched = Boolean(
+          dbCh?.isWatched ||
+          dbCh?.isRead ||
+          (dbCh?.progress && dbCh.progress >= 95) ||
+          dbProg?.isRead ||
+          (dbProg?.progress && dbProg.progress >= 95)
+        );
+
+        const localProg = ch.progress !== undefined ? ch.progress : (localIsWatched ? 100 : 0);
+        const dbProgVal = dbCh?.progress !== undefined
+          ? dbCh.progress
+          : (dbProg?.progress !== undefined ? dbProg.progress : (dbIsWatched ? 100 : 0));
+
+        const finalIsWatched = localIsWatched || dbIsWatched;
+        const finalProgress = finalIsWatched ? 100 : Math.max(localProg, dbProgVal);
+        const finalLastPage = Math.max(ch.lastPage || 1, dbCh?.lastPage || dbProg?.lastPage || 1);
+        const totalP = ch.totalPages || dbCh?.totalPages || dbProg?.totalPages || 1;
+
+        const mergedCh = {
+          ...ch,
+          id: ch.id || docId,
+          isWatched: finalIsWatched,
+          isRead: finalIsWatched,
+          progress: finalProgress,
+          lastPage: finalLastPage,
+          totalPages: totalP,
+          updatedAt: new Date().toISOString(),
+        };
+        mergedChapters.push(mergedCh);
+
+        // Upload to DB if local was watched but DB wasn't, or local progress is higher, or DB doesn't have the chapter
+        if ((localIsWatched && !dbIsWatched) || (localProg > dbProgVal) || !dbCh) {
+          uploadedCount++;
+          chaptersToUpload.push(mergedCh);
+        }
+
+        // Update local if DB was watched but local wasn't, or DB has higher progress
+        if ((dbIsWatched && !localIsWatched) || (dbProgVal > localProg)) {
+          downloadedCount++;
+        }
+
+        // Keep IndexedDB in sync
+        const progPayload = {
+          documentId: docId,
+          lastPage: finalLastPage,
+          totalPages: totalP,
+          progress: finalProgress,
+          isRead: finalIsWatched,
+          isWatched: finalIsWatched,
+          lastReadAt: new Date().toISOString(),
+        };
+        await saveReadingProgress(docId, progPayload);
+        if (ch.name) {
+          await saveReadingProgress(`manga_${mangaId}_${encodeURIComponent(ch.name)}`, progPayload);
+        }
+      }
+
+      // Sort natural order
+      mergedChapters.sort((a, b) => naturalChapterSort(a, b, true));
+
+      // 5. Update local state & storage
+      setChapters(mergedChapters);
+      setLocalChapters(mangaId, mergedChapters);
+
+      const completedCount = mergedChapters.filter((c) => c.isWatched || c.isRead).length;
+      const totalCount = (manga?.totalChapters && Number(manga.totalChapters) > 0)
+        ? Number(manga.totalChapters)
+        : mergedChapters.length;
+      const overallPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+      const isMangaWatched = overallPct === 100 || Boolean(dbMangaData?.isWatched) || Boolean(manga?.isWatched);
+
+      const updatedManga = {
+        ...(dbMangaData || {}),
+        ...manga,
+        progressPercent: overallPct,
+        completedChapters: completedCount,
+        isWatched: isMangaWatched,
+        isCompleted: isMangaWatched,
+        status: isMangaWatched ? 'completed' : (completedCount > 0 ? 'reading' : manga?.status || 'ready'),
+        updatedAt: new Date().toISOString(),
+      };
+      setManga(updatedManga);
+      upsertLocalManga(updatedManga);
+
+      // 6. Batch update Firestore with any chapters needing upload
+      let batch = writeBatch(db);
+      let bCount = 0;
+
+      for (const ch of chaptersToUpload) {
+        const chRef = doc(db, 'users', uid, 'mangas', mangaId, 'chapters', ch.id);
+        batch.set(chRef, ch, { merge: true });
+        bCount++;
+        if (bCount >= 450) {
+          await batch.commit();
+          batch = writeBatch(db);
+          bCount = 0;
+        }
+      }
+
+      batch.set(mangaDocRef, updatedManga, { merge: true });
+      await batch.commit();
+
+      setSyncDbMessage(`✓ Synced with database! (${uploadedCount} uploaded to cloud, ${downloadedCount} updated locally)`);
+    } catch (err) {
+      console.error('[MangaDetail] Sync with DB failed:', err);
+      setSyncDbMessage('Sync failed: ' + err.message);
+    } finally {
+      setIsSyncingWithDb(false);
+      setTimeout(() => setSyncDbMessage(''), 5000);
+    }
+  };
+
   // Calculate Overall Progress
+  const totalChaptersCount = (manga?.totalChapters && Number(manga.totalChapters) > 0) ? Number(manga.totalChapters) : (chapters.length || 0);
   const completedCount = chapters.filter((c) => c.isRead || (c.progress && c.progress >= 95)).length;
-  const overallProgressPct = manga.totalChapters > 0 ? Math.round((completedCount / manga.totalChapters) * 100) : 0;
+  const overallProgressPct = totalChaptersCount > 0 ? Math.round((completedCount / totalChaptersCount) * 100) : 0;
   const currentRatingNum = manga?.rating ? parseFloat(manga.rating) : 0;
 
   if (loading) {
@@ -1046,6 +1354,22 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
         </button>
 
         <div className="flex items-center gap-2">
+          {/* Sync with DB Button */}
+          <button
+            type="button"
+            onClick={handleSyncWithDb}
+            disabled={isSyncingWithDb}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
+              isSyncingWithDb
+                ? 'bg-blue-600/25 border-blue-500/50 text-blue-300 shadow-[0_0_12px_rgba(59,130,246,0.3)]'
+                : 'bg-blue-600/15 hover:bg-blue-600/25 border-blue-500/30 text-blue-400 hover:text-blue-300'
+            }`}
+            title="Sync watched chapters with Firestore Database"
+          >
+            <RefreshCw size={14} className={isSyncingWithDb ? "animate-spin text-blue-400" : "text-blue-400"} />
+            <span>{isSyncingWithDb ? 'Syncing...' : 'Sync with DB'}</span>
+          </button>
+
           {/* Mark Manga Complete Button */}
           <button
             type="button"
@@ -1182,11 +1506,11 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
               <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
                 <span className="text-[10px] text-gray-400 font-bold uppercase block">Chapters</span>
-                <span className="text-lg font-black text-white">{chapters.length} / {manga.totalChapters}</span>
+                <span className="text-lg font-black text-white">{chapters.length} / {manga?.totalChapters || chapters.length || 0}</span>
               </div>
               <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
                 <span className="text-[10px] text-gray-400 font-bold uppercase block">Completed</span>
-                <span className="text-lg font-black text-emerald-400">{completedCount} / {manga.totalChapters}</span>
+                <span className="text-lg font-black text-emerald-400">{completedCount} / {manga?.totalChapters || chapters.length || 0}</span>
               </div>
               <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
                 <span className="text-[10px] text-gray-400 font-bold uppercase block">Reading Progress</span>
@@ -1225,6 +1549,17 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
 
               <button
                 type="button"
+                onClick={handleSyncWithDb}
+                disabled={isSyncingWithDb}
+                className="px-4 py-3 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-blue-300 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+                title="Fetch DB and reconcile watched chapters"
+              >
+                <RefreshCw size={15} className={isSyncingWithDb ? "animate-spin text-blue-400" : "text-blue-400"} />
+                <span>{isSyncingWithDb ? 'Syncing...' : 'Sync with DB'}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={openEditModal}
                 className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition cursor-pointer"
               >
@@ -1250,6 +1585,13 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                 <span>Rate / AniList</span>
               </button>
             </div>
+
+            {syncDbMessage && (
+              <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs font-semibold flex items-center gap-2 mt-2">
+                <RefreshCw size={14} className={isSyncingWithDb ? "animate-spin shrink-0 text-blue-400" : "shrink-0 text-blue-400"} />
+                <span>{syncDbMessage}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -2104,7 +2446,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                 )}
                 <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between text-[11px] text-gray-400 font-mono">
                   <span>Current Progress:</span>
-                  <span className="text-emerald-400 font-bold">{completedCount} / {manga.totalChapters} chapters ({overallProgressPct}%)</span>
+                  <span className="text-emerald-400 font-bold">{completedCount} / {manga?.totalChapters || chapters.length || 0} chapters ({overallProgressPct}%)</span>
                 </div>
               </div>
 

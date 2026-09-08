@@ -240,6 +240,7 @@ export default function PDFReader({
         totalPages,
         progress: progressPct,
         isRead: isAutoRead,
+        isWatched: isAutoRead,
         zoom: scale,
         rotation,
         readingMode: settings.readingMode,
@@ -249,7 +250,59 @@ export default function PDFReader({
       // 1. Save locally via IndexedDB
       await saveReadingProgress(documentId, progressData);
 
-      // 2. Report to parent callback
+      // 2. Also update localChapters & localManga in localStore if mangaId is available
+      let updatedOverallPct = 0;
+      let updatedCompletedCount = 0;
+      let isMangaWatched = false;
+      let updatedMangaObj = null;
+
+      if (mangaId) {
+        try {
+          const localChs = getLocalChapters(mangaId);
+          if (localChs && localChs.length > 0) {
+            const targetChId = chapterId || documentId;
+            const updatedChs = localChs.map((ch) => {
+              const chDocId = ch.id || `manga_${mangaId}_${encodeURIComponent(ch.name || ch.fileName || '')}`;
+              if (ch.id === documentId || chDocId === documentId || ch.id === targetChId || ch.name === chapterTitle || ch.title === chapterTitle) {
+                return {
+                  ...ch,
+                  isRead: isAutoRead,
+                  isWatched: isAutoRead,
+                  progress: progressPct,
+                  lastPage: newPage,
+                  totalPages,
+                };
+              }
+              return ch;
+            });
+            setLocalChapters(mangaId, updatedChs);
+
+            updatedCompletedCount = updatedChs.filter(c => c.isWatched || c.isRead || (c.progress && c.progress >= 95)).length;
+            updatedOverallPct = updatedChs.length > 0 ? Math.round((updatedCompletedCount / updatedChs.length) * 100) : 0;
+            isMangaWatched = updatedOverallPct === 100;
+
+            const localManga = getLocalManga(mangaId);
+            if (localManga) {
+              updatedMangaObj = {
+                ...localManga,
+                progressPercent: updatedOverallPct,
+                completedChapters: updatedCompletedCount,
+                isWatched: isMangaWatched,
+                isCompleted: isMangaWatched,
+                status: isMangaWatched ? 'completed' : (updatedCompletedCount > 0 ? 'reading' : localManga.status || 'ready'),
+                lastWatchedChapter: chapterTitle || '',
+                lastOpenedAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              };
+              upsertLocalManga(updatedMangaObj);
+            }
+          }
+        } catch (e) {
+          console.warn('[PDFReader] Failed to update localStore:', e);
+        }
+      }
+
+      // 3. Report to parent callback
       if (onProgressUpdate) {
         onProgressUpdate({
           documentId,
@@ -257,25 +310,74 @@ export default function PDFReader({
           totalPages,
           progress: progressPct,
           isRead: isAutoRead,
+          isWatched: isAutoRead,
         });
       }
 
-      // 3. Sync to Firestore if logged-in user
+      // 4. Sync to Firestore if logged-in user
       const uid = currentUser?.uid || getUserId();
+      const targetChId = chapterId || documentId;
+      const chapterPayload = {
+        id: targetChId,
+        isRead: isAutoRead,
+        isWatched: isAutoRead,
+        progress: progressPct,
+        lastPage: newPage,
+        totalPages,
+        updatedAt: new Date().toISOString(),
+      };
+
       if (!isOffline && db && uid && mangaId) {
         try {
-          const ref = doc(db, 'users', uid, 'mangas', mangaId, 'progress', documentId);
-          await setDoc(ref, progressData, { merge: true });
+          const chRef = doc(db, 'users', uid, 'mangas', mangaId, 'chapters', targetChId);
+          await setDoc(chRef, chapterPayload, { merge: true });
+
+          const progRef = doc(db, 'users', uid, 'mangas', mangaId, 'progress', documentId);
+          await setDoc(progRef, progressData, { merge: true });
+
+          if (updatedMangaObj) {
+            const mangaRef = doc(db, 'users', uid, 'mangas', mangaId);
+            await setDoc(mangaRef, {
+              progressPercent: updatedOverallPct,
+              completedChapters: updatedCompletedCount,
+              isWatched: isMangaWatched,
+              isCompleted: isMangaWatched,
+              status: updatedMangaObj.status,
+              lastWatchedChapter: chapterTitle || '',
+              updatedAt: new Date().toISOString(),
+            }, { merge: true });
+          }
         } catch (e) {
+          console.error('[PDFReader] Firestore sync error:', e);
           addToDirtyQueue({
-            type: 'SET_MANGA_PROGRESS',
-            dedupeKey: `PROGRESS_${mangaId}_${documentId}`,
-            payload: { mangaId, documentId, ...progressData },
+            type: 'SET_CHAPTER',
+            dedupeKey: `SET_CHAPTER_${mangaId}_${targetChId}`,
+            payload: { mangaId, mangaUserId: uid, ...chapterPayload },
+          });
+          if (updatedMangaObj) {
+            addToDirtyQueue({
+              type: 'SET_MANGA',
+              dedupeKey: `SET_MANGA_${mangaId}`,
+              payload: { id: mangaId, userId: uid, ...updatedMangaObj },
+            });
+          }
+        }
+      } else if (mangaId) {
+        addToDirtyQueue({
+          type: 'SET_CHAPTER',
+          dedupeKey: `SET_CHAPTER_${mangaId}_${targetChId}`,
+          payload: { mangaId, mangaUserId: uid, ...chapterPayload },
+        });
+        if (updatedMangaObj) {
+          addToDirtyQueue({
+            type: 'SET_MANGA',
+            dedupeKey: `SET_MANGA_${mangaId}`,
+            payload: { id: mangaId, userId: uid, ...updatedMangaObj },
           });
         }
       }
     }, 600);
-  }, [documentId, totalPages, scale, rotation, settings.readingMode, settings.direction, currentUser, isOffline, mangaId, onProgressUpdate, isChapterCompleted]);
+  }, [documentId, totalPages, scale, rotation, settings.readingMode, settings.direction, currentUser, isOffline, mangaId, onProgressUpdate, isChapterCompleted, chapterId, chapterTitle]);
 
   // ── Explicit Toggle Chapter Complete in Reader ───────────────────────────────
   const handleToggleChapterRead = useCallback(async () => {
@@ -292,6 +394,7 @@ export default function PDFReader({
       totalPages: totalPages || 1,
       progress: newProg,
       isRead: nextReadState,
+      isWatched: nextReadState,
       zoom: scale,
       rotation,
       readingMode: settings.readingMode,
@@ -306,16 +409,23 @@ export default function PDFReader({
     }
 
     // 2. Also update localChapters & localManga in localStore if mangaId is available
+    let updatedOverallPct = 0;
+    let updatedCompletedCount = 0;
+    let isMangaWatched = false;
+    let updatedMangaObj = null;
+
     if (mangaId) {
       try {
         const localChs = getLocalChapters(mangaId);
         if (localChs && localChs.length > 0) {
+          const targetChId = chapterId || documentId;
           const updated = localChs.map((ch) => {
-            const chDocId = ch.id || `manga_${mangaId}_${encodeURIComponent(ch.name)}`;
-            if (ch.id === documentId || chDocId === documentId || ch.id === chapterId || ch.name === chapterTitle || ch.title === chapterTitle) {
+            const chDocId = ch.id || `manga_${mangaId}_${encodeURIComponent(ch.name || ch.fileName || '')}`;
+            if (ch.id === documentId || chDocId === documentId || ch.id === targetChId || ch.name === chapterTitle || ch.title === chapterTitle) {
               return {
                 ...ch,
                 isRead: nextReadState,
+                isWatched: nextReadState,
                 progress: newProg,
                 lastPage: newPage,
               };
@@ -324,18 +434,23 @@ export default function PDFReader({
           });
           setLocalChapters(mangaId, updated);
 
-          const completedCount = updated.filter(c => c.isRead || (c.progress && c.progress >= 95)).length;
-          const overallPct = updated.length > 0 ? Math.round((completedCount / updated.length) * 100) : 0;
+          updatedCompletedCount = updated.filter(c => c.isWatched || c.isRead || (c.progress && c.progress >= 95)).length;
+          updatedOverallPct = updated.length > 0 ? Math.round((updatedCompletedCount / updated.length) * 100) : 0;
+          isMangaWatched = updatedOverallPct === 100;
           const localManga = getLocalManga(mangaId);
           if (localManga) {
-            const updatedManga = {
+            updatedMangaObj = {
               ...localManga,
-              progressPercent: overallPct,
-              completedChapters: completedCount,
-              status: overallPct === 100 ? 'completed' : (completedCount > 0 ? 'reading' : localManga.status || 'ready'),
+              progressPercent: updatedOverallPct,
+              completedChapters: updatedCompletedCount,
+              isWatched: isMangaWatched,
+              isCompleted: isMangaWatched,
+              status: isMangaWatched ? 'completed' : (updatedCompletedCount > 0 ? 'reading' : localManga.status || 'ready'),
+              lastWatchedChapter: chapterTitle || '',
+              lastOpenedAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             };
-            upsertLocalManga(updatedManga);
+            upsertLocalManga(updatedMangaObj);
           }
         }
       } catch (e) {
@@ -351,28 +466,71 @@ export default function PDFReader({
         totalPages: totalPages || 1,
         progress: newProg,
         isRead: nextReadState,
+        isWatched: nextReadState,
       });
     }
 
     // 4. Sync to Firestore if user logged in
     const uid = currentUser?.uid || getUserId();
+    const targetChId = chapterId || documentId;
+    const chapterPayload = {
+      id: targetChId,
+      isRead: nextReadState,
+      isWatched: nextReadState,
+      progress: newProg,
+      lastPage: newPage,
+      totalPages: totalPages || 1,
+      updatedAt: new Date().toISOString(),
+    };
+
     if (!isOffline && db && uid && mangaId) {
       try {
-        const ref = doc(db, 'users', uid, 'mangas', mangaId, 'progress', documentId);
-        await setDoc(ref, progressData, { merge: true });
+        const chRef = doc(db, 'users', uid, 'mangas', mangaId, 'chapters', targetChId);
+        await setDoc(chRef, chapterPayload, { merge: true });
+
+        const progRef = doc(db, 'users', uid, 'mangas', mangaId, 'progress', documentId);
+        await setDoc(progRef, progressData, { merge: true });
+
+        if (updatedMangaObj) {
+          const mRef = doc(db, 'users', uid, 'mangas', mangaId);
+          await setDoc(mRef, {
+            progressPercent: updatedOverallPct,
+            completedChapters: updatedCompletedCount,
+            isWatched: isMangaWatched,
+            isCompleted: isMangaWatched,
+            status: updatedMangaObj.status,
+            lastWatchedChapter: chapterTitle || '',
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+        }
       } catch (e) {
+        console.error('[PDFReader] Firestore toggle sync error:', e);
         addToDirtyQueue({
-          type: 'SET_MANGA_PROGRESS',
-          dedupeKey: `PROGRESS_${mangaId}_${documentId}`,
-          payload: { mangaId, documentId, ...progressData },
+          type: 'SET_CHAPTER',
+          dedupeKey: `SET_CHAPTER_${mangaId}_${targetChId}`,
+          payload: { mangaId, mangaUserId: uid, ...chapterPayload },
         });
+        if (updatedMangaObj) {
+          addToDirtyQueue({
+            type: 'SET_MANGA',
+            dedupeKey: `SET_MANGA_${mangaId}`,
+            payload: { id: mangaId, userId: uid, ...updatedMangaObj },
+          });
+        }
       }
     } else if (mangaId) {
       addToDirtyQueue({
-        type: 'SET_MANGA_PROGRESS',
-        dedupeKey: `PROGRESS_${mangaId}_${documentId}`,
-        payload: { mangaId, documentId, ...progressData },
+        type: 'SET_CHAPTER',
+        dedupeKey: `SET_CHAPTER_${mangaId}_${targetChId}`,
+        payload: { mangaId, mangaUserId: uid, ...chapterPayload },
       });
+      if (updatedMangaObj) {
+        addToDirtyQueue({
+          type: 'SET_MANGA',
+          dedupeKey: `SET_MANGA_${mangaId}`,
+          payload: { id: mangaId, userId: uid, ...updatedMangaObj },
+        });
+      }
     }
   }, [documentId, chapterId, isChapterCompleted, totalPages, scale, rotation, settings.readingMode, settings.direction, mangaId, chapterTitle, onProgressUpdate, currentUser, isOffline]);
 
