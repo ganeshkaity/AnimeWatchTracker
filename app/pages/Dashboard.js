@@ -229,6 +229,11 @@ export default function Dashboard({ onSelectAnime }) {
   const [uploadingMangaCover, setUploadingMangaCover] = useState(false);
   const [mangaGenres, setMangaGenres] = useState([]);
   const [showMangaCoverSearch, setShowMangaCoverSearch] = useState(false);
+  const [mangaDescription, setMangaDescription] = useState('');
+  const [mangaTotalVolumes, setMangaTotalVolumes] = useState('');
+  const [mangaTotalChapters, setMangaTotalChapters] = useState('');
+  const [fetchingMangaOnline, setFetchingMangaOnline] = useState(false);
+  const [mangaOnlineMessage, setMangaOnlineMessage] = useState('');
 
   // Hero Carousel State
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -282,6 +287,10 @@ export default function Dashboard({ onSelectAnime }) {
 
   // Ref for trending carousel horizontal scroll
   const trendingRef = useRef(null);
+  // Ref for recently updated horizontal scroll
+  const recentlyUpdatedRef = useRef(null);
+  // Ref for manga horizontal scroll
+  const mangaScrollRef = useRef(null);
 
   // Weekly Popular Anime from Internet (Top 10 of the week) with Local Storage Cache
   const [weeklyPopular, setWeeklyPopular] = useState(() => {
@@ -416,6 +425,71 @@ export default function Dashboard({ onSelectAnime }) {
     fetchTrending();
     return () => { isMounted = false; };
   }, []);
+
+  const [refreshingPopular, setRefreshingPopular] = useState(false);
+  const [refreshPopularSuccess, setRefreshPopularSuccess] = useState(false);
+  const [refreshingTrending, setRefreshingTrending] = useState(false);
+  const [refreshTrendingSuccess, setRefreshTrendingSuccess] = useState(false);
+
+  const handleRefreshPopular = async (e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (refreshingPopular) return;
+    setRefreshingPopular(true);
+    setRefreshPopularSuccess(false);
+    try {
+      const res = await fetch(`/api/popular-anime?refresh=1&t=${Date.now()}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.anime) && data.anime.length > 0) {
+        setWeeklyPopular([...data.anime]);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem(
+              'watchanime_weekly_popular',
+              JSON.stringify({ timestamp: Date.now(), data: data.anime })
+            );
+          } catch (e) {}
+        }
+        setRefreshPopularSuccess(true);
+        setTimeout(() => setRefreshPopularSuccess(false), 3000);
+      } else {
+        console.warn('[Dashboard] Popular anime fetch returned no items:', data);
+      }
+    } catch (err) {
+      console.warn('[Dashboard] Failed to refresh weekly popular anime:', err);
+    } finally {
+      setRefreshingPopular(false);
+    }
+  };
+
+  const handleRefreshTrending = async (e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (refreshingTrending) return;
+    setRefreshingTrending(true);
+    setRefreshTrendingSuccess(false);
+    try {
+      const res = await fetch(`/api/trending-today?refresh=1&t=${Date.now()}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.trending) && data.trending.length > 0) {
+        setInternetTrending([...data.trending]);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem(
+              'watchanime_trending_today_v3',
+              JSON.stringify({ timestamp: Date.now(), data: data.trending })
+            );
+          } catch (e) {}
+        }
+        setRefreshTrendingSuccess(true);
+        setTimeout(() => setRefreshTrendingSuccess(false), 3000);
+      } else {
+        console.warn('[Dashboard] Trending fetch returned no items:', data);
+      }
+    } catch (err) {
+      console.warn('[Dashboard] Failed to refresh trending today:', err);
+    } finally {
+      setRefreshingTrending(false);
+    }
+  };
 
   const handlePopularScroll = (direction) => {
     if (!popularScrollRef.current) return;
@@ -650,6 +724,20 @@ export default function Dashboard({ onSelectAnime }) {
     return a.coverImage || a.coverUrl || a.image || '';
   };
 
+  // Helper to extract the current cover photo of a manga folder
+  const getMangaFolderCover = (m) => {
+    if (!m) return '';
+    if (m.thumbnailBase64) {
+      return (m.thumbnailBase64.startsWith('http') || m.thumbnailBase64.startsWith('data:'))
+        ? m.thumbnailBase64
+        : `/api/image?path=${encodeURIComponent(m.thumbnailBase64)}`;
+    }
+    if (m.thumbnailPath) {
+      return `/api/image?path=${encodeURIComponent(m.thumbnailPath)}`;
+    }
+    return m.coverUrl || m.banner || m.image || '';
+  };
+
   const [isDraggingTopRated, setIsDraggingTopRated] = useState(false);
   const [topRatedStartX, setTopRatedStartX] = useState(0);
   const [topRatedScrollLeft, setTopRatedScrollLeft] = useState(0);
@@ -846,18 +934,44 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
-  const recentlyUpdated = [...animes]
-    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
-    .slice(0, 6)
-    .map(anime => ({
-      id: anime.id,
-      title: anime.title || 'Untitled Anime',
-      episode: anime.lastWatchedEpisode ? `Ep ${anime.lastWatchedEpisode}` : 'EP 0',
-      rating: getDeterministicRating(anime.id, anime.rating),
-      image: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop',
-      quality: anime.quality || 'HD',
-      isYouTube: !!(anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://'))
-    }));
+  const recentlyUpdated = useMemo(() => {
+    const formattedAnime = (animes || []).map(anime => {
+      const cover = getAnimeFolderCover(anime) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop';
+      return {
+        id: anime.id,
+        type: 'anime',
+        title: anime.title || 'Untitled Anime',
+        episode: anime.lastWatchedEpisode ? `Ep ${anime.lastWatchedEpisode}` : (anime.episodeCount ? `${anime.episodeCount} EP` : 'EP 0'),
+        rating: getDeterministicRating(anime.id, anime.rating),
+        image: cover,
+        quality: anime.quality || 'HD',
+        isYouTube: !!(anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://')),
+        updatedAt: anime.updatedAt || anime.createdAt || 0,
+      };
+    });
+
+    const formattedManga = (mangas || []).map(manga => {
+      const cover = getMangaFolderCover(manga) || 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop';
+      const chLabel = manga.lastReadChapter
+        ? `Ch ${manga.lastReadChapter}`
+        : (manga.chapterCount ? `${manga.chapterCount} Chs` : (manga.totalChapters ? `${manga.totalChapters} Chs` : 'Manga'));
+      return {
+        id: manga.id,
+        type: 'manga',
+        title: manga.title || 'Untitled Manga',
+        episode: chLabel,
+        rating: getDeterministicRating(manga.id, manga.rating),
+        image: cover,
+        quality: 'MANGA',
+        isYouTube: false,
+        updatedAt: manga.updatedAt || manga.lastReadAt || manga.createdAt || 0,
+      };
+    });
+
+    return [...formattedAnime, ...formattedManga]
+      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+      .slice(0, 30);
+  }, [animes, mangas]);
 
   const popularThisWeek = useMemo(() => {
     if (weeklyPopular.length > 0) {
@@ -1444,6 +1558,57 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
+  const handleFetchMangaOnline = async () => {
+    const query = (mangaTitle || '').trim();
+    if (!query) {
+      setMangaOnlineMessage('Please enter a manga title first.');
+      setTimeout(() => setMangaOnlineMessage(''), 3000);
+      return;
+    }
+    setFetchingMangaOnline(true);
+    setMangaOnlineMessage('Searching online for manga info...');
+    try {
+      const res = await fetch(`/api/manga-rating?q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      if (data.success) {
+        if (data.synopsis) {
+          setMangaDescription(data.synopsis);
+        }
+        if (data.volumes) {
+          setMangaTotalVolumes(String(data.volumes));
+        }
+        if (data.chapters) {
+          setMangaTotalChapters(String(data.chapters));
+        }
+        if (data.imageUrl && !mangaCoverUrl) {
+          setMangaCoverUrl(data.imageUrl);
+        }
+        if (Array.isArray(data.genres) && data.genres.length > 0) {
+          setMangaGenres(prev => {
+            const set = new Set(prev);
+            data.genres.forEach(g => {
+              const matched = GENRES_LIST.find(gl => gl.toLowerCase() === g.toLowerCase());
+              if (matched && matched !== 'All') set.add(matched);
+            });
+            return Array.from(set);
+          });
+        }
+        const infoParts = [];
+        if (data.volumes) infoParts.push(`${data.volumes} vols`);
+        if (data.chapters) infoParts.push(`${data.chapters} chs`);
+        const infoStr = infoParts.length > 0 ? ` (${infoParts.join(', ')})` : '';
+        setMangaOnlineMessage(`✓ Auto-filled details from ${data.source || 'Online'}${infoStr}`);
+      } else {
+        setMangaOnlineMessage(data.error || 'No manga found online.');
+      }
+    } catch (err) {
+      setMangaOnlineMessage('Fetch failed: ' + err.message);
+    } finally {
+      setFetchingMangaOnline(false);
+      setTimeout(() => setMangaOnlineMessage(''), 5000);
+    }
+  };
+
   const handleAddManga = async (e) => {
     e.preventDefault();
     const cleanPath = mangaFolderPath.trim();
@@ -1465,11 +1630,17 @@ export default function Dashboard({ onSelectAnime }) {
       }
       const randomGradient = GRADIENTS[Math.floor(Math.random() * GRADIENTS.length)];
 
+      const totalChs = mangaTotalChapters ? parseInt(mangaTotalChapters, 10) : mangaScanResult.length;
+      const totalVols = mangaTotalVolumes ? parseInt(mangaTotalVolumes, 10) : null;
       const mangaData = {
         title: mangaTitle.trim(),
         folderPath: cleanPath,
         chapterCount: mangaScanResult.length,
-        totalChapters: mangaScanResult.length,
+        totalChapters: totalChs,
+        volumes: totalVols,
+        totalVolumes: totalVols,
+        description: mangaDescription.trim(),
+        synopsis: mangaDescription.trim(),
         progressPercent: 0,
         coverGradient: randomGradient,
         createdAt: new Date().toISOString(),
@@ -1533,6 +1704,10 @@ export default function Dashboard({ onSelectAnime }) {
       setMangaCoverUrl('');
       setMangaGenres([]);
       setMangaScanResult([]);
+      setMangaDescription('');
+      setMangaTotalVolumes('');
+      setMangaTotalChapters('');
+      setMangaOnlineMessage('');
     } catch (err) {
       console.error(err);
       alert('Error adding manga: ' + err.message);
@@ -2086,6 +2261,22 @@ export default function Dashboard({ onSelectAnime }) {
       const { scrollLeft, clientWidth } = trendingRef.current;
       const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.7 : scrollLeft + clientWidth * 0.7;
       trendingRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  const scrollRecentlyUpdated = (direction) => {
+    if (recentlyUpdatedRef.current) {
+      const { scrollLeft, clientWidth } = recentlyUpdatedRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.7 : scrollLeft + clientWidth * 0.7;
+      recentlyUpdatedRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  const scrollManga = (direction) => {
+    if (mangaScrollRef.current) {
+      const { scrollLeft, clientWidth } = mangaScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.7 : scrollLeft + clientWidth * 0.7;
+      mangaScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
     }
   };
 
@@ -3052,8 +3243,28 @@ export default function Dashboard({ onSelectAnime }) {
                 </div>
               </div>
 
-              {/* Arrow controls */}
+              {/* Controls */}
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRefreshTrending}
+                  disabled={refreshingTrending}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition cursor-pointer active:scale-95 disabled:opacity-50 ${
+                    refreshTrendingSuccess
+                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                      : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-300 hover:text-white'
+                  }`}
+                  title="Refetch Trending Today list from online and save"
+                >
+                  {refreshTrendingSuccess ? (
+                    <CheckCircle2 size={15} className="text-emerald-400" />
+                  ) : (
+                    <RefreshCw size={15} className={refreshingTrending ? "animate-spin text-amber-400" : "text-amber-400"} />
+                  )}
+                  <span className="hidden sm:inline">
+                    {refreshingTrending ? "Refetching..." : refreshTrendingSuccess ? "Saved!" : "Refresh"}
+                  </span>
+                </button>
                 <button
                   onClick={() => scrollTrending('left')}
                   className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition cursor-pointer"
@@ -3204,14 +3415,37 @@ export default function Dashboard({ onSelectAnime }) {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowAddMangaModal(true)}
-              className="px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-            >
-              <Plus size={14} />
-              <span>Add Manga</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddMangaModal(true)}
+                className="px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+              >
+                <Plus size={14} />
+                <span className="hidden sm:inline">Add Manga</span>
+              </button>
+
+              {sortedMangas.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => scrollManga('left')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll left"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollManga('right')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll right"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {sortedMangas.length === 0 ? (
@@ -3235,22 +3469,26 @@ export default function Dashboard({ onSelectAnime }) {
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            /* Horizontal Slider (X-Axis Scrollable) */
+            <div
+              ref={mangaScrollRef}
+              className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+            >
               {sortedMangas.map((m) => {
                 const isWatched = Boolean(m.isWatched || m.progressPercent === 100 || m.status === 'completed');
+                const coverImg = m.thumbnailBase64 || (m.thumbnailPath ? `/api/image?path=${encodeURIComponent(m.thumbnailPath)}` : null);
                 return (
                   <div
                     key={`manga-${m.id}`}
                     onClick={() => router.push(`/manga/${m.id}`)}
-                    className="glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-purple-500/50 transition duration-200"
+                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-purple-500/50 transition-all duration-300 shadow-md hover:shadow-xl"
                   >
-                    <div className="relative h-48 overflow-hidden bg-[#181c24] flex items-center justify-center">
-                      {m.thumbnailBase64 ? (
-                        <img
-                          src={m.thumbnailBase64}
+                    <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
+                      {coverImg ? (
+                        <CachedImage
+                          src={coverImg}
                           alt={m.title}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          loading="lazy"
                         />
                       ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center text-purple-400/80 bg-purple-950/20 gap-1.5">
@@ -3262,24 +3500,24 @@ export default function Dashboard({ onSelectAnime }) {
                       {/* Status / Chapter Badge */}
                       <div className="absolute top-2 left-2 flex items-center gap-1">
                         {isWatched ? (
-                          <span className="px-2 py-0.5 rounded bg-emerald-500/90 backdrop-blur-md text-[9px] uppercase font-bold text-white flex items-center gap-1 shadow">
+                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/90 backdrop-blur-md text-[9px] uppercase font-bold text-white flex items-center gap-1 shadow">
                             <CheckCircle2 size={10} /> Completed
                           </span>
                         ) : (
-                          <div className="px-2 py-0.5 rounded bg-black/70 backdrop-blur-md text-purple-300 font-bold text-[9px] border border-white/10">
+                          <div className="px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-md text-purple-300 font-bold text-[9px] border border-white/10">
                             {m.chapterCount || m.totalChapters || 0} Ch
                           </div>
                         )}
                       </div>
 
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-purple-600 text-white font-extrabold text-[8px] shadow">
+                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-purple-600 text-white font-extrabold text-[8px] shadow">
                         PDF
                       </div>
 
                       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center p-3 gap-2">
                         <div className="px-3 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg">
                           <BookOpen size={14} />
-                          <span>Read Manga</span>
+                          <span>Read</span>
                         </div>
                         <button
                           type="button"
@@ -3300,11 +3538,11 @@ export default function Dashboard({ onSelectAnime }) {
                       </div>
                     </div>
 
-                    <div className="p-3 bg-black/30">
-                      <h4 className="font-bold text-xs text-white line-clamp-1 group-hover:text-purple-300 transition-colors">
+                    <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
+                      <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-purple-300 transition-colors">
                         {m.title}
                       </h4>
-                      <div className="flex justify-between items-center text-[9px] text-gray-400 mt-1">
+                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
                         <span>Local PDF</span>
                         <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-1" : "text-purple-400 font-semibold"}>
                           {isWatched ? (
@@ -3327,44 +3565,82 @@ export default function Dashboard({ onSelectAnime }) {
         {/* 5. RECENTLY UPDATED */}
         {recentlyUpdated.length > 0 && (
           <section id="recently-updated" className="space-y-4">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
-                <Clock size={20} />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
+                  <Clock size={20} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-extrabold tracking-wide text-white">Recently Updated</h2>
+                  <p className="text-[11px] text-gray-400 font-medium">Fresh additions & activity across your local anime and manga library</p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-xl font-extrabold tracking-wide text-white">Recently Updated</h2>
-                <p className="text-[11px] text-gray-400 font-medium">Fresh additions to your local library & releases</p>
+
+              {/* Scroll Navigation Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => scrollRecentlyUpdated('left')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                  title="Scroll left"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollRecentlyUpdated('right')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                  title="Scroll right"
+                >
+                  <ChevronRight size={18} />
+                </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            {/* Horizontal Slider (X-Axis Scrollable) */}
+            <div
+              ref={recentlyUpdatedRef}
+              className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+            >
               {recentlyUpdated.map((show, i) => (
                 <div
-                  key={`recent-${show.id}-${i}`}
-                  onClick={() => onSelectAnime(show.id)}
-                  className="glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between"
+                  key={`recent-${show.type || 'anime'}-${show.id}-${i}`}
+                  onClick={() => {
+                    if (show.type === 'manga') {
+                      router.push(`/manga/${show.id}`);
+                    } else {
+                      onSelectAnime(show.id);
+                    }
+                  }}
+                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/5 hover:border-[#7c5cff]/40 transition-all duration-300 shadow-md hover:shadow-xl"
                 >
-                  <div className="relative h-48 overflow-hidden bg-[#181c24] flex items-center justify-center">
-                    <CachedImage src={show.image} alt={show.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/70 text-gray-300 font-bold text-[9px]">
+                  <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
+                    <CachedImage src={show.image} alt={show.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-md text-gray-300 font-bold text-[10px] border border-white/10">
                       {show.episode}
                     </div>
-                    {show.isYouTube ? (
+                    {show.type === 'manga' ? (
+                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-emerald-500/90 backdrop-blur-md text-white font-extrabold text-[8px] tracking-wider uppercase shadow-lg border border-emerald-400/30">
+                        MANGA
+                      </div>
+                    ) : show.isYouTube ? (
                       <div className="absolute top-2 right-2 p-1 bg-black/60 rounded-lg shadow-lg border border-red-500/40 backdrop-blur-md flex items-center justify-center">
                         <YoutubeLogo size={16} />
                       </div>
                     ) : (
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-[#7c5cff]/80 text-white font-extrabold text-[8px]">
+                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-[#7c5cff]/90 backdrop-blur-md text-white font-extrabold text-[8px] border border-purple-400/30">
                         {show.quality || 'HD'}
                       </div>
                     )}
                   </div>
-                  <div className="p-3">
-                    <h4 className="font-bold text-xs text-white line-clamp-1 group-hover:text-[#7c5cff] transition-colors">
+                  <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
+                    <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-[#7c5cff] transition-colors">
                       {show.title}
                     </h4>
-                    <div className="flex justify-between items-center text-[9px] text-gray-400 mt-1">
-                      <span>Local Library</span>
+                    <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
+                      <span className={show.type === 'manga' ? "text-emerald-400/90 font-semibold" : "text-gray-400 font-medium"}>
+                        {show.type === 'manga' ? 'Manga' : 'Anime'}
+                      </span>
                       <span className="text-amber-400 font-bold">★ {show.rating}</span>
                     </div>
                   </div>
@@ -3393,8 +3669,28 @@ export default function Dashboard({ onSelectAnime }) {
                 </div>
               </div>
 
-              {/* Scroll Navigation Buttons */}
+              {/* Scroll Navigation Buttons & Refresh */}
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRefreshPopular}
+                  disabled={refreshingPopular}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition cursor-pointer active:scale-95 disabled:opacity-50 shadow-sm ${
+                    refreshPopularSuccess
+                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                      : 'bg-white/5 hover:bg-white/15 border-white/10 text-gray-300 hover:text-white'
+                  }`}
+                  title="Refetch Popular This Week list from online and save"
+                >
+                  {refreshPopularSuccess ? (
+                    <CheckCircle2 size={15} className="text-emerald-400" />
+                  ) : (
+                    <RefreshCw size={15} className={refreshingPopular ? "animate-spin text-[#a855f7]" : "text-[#a855f7]"} />
+                  )}
+                  <span className="hidden sm:inline">
+                    {refreshingPopular ? "Refetching..." : refreshPopularSuccess ? "Saved!" : "Refresh"}
+                  </span>
+                </button>
                 <button
                   type="button"
                   onClick={() => handlePopularScroll('left')}
@@ -4997,17 +5293,78 @@ export default function Dashboard({ onSelectAnime }) {
                   </div>
                 )}
 
-                {/* 2. Manga Title */}
+                {/* 2. Manga Title + Auto-Fetch Button */}
                 <div>
-                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
-                    Manga / Webtoon Title *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                      Manga / Webtoon Title *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleFetchMangaOnline}
+                      disabled={fetchingMangaOnline || !mangaTitle.trim()}
+                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-purple-600/30 to-pink-600/30 hover:from-purple-600/50 hover:to-pink-600/50 text-purple-200 border border-purple-500/30 hover:border-purple-400 text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Auto-fetch description, volumes, chapters count, and cover from online"
+                    >
+                      <Sparkles size={12} className={fetchingMangaOnline ? 'animate-spin text-purple-400' : 'text-purple-300'} />
+                      <span>{fetchingMangaOnline ? 'Fetching Online...' : 'Auto-Fetch from Online'}</span>
+                    </button>
+                  </div>
                   <input
                     type="text"
                     placeholder="e.g. Berserk, Solo Leveling, One Piece..."
                     className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
                     value={mangaTitle}
                     onChange={(e) => setMangaTitle(e.target.value)}
+                  />
+                  {mangaOnlineMessage && (
+                    <p className={`text-[11px] mt-1 font-medium ${mangaOnlineMessage.startsWith('✓') ? 'text-emerald-400' : 'text-purple-300'}`}>
+                      {mangaOnlineMessage}
+                    </p>
+                  )}
+                </div>
+
+                {/* 3. Volumes & Total Chapters */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                      Volumes Count
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="e.g. 12 (optional)"
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={mangaTotalVolumes}
+                      onChange={(e) => setMangaTotalVolumes(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                      Total Chapters
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder={mangaScanResult.length > 0 ? `Scanned: ${mangaScanResult.length} (or fetch/enter total)` : 'e.g. 100'}
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={mangaTotalChapters}
+                      onChange={(e) => setMangaTotalChapters(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {/* 4. Description / Synopsis */}
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                    Description / Synopsis
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Enter manga description, synopsis, or auto-fetch from online..."
+                    className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                    value={mangaDescription}
+                    onChange={(e) => setMangaDescription(e.target.value)}
                   />
                 </div>
 

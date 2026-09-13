@@ -26,10 +26,23 @@ async function fetchJikanCover(query) {
   return null;
 }
 
-export async function GET() {
+export async function GET(request) {
+  let isRefresh = false;
+  if (request && request.url) {
+    try {
+      const { searchParams } = new URL(request.url);
+      isRefresh = searchParams.get('refresh') === '1' || searchParams.get('refresh') === 'true' || searchParams.has('refresh');
+    } catch (e) {}
+  }
+
   const now = Date.now();
-  if (cachedTrending && (now - cacheTime < CACHE_DURATION_MS)) {
+  if (!isRefresh && cachedTrending && (now - cacheTime < CACHE_DURATION_MS)) {
     return NextResponse.json({ success: true, trending: cachedTrending, cached: true });
+  }
+
+  if (isRefresh) {
+    cachedTrending = null;
+    cacheTime = 0;
   }
 
   // ── 1. Primary: AniList GraphQL Multi-Category Trending Query ───────────────

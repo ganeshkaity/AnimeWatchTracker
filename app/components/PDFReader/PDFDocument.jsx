@@ -3,6 +3,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import PageRenderer from './PageRenderer';
 import { attachGestureListeners } from './GestureManager';
+import { ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
 
 export default function PDFDocument({
   pdfDoc,
@@ -24,6 +25,14 @@ export default function PDFDocument({
   searchQuery,
   centerAlign = true,
   jumpTarget = null,
+  onBack,
+  onPrevChapter,
+  onNextChapter,
+  hasPrevChapter = false,
+  hasNextChapter = false,
+  prevChapterTitle = '',
+  nextChapterTitle = '',
+  chapterTitle = '',
 }) {
   const containerRef = useRef(null);
   const isProgrammaticScrollRef = useRef(false);
@@ -487,6 +496,75 @@ export default function PDFDocument({
             />
           );
         })}
+
+        {/* Webtoon End-of-Chapter Navigation (Previous Chapter, Back, Next Chapter) */}
+        {settings.readingMode === 'vertical' && totalPages > 0 && (
+          <div className="w-full max-w-2xl px-4 py-12 flex flex-col items-center gap-6 mt-6 select-none">
+            {/* End of Chapter Divider & Badge */}
+            <div className="flex items-center gap-3 w-full opacity-60">
+              <div className="flex-1 h-px bg-gradient-to-r from-transparent via-purple-500/40 to-white/20" />
+              <span className="text-[11px] font-mono uppercase tracking-widest text-purple-300 font-bold px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/30">
+                End of {chapterTitle || 'Chapter'}
+              </span>
+              <div className="flex-1 h-px bg-gradient-to-l from-transparent via-purple-500/40 to-white/20" />
+            </div>
+
+            {/* Navigation Action Buttons */}
+            <div className="flex items-center justify-center gap-3 sm:gap-4 w-full flex-wrap">
+              {/* Previous Chapter */}
+              <button
+                type="button"
+                onClick={onPrevChapter}
+                disabled={!hasPrevChapter}
+                className={`flex items-center gap-2 px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs sm:text-sm transition-all duration-200 border shadow-lg ${
+                  hasPrevChapter
+                    ? 'bg-white/5 hover:bg-white/10 border-white/10 hover:border-purple-500/40 text-white cursor-pointer active:scale-95'
+                    : 'bg-white/[0.02] border-white/5 text-gray-600 cursor-not-allowed opacity-40'
+                }`}
+                title={prevChapterTitle ? `Previous: ${prevChapterTitle}` : 'No previous chapter'}
+              >
+                <ChevronLeft size={18} />
+                <span>Previous Chapter</span>
+              </button>
+
+              {/* Back to Manga Details */}
+              <button
+                type="button"
+                onClick={onBack}
+                className="flex items-center gap-2 px-4 sm:px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-xs sm:text-sm transition-all duration-200 cursor-pointer active:scale-95 shadow-lg hover:border-white/40"
+                title="Back to Manga Overview"
+              >
+                <ArrowLeft size={16} />
+                <span>Back</span>
+              </button>
+
+              {/* Next Chapter */}
+              <button
+                type="button"
+                onClick={onNextChapter}
+                disabled={!hasNextChapter}
+                className={`flex items-center gap-2 px-5 sm:px-6 py-3 rounded-2xl font-bold text-xs sm:text-sm transition-all duration-200 border shadow-xl ${
+                  hasNextChapter
+                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 border-purple-400/40 text-white cursor-pointer active:scale-95 shadow-purple-900/30'
+                    : 'bg-white/[0.02] border-white/5 text-gray-600 cursor-not-allowed opacity-40'
+                }`}
+                title={nextChapterTitle ? `Next: ${nextChapterTitle}` : 'No next chapter'}
+              >
+                <span>Next Chapter</span>
+                <ChevronRight size={18} />
+              </button>
+            </div>
+
+            {/* Subtitle / Status Hint */}
+            <div className="text-[11px] text-gray-500 font-medium text-center">
+              {hasNextChapter && nextChapterTitle ? (
+                <span>Next up: <strong className="text-gray-300">{nextChapterTitle}</strong></span>
+              ) : !hasNextChapter ? (
+                <span className="text-emerald-400/90 font-semibold">🎉 You have reached the latest chapter!</span>
+              ) : null}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -31,6 +31,7 @@ export default function PDFReader({
   mangaId,
   title = 'Manga Reader',
   chapterTitle = '',
+  defaultReadingMode = 'vertical',
   onBack,
   onProgressUpdate,
   onPrevChapter,
@@ -77,10 +78,10 @@ export default function PDFReader({
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Reader Preferences
+  // Reader Preferences (Webtoon mode default)
   const [settings, setSettings] = useState({
     direction: 'rtl',
-    readingMode: 'single',
+    readingMode: defaultReadingMode || 'vertical',
     background: 'dark',
     zoomMode: 'fit-width',
     pageTransition: true,
@@ -186,10 +187,14 @@ export default function PDFReader({
 
     const init = async () => {
       try {
-        // 1. Load Reader Settings
+        // 1. Load Reader Settings (Default to webtoon mode on open)
         const savedSettings = await getReaderSettings();
         if (!isCancelled && savedSettings) {
-          setSettings(savedSettings);
+          setSettings(prev => ({
+            ...prev,
+            ...savedSettings,
+            readingMode: defaultReadingMode || 'vertical',
+          }));
         }
 
         // 2. Load Stored Reading Progress, Bookmarks, Notes, Annotations
@@ -1097,6 +1102,14 @@ export default function PDFReader({
           searchQuery={searchQuery}
           centerAlign={centerAlign}
           jumpTarget={jumpTarget}
+          onBack={onBack}
+          onPrevChapter={onPrevChapter}
+          onNextChapter={onNextChapter}
+          hasPrevChapter={hasPrevChapter}
+          hasNextChapter={hasNextChapter}
+          prevChapterTitle={prevChapterTitle}
+          nextChapterTitle={nextChapterTitle}
+          chapterTitle={chapterTitle}
         />
       </div>
 

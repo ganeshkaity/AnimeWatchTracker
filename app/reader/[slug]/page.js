@@ -119,6 +119,7 @@ export default function ReaderPage() {
         mangaId={mangaId}
         title={resolvedTitle || 'Manga Reader'}
         chapterTitle={resolvedChapterTitle || currentChapter?.name || currentChapter?.title || ''}
+        defaultReadingMode="vertical"
         onPrevChapter={prevChapter ? () => handleOpenChapter(prevChapter) : undefined}
         onNextChapter={nextChapter ? () => handleOpenChapter(nextChapter) : undefined}
         hasPrevChapter={!!prevChapter}

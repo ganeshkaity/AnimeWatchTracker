@@ -17,23 +17,31 @@ export async function GET(request) {
     try {
       const anilistQuery = `
         query ($search: String) {
-          Media(search: $search, type: MANGA, sort: SEARCH_MATCH) {
-            id
-            title {
-              romaji
-              english
-              native
+          Page(page: 1, perPage: 10) {
+            media(search: $search, type: MANGA, sort: SEARCH_MATCH) {
+              id
+              format
+              title {
+                romaji
+                english
+                native
+              }
+              averageScore
+              meanScore
+              popularity
+              favourites
+              status
+              chapters
+              volumes
+              genres
+              siteUrl
+              description
+              coverImage {
+                extraLarge
+                large
+                medium
+              }
             }
-            averageScore
-            meanScore
-            popularity
-            favourites
-            status
-            chapters
-            volumes
-            genres
-            siteUrl
-            description
           }
         }
       `;
@@ -53,9 +61,39 @@ export async function GET(request) {
 
       if (aniRes.ok) {
         const aniData = await aniRes.json();
-        const media = aniData?.data?.Media;
+        const mediaList = aniData?.data?.Page?.media || [];
 
-        if (media) {
+        if (mediaList.length > 0) {
+          const sLower = cleanQuery.toLowerCase();
+
+          // 1. Check for exact title match that isn't a one-shot
+          let media = mediaList.find(m =>
+            (m.title?.romaji?.toLowerCase() === sLower || m.title?.english?.toLowerCase() === sLower) &&
+            m.format !== 'ONE_SHOT'
+          );
+
+          // 2. Exact match even if one-shot if it has chapters
+          if (!media) {
+            media = mediaList.find(m =>
+              (m.title?.romaji?.toLowerCase() === sLower || m.title?.english?.toLowerCase() === sLower) &&
+              (m.format === 'MANGA' || (m.chapters && m.chapters > 1))
+            );
+          }
+
+          // 3. Serialized manga with highest popularity
+          if (!media) {
+            const serializations = mediaList.filter(m => m.format === 'MANGA' || m.format === 'NOVEL');
+            if (serializations.length > 0) {
+              serializations.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+              media = serializations[0];
+            }
+          }
+
+          // 4. Fallback to first item
+          if (!media) {
+            media = mediaList[0];
+          }
+
           const avg = media.averageScore || media.meanScore;
           const rating = avg ? Math.round((avg / 10) * 10) / 10 : 8.0;
 
@@ -72,6 +110,7 @@ export async function GET(request) {
             volumes: media.volumes || null,
             genres: media.genres || [],
             synopsis: media.description ? media.description.replace(/<[^>]*>?/gm, '') : '',
+            imageUrl: media.coverImage?.extraLarge || media.coverImage?.large || media.coverImage?.medium || '',
             url: media.siteUrl || `https://anilist.co/manga/${media.id}`,
             source: 'AniList'
           });
@@ -111,7 +150,9 @@ export async function GET(request) {
             status: attr.status || 'finished',
             chapters: attr.chapterCount || null,
             volumes: attr.volumeCount || null,
+            genres: [],
             synopsis: attr.synopsis || '',
+            imageUrl: attr.posterImage?.large || attr.posterImage?.original || attr.posterImage?.medium || '',
             url: `https://kitsu.io/manga/${items[0].id}`,
             source: 'Kitsu / AniList Fallback'
           });
@@ -149,7 +190,9 @@ export async function GET(request) {
             status: item.status || 'Publishing',
             chapters: item.chapters || null,
             volumes: item.volumes || null,
+            genres: Array.isArray(item.genres) ? item.genres.map(g => g.name) : [],
             synopsis: item.synopsis || '',
+            imageUrl: item.images?.webp?.large_image_url || item.images?.jpg?.large_image_url || item.images?.jpg?.image_url || '',
             url: item.url || '',
             source: 'MyAnimeList'
           });

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   getLocalManga, upsertLocalManga, deleteLocalManga,
@@ -17,10 +17,12 @@ import {
   StickyNote, Star, RefreshCw, FolderPlus, FolderTree, Search,
   ChevronDown, ChevronUp, Trash2, Edit3, Check, ExternalLink, HardDrive,
   FileText, Sparkles, Heart, SlidersHorizontal, ImagePlus, X, FilePlus,
-  Move, CornerDownRight, ArrowRight, Layers, Loader2, RotateCcw
+  Move, CornerDownRight, ArrowRight, Layers, Loader2, RotateCcw,
+  PlusCircle, CheckSquare, FolderMinus, AlertTriangle, Menu
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MangaCoverSearch from '../components/MangaCoverSearch';
+import { getSubfolder } from '../utils/parser';
 
 const GENRES_LIST = [
   "All", "Action", "Adventure", "Comedy", "Crime", "Demons", "Detective", "Drama", 
@@ -100,18 +102,27 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
   const [manga, setManga] = useState(null);
   const [chapters, setChapters] = useState([]);
   const [sortAscending, setSortAscending] = useState(true);
+  const [chapterStatusFilter, setChapterStatusFilter] = useState('incomplete'); // 'incomplete' | 'completed' | 'all'
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedSubfolder, setSelectedSubfolder] = useState('ALL');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const filterInitializedMangaId = useRef(null);
 
   // Note Modal state
   const [editingChapter, setEditingChapter] = useState(null);
   const [noteText, setNoteText] = useState('');
 
-  // Rescan state
-  const [manageFolderExpanded, setManageFolderExpanded] = useState(false);
-  const [isRescanning, setIsRescanning] = useState(false);
+  // Rescan & Multi-Option Sync State
+  const [showRescanModal, setShowRescanModal] = useState(false);
+  const [rescanStatus, setRescanStatus] = useState('idle'); // 'idle' | 'scanning' | 'preview' | 'applying' | 'completed' | 'error'
   const [rescanMessage, setRescanMessage] = useState('');
+  const [manageFolderExpanded, setManageFolderExpanded] = useState(false);
+  const [rescanDiff, setRescanDiff] = useState(null);
+  const [rescanSyncMode, setRescanSyncMode] = useState('normal'); // 'normal' | 'new_only' | 'deleted_only' | 'custom'
+  const [selectedNewChIds, setSelectedNewChIds] = useState(new Set());
+  const [selectedRemovedChIds, setSelectedRemovedChIds] = useState(new Set());
+  const [rescanActiveTab, setRescanActiveTab] = useState('all'); // 'all' | 'new' | 'removed'
 
   // ── Rating State ──────────────────────────────────────────────────────────
   const [hoverRating, setHoverRating] = useState(0);
@@ -138,11 +149,14 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editTotalChapters, setEditTotalChapters] = useState('');
+  const [editTotalVolumes, setEditTotalVolumes] = useState('');
   const [editGenres, setEditGenres] = useState([]);
   const [editDescription, setEditDescription] = useState('');
   const [editCoverUrl, setEditCoverUrl] = useState('');
   const [showOnlineSearchEdit, setShowOnlineSearchEdit] = useState(false);
   const [uploadingEditCover, setUploadingEditCover] = useState(false);
+  const [fetchingEditOnline, setFetchingEditOnline] = useState(false);
+  const [editOnlineMessage, setEditOnlineMessage] = useState('');
 
   // ── Mark Entire Manga Complete State ─────────────────────────────────────
   const [showMarkAllModal, setShowMarkAllModal] = useState(false);
@@ -258,6 +272,20 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
     if (mangaId) loadData();
   }, [mangaId, currentUser]);
 
+  // Set default filter mode: if manga is completed, default to 'all'; otherwise 'incomplete' (unread only)
+  useEffect(() => {
+    if (!loading && manga && filterInitializedMangaId.current !== mangaId) {
+      filterInitializedMangaId.current = mangaId;
+      const isMangaDone = Boolean(
+        manga.isCompleted ||
+        manga.isWatched ||
+        (manga.status && manga.status.toLowerCase() === 'completed') ||
+        (chapters.length > 0 && chapters.every((c) => Boolean(c.isRead || c.isWatched || (c.progress && c.progress >= 95))))
+      );
+      setChapterStatusFilter(isMangaDone ? 'all' : 'incomplete');
+    }
+  }, [loading, manga, chapters, mangaId]);
+
   // ── Subfolders / Volumes grouping ──────────────────────────────────────────
   const subfolders = useMemo(() => {
     const set = new Set();
@@ -273,7 +301,16 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
     return Array.from(set).sort();
   }, [chapters, manga]);
 
-  // Filtered chapters (sorted small to big by default)
+  // Chapter counts for filter tabs
+  const unreadChaptersCount = useMemo(() => {
+    return chapters.filter(c => !c.isRead && !c.isWatched && !(c.progress && c.progress >= 95)).length;
+  }, [chapters]);
+
+  const completedChaptersCount = useMemo(() => {
+    return chapters.filter(c => Boolean(c.isRead || c.isWatched || (c.progress && c.progress >= 95))).length;
+  }, [chapters]);
+
+  // Filtered chapters (respecting status filter, subfolder, search, and sort order)
   const filteredChapters = useMemo(() => {
     const list = chapters.filter((c) => {
       const matchSearch = (c.name || c.title || '').toLowerCase().includes(search.toLowerCase());
@@ -281,13 +318,22 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
 
       if (selectedSubfolder !== 'ALL') {
         const rel = (c.filePath || '').replace(manga?.folderPath || '', '').replace(/^[\\/]/, '');
-        return rel.startsWith(selectedSubfolder);
+        if (!rel.startsWith(selectedSubfolder)) return false;
       }
+
+      const isChRead = Boolean(c.isRead || c.isWatched || (c.progress && c.progress >= 95));
+      if (chapterStatusFilter === 'incomplete') {
+        return !isChRead;
+      }
+      if (chapterStatusFilter === 'completed') {
+        return isChRead;
+      }
+      // 'all'
       return true;
     });
 
     return list.sort((a, b) => naturalChapterSort(a, b, sortAscending));
-  }, [chapters, search, selectedSubfolder, manga, sortAscending]);
+  }, [chapters, search, selectedSubfolder, manga, sortAscending, chapterStatusFilter]);
 
   // Target chapter for "Start / Continue Reading": first unread chapter in natural ascending order
   const targetReadingChapter = useMemo(() => {
@@ -334,11 +380,12 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
     }
   };
 
-  // ── Rescan Folder ──────────────────────────────────────────────────────────
+  // ── Rescan Folder & Compute Diff for Preview & Consent ──────────────────────────
   const handleRescanFolder = async () => {
     if (!manga?.folderPath) return;
-    setIsRescanning(true);
-    setRescanMessage('Scanning folder for new PDF chapters...');
+    setRescanStatus('scanning');
+    setRescanMessage('Scanning folder for PDF chapters and library differences...');
+    setShowRescanModal(true);
 
     try {
       const res = await fetch('/api/manga/scan', {
@@ -348,38 +395,323 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
       });
       const data = await res.json();
 
-      if (data.success && Array.isArray(data.chapters)) {
-        // Natural sort discovered files
-        data.chapters.sort((a, b) => naturalChapterSort(a, b, true));
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to scan manga folder');
+      }
 
-        const newChapters = data.chapters.map((ch, idx) => ({
-          id: `chap_${idx + 1}_${encodeURIComponent(ch.name)}`,
-          chapterNumber: extractChapterNumber(ch.name || ch.fileName),
+      const scannedFiles = Array.isArray(data.chapters) ? data.chapters : [];
+      // Natural sort discovered files
+      scannedFiles.sort((a, b) => naturalChapterSort(a, b, true));
+
+      const existingById = new Map(chapters.map(c => [c.id, c]));
+      const existingByPath = new Map(chapters.map(c => [(c.filePath || '').replace(/\\/g, '/').toLowerCase(), c]));
+      const existingByName = new Map(chapters.map(c => [(c.name || c.fileName || '').toLowerCase(), c]));
+
+      const findExisting = (pCh, rawId) => {
+        if (existingById.has(rawId)) return existingById.get(rawId);
+        const normPath = (pCh.filePath || '').replace(/\\/g, '/').toLowerCase();
+        if (normPath && existingByPath.has(normPath)) return existingByPath.get(normPath);
+        const normName = (pCh.name || pCh.fileName || '').toLowerCase();
+        if (normName && existingByName.has(normName)) return existingByName.get(normName);
+        return null;
+      };
+
+      const scannedCandidateChs = scannedFiles.map((ch, idx) => {
+        const rawId = ch.id || `chap_${ch.chapterNumber || (idx + 1)}_${encodeURIComponent(ch.name || ch.fileName || '')}`;
+        const existing = findExisting(ch, rawId);
+        const chId = existing?.id || rawId;
+
+        return {
           ...ch,
-        }));
-
-        setLocalChapters(mangaId, newChapters);
-        setChapters(newChapters);
-
-        // Update manga total chapters
-        const updatedManga = {
-          ...manga,
-          chapterCount: newChapters.length,
-          totalChapters: newChapters.length,
+          id: chId,
+          mangaId: mangaId,
+          chapterNumber: ch.chapterNumber !== undefined ? ch.chapterNumber : (existing?.chapterNumber || extractChapterNumber(ch.name || ch.fileName)),
+          name: ch.name || ch.fileName,
+          fileName: ch.fileName || ch.name,
+          filePath: ch.filePath,
+          size: ch.size || existing?.size || 0,
+          isRead: existing ? !!existing.isRead : false,
+          isWatched: existing ? !!existing.isWatched : false,
+          progress: existing ? (existing.progress || 0) : 0,
+          lastPage: existing ? (existing.lastPage || 1) : 1,
+          totalPages: existing ? (existing.totalPages || 0) : 0,
+          flags: existing ? (existing.flags || []) : [],
+          isFlagged: existing ? !!existing.isFlagged : false,
+          note: existing ? (existing.note || '') : '',
+          createdAt: existing?.createdAt || ch.createdAt || Date.now(),
           updatedAt: new Date().toISOString(),
         };
-        upsertLocalManga(updatedManga);
-        setManga(updatedManga);
+      });
 
-        setRescanMessage(`✓ Scanned successfully! Found ${newChapters.length} chapters.`);
+      // Calculate Diff against current chapters
+      const existingIdSet = new Set(chapters.map(c => c.id));
+      const scannedIdSet = new Set(scannedCandidateChs.map(c => c.id));
+
+      const newChapters = scannedCandidateChs.filter(c => !existingIdSet.has(c.id));
+      const retainedChapters = scannedCandidateChs.filter(c => existingIdSet.has(c.id));
+      const removedChapters = chapters.filter(c => !scannedIdSet.has(c.id));
+
+      // Folder Diff
+      const oldFolders = new Set(chapters.map(c => getSubfolder(c.filePath, manga?.folderPath || '')));
+      const newFolders = new Set(scannedCandidateChs.map(c => getSubfolder(c.filePath, manga?.folderPath || '')));
+
+      const addedFoldersList = Array.from(newFolders).filter(f => f && f !== '' && !oldFolders.has(f));
+      const removedFoldersList = Array.from(oldFolders).filter(f => f && f !== '' && !newFolders.has(f));
+
+      const mergedList = [...retainedChapters, ...newChapters].sort((a, b) => naturalChapterSort(a, b, true));
+
+      const diff = {
+        newChapters,
+        retainedChapters,
+        removedChapters,
+        addedFolders: addedFoldersList,
+        removedFolders: removedFoldersList,
+        allMergedChapters: mergedList,
+        scannedCount: scannedCandidateChs.length,
+      };
+
+      setRescanDiff(diff);
+
+      // Initialize selection sets
+      const allNewIds = new Set(newChapters.map(c => c.id));
+      const allRemovedIds = new Set(removedChapters.map(c => c.id));
+      setSelectedNewChIds(allNewIds);
+      setSelectedRemovedChIds(allRemovedIds);
+
+      // Smart default mode based on detected changes
+      if (newChapters.length > 0 && removedChapters.length > 0) {
+        setRescanSyncMode('normal');
+      } else if (newChapters.length > 0) {
+        setRescanSyncMode('new_only');
+      } else if (removedChapters.length > 0) {
+        setRescanSyncMode('deleted_only');
       } else {
-        setRescanMessage('Failed to scan folder: ' + (data.error || 'Unknown error'));
+        setRescanSyncMode('normal');
       }
+
+      setRescanActiveTab('all');
+      setRescanStatus('preview');
     } catch (err) {
-      setRescanMessage('Scan error: ' + err.message);
-    } finally {
-      setIsRescanning(false);
-      setTimeout(() => setRescanMessage(''), 4000);
+      console.error('Error during manga rescan:', err);
+      setRescanStatus('error');
+      setRescanMessage(err.message || 'Error occurred while rescanning folder');
+    }
+  };
+
+  // Switch Sync Mode handler
+  const handleSelectSyncMode = (mode) => {
+    setRescanSyncMode(mode);
+    if (!rescanDiff) return;
+    if (mode === 'normal') {
+      setSelectedNewChIds(new Set(rescanDiff.newChapters.map(c => c.id)));
+      setSelectedRemovedChIds(new Set(rescanDiff.removedChapters.map(c => c.id)));
+    } else if (mode === 'new_only') {
+      setSelectedNewChIds(new Set(rescanDiff.newChapters.map(c => c.id)));
+      setSelectedRemovedChIds(new Set()); // Nothing deleted
+    } else if (mode === 'deleted_only') {
+      setSelectedNewChIds(new Set()); // Nothing added
+      setSelectedRemovedChIds(new Set(rescanDiff.removedChapters.map(c => c.id)));
+    }
+  };
+
+  // Toggle single new chapter checkbox
+  const handleToggleNewChapter = (chId) => {
+    setRescanSyncMode('custom');
+    setSelectedNewChIds(prev => {
+      const next = new Set(prev);
+      if (next.has(chId)) next.delete(chId);
+      else next.add(chId);
+      return next;
+    });
+  };
+
+  // Toggle single removed chapter checkbox (checked = will remove)
+  const handleToggleRemovedChapter = (chId) => {
+    setRescanSyncMode('custom');
+    setSelectedRemovedChIds(prev => {
+      const next = new Set(prev);
+      if (next.has(chId)) next.delete(chId);
+      else next.add(chId);
+      return next;
+    });
+  };
+
+  // Select all or deselect all new chapters
+  const handleSelectAllNew = (select) => {
+    if (!rescanDiff) return;
+    setRescanSyncMode('custom');
+    if (select) {
+      setSelectedNewChIds(new Set(rescanDiff.newChapters.map(c => c.id)));
+    } else {
+      setSelectedNewChIds(new Set());
+    }
+  };
+
+  // Select all or deselect all removed chapters
+  const handleSelectAllRemoved = (select) => {
+    if (!rescanDiff) return;
+    setRescanSyncMode('custom');
+    if (select) {
+      setSelectedRemovedChIds(new Set(rescanDiff.removedChapters.map(c => c.id)));
+    } else {
+      setSelectedRemovedChIds(new Set());
+    }
+  };
+
+  // Toggle entire subfolder for new chapters
+  const handleToggleFolderNew = (folderName, selectAll) => {
+    if (!rescanDiff) return;
+    setRescanSyncMode('custom');
+    const folderChIds = rescanDiff.newChapters
+      .filter(c => getSubfolder(c.filePath, manga?.folderPath || '') === folderName)
+      .map(c => c.id);
+    setSelectedNewChIds(prev => {
+      const next = new Set(prev);
+      folderChIds.forEach(id => {
+        if (selectAll) next.add(id);
+        else next.delete(id);
+      });
+      return next;
+    });
+  };
+
+  // Toggle entire subfolder for removed chapters
+  const handleToggleFolderRemoved = (folderName, selectAll) => {
+    if (!rescanDiff) return;
+    setRescanSyncMode('custom');
+    const folderChIds = rescanDiff.removedChapters
+      .filter(c => getSubfolder(c.filePath, manga?.folderPath || '') === folderName)
+      .map(c => c.id);
+    setSelectedRemovedChIds(prev => {
+      const next = new Set(prev);
+      folderChIds.forEach(id => {
+        if (selectAll) next.add(id);
+        else next.delete(id);
+      });
+      return next;
+    });
+  };
+
+  // Apply Rescan Changes Handler (respects chosen sync mode & selected items)
+  const handleApplyRescanChanges = async () => {
+    if (!rescanDiff || !manga) return;
+    setRescanStatus('applying');
+    setRescanMessage('Applying rescan changes to library and database...');
+
+    try {
+      const { newChapters, removedChapters } = rescanDiff;
+
+      // Filter exact chapters to add & remove based on user's selected sets
+      const chaptersToAdd = newChapters.filter(c => selectedNewChIds.has(c.id));
+      const chaptersToRemove = removedChapters.filter(c => selectedRemovedChIds.has(c.id));
+
+      // Build retained list: all currently existing chapters EXCEPT those selected for removal
+      const removedIdSet = new Set(chaptersToRemove.map(c => c.id));
+      const retainedCurrentChapters = chapters.filter(c => !removedIdSet.has(c.id));
+
+      // Build final merged chapters
+      const allMergedChapters = [...retainedCurrentChapters, ...chaptersToAdd].sort((a, b) => naturalChapterSort(a, b, true));
+
+      const total = allMergedChapters.length;
+      const completed = allMergedChapters.filter(c => Boolean(c.isRead || c.isWatched || (c.progress && c.progress >= 95))).length;
+      const effectiveTotalChapters = (manga?.totalChapters && Number(manga.totalChapters) > 0)
+        ? Number(manga.totalChapters)
+        : total;
+      const newProgressPercent = effectiveTotalChapters > 0 ? Math.round((completed / effectiveTotalChapters) * 100) : 0;
+      const isMangaDone = effectiveTotalChapters > 0 && completed >= effectiveTotalChapters;
+
+      const updatedMangaDoc = {
+        ...manga,
+        chapterCount: total,
+        totalChapters: effectiveTotalChapters,
+        completedChapters: completed,
+        progressPercent: newProgressPercent,
+        isWatched: isMangaDone,
+        isCompleted: isMangaDone,
+        status: isMangaDone ? 'completed' : (completed > 0 ? 'reading' : manga.status || 'ready'),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // 1. Immediately apply locally to state & storage
+      chaptersToAdd.forEach(ch => upsertLocalChapter(mangaId, ch));
+      chaptersToRemove.forEach(ch => deleteLocalChapter(mangaId, ch.id));
+
+      setChapters(allMergedChapters);
+      setLocalChapters(mangaId, allMergedChapters);
+      upsertLocalManga(updatedMangaDoc);
+      setManga(updatedMangaDoc);
+
+      // 2. Upload to Firestore if online
+      if (!isOffline && db && currentUser) {
+        const batch = writeBatch(db);
+
+        // Upload newly added chapters
+        chaptersToAdd.forEach(ch => {
+          const chRef = doc(db, 'users', getUserId(), 'mangas', mangaId, 'chapters', ch.id);
+          batch.set(chRef, ch, { merge: true });
+        });
+
+        // Delete selected removed chapters
+        chaptersToRemove.forEach(ch => {
+          const chRef = doc(db, 'users', getUserId(), 'mangas', mangaId, 'chapters', ch.id);
+          batch.delete(chRef);
+        });
+
+        // Update manga metadata
+        const mangaRef = doc(db, 'users', getUserId(), 'mangas', mangaId);
+        batch.set(mangaRef, {
+          chapterCount: total,
+          totalChapters: effectiveTotalChapters,
+          completedChapters: completed,
+          progressPercent: newProgressPercent,
+          isWatched: isMangaDone,
+          isCompleted: isMangaDone,
+          status: isMangaDone ? 'completed' : (completed > 0 ? 'reading' : manga.status || 'ready'),
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+
+        await batch.commit();
+      } else {
+        // Queue dirty ops for offline sync
+        chaptersToAdd.forEach(ch => {
+          addToDirtyQueue({ type: 'SET_CHAPTER', dedupeKey: `SET_CHAPTER_${mangaId}_${ch.id}`, payload: { mangaId, ...ch } });
+        });
+        chaptersToRemove.forEach(ch => {
+          addToDirtyQueue({ type: 'DELETE_CHAPTER', dedupeKey: `DELETE_CHAPTER_${mangaId}_${ch.id}`, payload: { mangaId, id: ch.id } });
+        });
+        addToDirtyQueue({
+          type: 'SET_MANGA',
+          dedupeKey: `SET_MANGA_${mangaId}`,
+          payload: {
+            id: mangaId,
+            chapterCount: total,
+            totalChapters: effectiveTotalChapters,
+            completedChapters: completed,
+            progressPercent: newProgressPercent,
+            isWatched: isMangaDone,
+            isCompleted: isMangaDone,
+            status: isMangaDone ? 'completed' : (completed > 0 ? 'reading' : manga.status || 'ready'),
+            updatedAt: new Date().toISOString(),
+          },
+        });
+      }
+
+      setRescanStatus('completed');
+      let summaryText = 'Library updated successfully!';
+      if (chaptersToAdd.length > 0 && chaptersToRemove.length > 0) {
+        summaryText = `Added ${chaptersToAdd.length} new chapter(s) and removed ${chaptersToRemove.length} missing item(s).`;
+      } else if (chaptersToAdd.length > 0) {
+        summaryText = `Added ${chaptersToAdd.length} new chapter(s). Existing & missing items were kept untouched.`;
+      } else if (chaptersToRemove.length > 0) {
+        summaryText = `Removed ${chaptersToRemove.length} missing item(s) from library.`;
+      } else {
+        summaryText = `No chapter changes applied. Library metadata refreshed.`;
+      }
+      setRescanMessage(`Rescan complete! ${summaryText} (${total} total chapters, ${completed} completed).`);
+    } catch (err) {
+      console.error("Error applying manga rescan changes:", err);
+      setRescanStatus('error');
+      setRescanMessage(err.message || 'Failed to apply rescan changes');
     }
   };
 
@@ -618,7 +950,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
       const updatedList = [...chapters, newCh];
       setChapters(updatedList);
 
-      const updatedManga = { ...manga, chapterCount: updatedList.length, totalChapters: updatedList.length };
+      const updatedManga = { ...manga, chapterCount: updatedList.length, totalChapters: manga?.totalChapters || updatedList.length };
       upsertLocalManga(updatedManga);
       setManga(updatedManga);
 
@@ -750,7 +1082,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
       const updatedManga = {
         ...manga,
         chapterCount: updatedRemaining.length,
-        totalChapters: updatedRemaining.length,
+        totalChapters: manga?.totalChapters || updatedRemaining.length,
         updatedAt: new Date().toISOString()
       };
       upsertLocalManga(updatedManga);
@@ -837,11 +1169,64 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
   const openEditModal = () => {
     setEditTitle(manga?.title || '');
     setEditTotalChapters(manga?.totalChapters || manga?.chapterCount || chapters.length || '');
+    setEditTotalVolumes(manga?.volumes || manga?.totalVolumes || '');
     setEditGenres(Array.isArray(manga?.genres) ? manga.genres : typeof manga?.genres === 'string' ? manga.genres.split(',').map(s => s.trim()) : []);
     setEditDescription(manga?.description || manga?.synopsis || '');
     setEditCoverUrl(manga?.thumbnailBase64 || manga?.thumbnailPath || '');
+    setEditOnlineMessage('');
     setShowOnlineSearchEdit(false);
     setShowEditModal(true);
+  };
+
+  const handleFetchEditOnline = async () => {
+    const query = (editTitle || '').trim();
+    if (!query) {
+      setEditOnlineMessage('Please enter a manga title first.');
+      setTimeout(() => setEditOnlineMessage(''), 3000);
+      return;
+    }
+    setFetchingEditOnline(true);
+    setEditOnlineMessage('Searching online for manga info...');
+    try {
+      const res = await fetch(`/api/manga-rating?q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      if (data.success) {
+        if (data.synopsis) {
+          setEditDescription(data.synopsis);
+        }
+        if (data.volumes) {
+          setEditTotalVolumes(String(data.volumes));
+        }
+        if (data.chapters) {
+          setEditTotalChapters(String(data.chapters));
+        }
+        if (data.imageUrl) {
+          setEditCoverUrl(data.imageUrl);
+        }
+        if (Array.isArray(data.genres) && data.genres.length > 0) {
+          setEditGenres(prev => {
+            const set = new Set(prev);
+            data.genres.forEach(g => {
+              const matched = GENRES_LIST.find(gl => gl.toLowerCase() === g.toLowerCase());
+              if (matched && matched !== 'All') set.add(matched);
+            });
+            return Array.from(set);
+          });
+        }
+        const infoParts = [];
+        if (data.volumes) infoParts.push(`${data.volumes} vols`);
+        if (data.chapters) infoParts.push(`${data.chapters} chs`);
+        const infoStr = infoParts.length > 0 ? ` (${infoParts.join(', ')})` : '';
+        setEditOnlineMessage(`✓ Auto-filled details from ${data.source || 'Online'}${infoStr}`);
+      } else {
+        setEditOnlineMessage(data.error || 'No manga found online.');
+      }
+    } catch (err) {
+      setEditOnlineMessage('Fetch failed: ' + err.message);
+    } finally {
+      setFetchingEditOnline(false);
+      setTimeout(() => setEditOnlineMessage(''), 5000);
+    }
   };
 
   const handleEditCoverUpload = (e) => {
@@ -874,11 +1259,15 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
     if (!editTitle.trim()) return;
 
     try {
+      const totalChs = editTotalChapters ? parseInt(editTotalChapters, 10) : chapters.length;
+      const totalVols = editTotalVolumes ? parseInt(editTotalVolumes, 10) : null;
       const updatedManga = {
         ...manga,
         title: editTitle.trim(),
-        totalChapters: editTotalChapters ? parseInt(editTotalChapters, 10) : chapters.length,
-        chapterCount: editTotalChapters ? parseInt(editTotalChapters, 10) : chapters.length,
+        totalChapters: totalChs,
+        chapterCount: totalChs,
+        volumes: totalVols,
+        totalVolumes: totalVols,
         genres: editGenres,
         description: editDescription,
         synopsis: editDescription,
@@ -1355,6 +1744,11 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
   const completedCount = chapters.filter((c) => c.isRead || (c.progress && c.progress >= 95)).length;
   const overallProgressPct = totalChaptersCount > 0 ? Math.round((completedCount / totalChaptersCount) * 100) : 0;
   const currentRatingNum = manga?.rating ? parseFloat(manga.rating) : 0;
+  const mangaCoverImg = manga?.thumbnailBase64
+    ? (manga.thumbnailBase64.startsWith('http') || manga.thumbnailBase64.startsWith('data:')
+        ? manga.thumbnailBase64
+        : `/api/image?path=${encodeURIComponent(manga.thumbnailBase64)}`)
+    : (manga?.coverUrl || '');
 
   if (loading) {
     return (
@@ -1370,16 +1764,25 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
   return (
     <div className="min-h-screen bg-[#0d1117] text-white selection:bg-purple-600/30 pb-20">
       {/* ── Top Header ──────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 h-16 border-b border-white/10 bg-[#0d1117]/90 backdrop-blur-md px-4 sm:px-8 flex items-center justify-between">
+      <header className="sticky top-0 z-30 h-16 border-b border-white/10 bg-[#0d1117]/90 backdrop-blur-md px-4 sm:px-8 flex items-center justify-between gap-3">
         <button
           onClick={onBack || (() => router.push('/'))}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-gray-300 hover:text-white transition cursor-pointer"
+          className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-gray-300 hover:text-white transition cursor-pointer shrink-0"
         >
           <ArrowLeft size={16} />
-          <span>Back to Library</span>
+          <span className="hidden sm:inline">Back to Library</span>
+          <span className="sm:hidden">Back</span>
         </button>
 
-        <div className="flex items-center gap-2">
+        {/* Mobile Center Title (Truncated) */}
+        <div className="md:hidden flex-1 min-w-0 px-1 text-center">
+          <h1 className="text-xs font-extrabold text-white truncate">
+            {manga?.title || 'Manga Details'}
+          </h1>
+        </div>
+
+        {/* Desktop Navigation Actions */}
+        <div className="hidden md:flex items-center gap-2">
           {/* Sync with DB Button */}
           <button
             type="button"
@@ -1444,16 +1847,186 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
             <span>File Manager</span>
           </button>
         </div>
+
+        {/* Mobile Hamburger Menu Toggle Button */}
+        <div className="flex md:hidden items-center shrink-0">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(!mobileNavOpen)}
+            className={`p-2 rounded-xl border transition cursor-pointer flex items-center justify-center ${
+              mobileNavOpen
+                ? 'bg-purple-600/25 border-purple-500/50 text-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
+                : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-300 hover:text-white'
+            }`}
+            aria-label="Toggle Navigation Menu"
+            title={mobileNavOpen ? "Close Menu" : "Open Menu"}
+          >
+            {mobileNavOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        </div>
       </header>
+
+      {/* ── Mobile Navigation Drawer / Dropdown ────────────────────────────── */}
+      <AnimatePresence>
+        {mobileNavOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setMobileNavOpen(false)}
+              className="md:hidden fixed inset-0 top-16 z-40 bg-black/60 backdrop-blur-sm"
+            />
+
+            {/* Mobile Menu Panel */}
+            <motion.div
+              initial={{ opacity: 0, y: -12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.18 }}
+              className="md:hidden fixed top-16 left-0 right-0 z-50 bg-[#0d1117]/95 backdrop-blur-2xl border-b border-white/15 p-4 shadow-2xl space-y-3 max-h-[calc(100vh-4.5rem)] overflow-y-auto custom-scrollbar"
+            >
+              {/* Manga Info Banner */}
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-900/30 to-pink-900/20 border border-purple-500/25 flex items-center justify-between">
+                <div className="min-w-0 flex-1 pr-3">
+                  <div className="text-xs font-black text-white truncate">{manga?.title || 'Manga Details'}</div>
+                  <div className="text-[11px] text-gray-400 font-mono mt-0.5">
+                    {completedCount} / {manga?.totalChapters || chapters.length || 0} chapters read ({overallProgressPct}%)
+                  </div>
+                </div>
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border shrink-0 ${
+                  overallProgressPct === 100
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                }`}>
+                  {overallProgressPct === 100 ? 'Completed' : 'Reading'}
+                </span>
+              </div>
+
+              {/* Action Buttons List */}
+              <div className="space-y-2">
+                {/* 1. Sync with DB */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileNavOpen(false);
+                    handleSyncWithDb();
+                  }}
+                  disabled={isSyncingWithDb}
+                  className="w-full flex items-center justify-between p-3 rounded-xl bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 text-blue-300 text-xs font-bold transition cursor-pointer disabled:opacity-50"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <RefreshCw size={16} className={isSyncingWithDb ? "animate-spin text-blue-400" : "text-blue-400"} />
+                    <span>{isSyncingWithDb ? 'Syncing with DB...' : 'Sync with Database'}</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-lg border border-blue-500/20">
+                    Firestore
+                  </span>
+                </button>
+
+                {/* 2. Mark Complete */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileNavOpen(false);
+                    setShowMarkAllModal(true);
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-xl bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 text-xs font-bold transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircle2 size={16} className="text-emerald-400" />
+                    <span>{overallProgressPct === 100 ? 'Manga Completed (Review / Reset)' : 'Mark Entire Manga Complete'}</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+                    {overallProgressPct}%
+                  </span>
+                </button>
+
+                {/* 3. Rating */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileNavOpen(false);
+                    setShowRatingPanel(true);
+                    setTimeout(() => {
+                      const el = document.getElementById('rating-panel-section');
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    }, 100);
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Star size={16} className="fill-amber-400 text-amber-400" />
+                    <span>Rate & AniList Score</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20">
+                    {manga?.rating ? `★ ${manga.rating}/10` : 'Unrated'}
+                  </span>
+                </button>
+
+                {/* 4. Edit Manga */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileNavOpen(false);
+                    openEditModal();
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-xl bg-purple-600/10 hover:bg-purple-600/20 border border-purple-500/30 text-purple-300 text-xs font-bold transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <SlidersHorizontal size={16} className="text-purple-400" />
+                    <span>Edit Manga Details & Cover</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-lg border border-purple-500/20">
+                    Edit
+                  </span>
+                </button>
+
+                {/* 5. File Manager */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileNavOpen(false);
+                    openFileManagerModal();
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-xs font-bold transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <FolderTree size={16} className="text-cyan-400" />
+                    <span>Folder & File Manager</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-lg border border-cyan-500/20">
+                    Files
+                  </span>
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-8 py-8 space-y-8">
         {/* ── Hero Banner / Overview Card ────────────────────────────────────── */}
-        <div className="relative rounded-3xl overflow-hidden glass-panel border border-white/10 p-6 sm:p-8 bg-gradient-to-br from-purple-900/20 via-[#10141d] to-[#0d1117] shadow-2xl flex flex-col md:flex-row gap-8 items-start">
-          {/* Cover Poster */}
-          <div className="w-48 sm:w-56 shrink-0 aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-white/15 bg-black/50 relative group">
-            {manga?.thumbnailBase64 ? (
+        <div className="relative rounded-3xl overflow-hidden border border-white/10 p-6 sm:p-8 bg-[#0d1117]/90 md:bg-gradient-to-br md:from-purple-900/20 md:via-[#10141d] md:to-[#0d1117] shadow-2xl flex flex-col md:flex-row gap-8 items-start">
+          {/* Ambient Background Cover: on mobile, clearly and vibrantly covers the hero card */}
+          {mangaCoverImg && (
+            <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
               <img
-                src={manga.thumbnailBase64.startsWith('http') || manga.thumbnailBase64.startsWith('data:') ? manga.thumbnailBase64 : `/api/image?path=${encodeURIComponent(manga.thumbnailBase64)}`}
+                src={mangaCoverImg}
+                alt=""
+                className="w-full h-full object-cover object-top opacity-45 md:opacity-20 blur-[1.5px] md:blur-xl scale-105"
+                aria-hidden="true"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#0d1117] via-[#0d1117]/65 to-black/30 md:bg-gradient-to-b md:from-[#0d1117]/40 md:via-[#0d1117]/80 md:to-[#0d1117]" />
+            </div>
+          )}
+
+          {/* Cover Poster (Desktop only: hidden on mobile per user request) */}
+          <div className="relative z-10 hidden md:block w-48 sm:w-56 shrink-0 aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-white/15 bg-black/50 group">
+            {mangaCoverImg ? (
+              <img
+                src={mangaCoverImg}
                 alt={manga.title}
                 className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
               />
@@ -1476,10 +2049,21 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
           </div>
 
           {/* Details Column */}
-          <div className="flex-1 space-y-4">
+          <div className="relative z-10 flex-1 space-y-4 w-full">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h1 className="text-2xl sm:text-3xl font-black tracking-wide text-white">
+                <div className="flex items-center gap-2 mb-1.5 md:hidden">
+                  <span className="px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-md text-[10px] font-extrabold text-purple-300 border border-purple-500/30">
+                    PDF Manga
+                  </span>
+                  <button
+                    onClick={openEditModal}
+                    className="text-[10px] font-bold text-purple-300 hover:text-white flex items-center gap-1 transition px-2 py-0.5 rounded-md bg-white/10 border border-white/10 cursor-pointer"
+                  >
+                    <Edit3 size={11} /> Change Cover
+                  </button>
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-black tracking-wide text-white drop-shadow-md">
                   {manga?.title || 'Untitled Manga'}
                 </h1>
                 {manga?.folderPath && (
@@ -1533,6 +2117,11 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
               <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
                 <span className="text-[10px] text-gray-400 font-bold uppercase block">Chapters</span>
                 <span className="text-lg font-black text-white">{chapters.length} / {manga?.totalChapters || chapters.length || 0}</span>
+                {(manga?.volumes || manga?.totalVolumes) && (
+                  <span className="text-[10px] text-purple-300 font-mono block mt-0.5">
+                    {manga.volumes || manga.totalVolumes} Volumes
+                  </span>
+                )}
               </div>
               <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
                 <span className="text-[10px] text-gray-400 font-bold uppercase block">Completed</span>
@@ -1611,6 +2200,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
         <AnimatePresence>
           {showRatingPanel && (
             <motion.div
+              id="rating-panel-section"
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
@@ -1734,18 +2324,18 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
           {manageFolderExpanded && (
             <div className="pt-3 border-t border-white/10 space-y-3 text-xs">
               <p className="text-gray-400">
-                Added new PDF files or chapters to this directory? Click rescan to automatically sync them into your library.
+                Added new PDF files or chapters to this directory? Click rescan to check for changes and choose your sync options.
               </p>
 
               <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={handleRescanFolder}
-                  disabled={isRescanning}
+                  disabled={rescanStatus === 'scanning' || rescanStatus === 'applying'}
                   className="px-4 py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 hover:text-white font-bold flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
                 >
-                  <RefreshCw size={14} className={isRescanning ? 'animate-spin' : ''} />
-                  <span>{isRescanning ? 'Scanning...' : 'Rescan Folder'}</span>
+                  <RefreshCw size={14} className={rescanStatus === 'scanning' || rescanStatus === 'applying' ? 'animate-spin' : ''} />
+                  <span>{rescanStatus === 'scanning' ? 'Scanning...' : 'Rescan Folder'}</span>
                 </button>
 
                 <button
@@ -1757,7 +2347,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                   <span>Open Full File Manager</span>
                 </button>
 
-                {rescanMessage && (
+                {rescanMessage && !showRescanModal && (
                   <span className="text-xs font-semibold text-purple-300">{rescanMessage}</span>
                 )}
               </div>
@@ -1767,7 +2357,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
 
         {/* ── Chapter Catalog Section ────────────────────────────────────────── */}
         <section className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div>
               <h2 className="text-lg font-extrabold text-white flex items-center gap-2">
                 <span>Chapters</span>
@@ -1778,26 +2368,71 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
               <p className="text-xs text-gray-400">Select any chapter to launch the custom PDF viewer</p>
             </div>
 
-            {/* Search filter and Sort Order toggle */}
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            {/* Filter buttons, Sort Order toggle, and Search */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Status Filter Tabs: Incomplete, Completed, All */}
+              <div className="flex items-center p-1 rounded-xl bg-white/5 border border-white/10 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setChapterStatusFilter('incomplete')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                    chapterStatusFilter === 'incomplete'
+                      ? 'bg-purple-600 text-white shadow-md shadow-purple-500/25'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                  title="Show only unread/incomplete chapters"
+                >
+                  <Clock size={13} className={chapterStatusFilter === 'incomplete' ? 'text-white' : 'text-purple-400'} />
+                  <span>Incomplete ({unreadChaptersCount})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChapterStatusFilter('completed')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                    chapterStatusFilter === 'completed'
+                      ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/25'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                  title="Show only completed/read chapters"
+                >
+                  <CheckCircle2 size={13} className={chapterStatusFilter === 'completed' ? 'text-white' : 'text-emerald-400'} />
+                  <span>Completed ({completedChaptersCount})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChapterStatusFilter('all')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                    chapterStatusFilter === 'all'
+                      ? 'bg-white/20 text-white shadow-md'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                  title="Show all chapters"
+                >
+                  <Layers size={13} className={chapterStatusFilter === 'all' ? 'text-white' : 'text-gray-400'} />
+                  <span>All ({chapters.length})</span>
+                </button>
+              </div>
+
+              {/* Sort Order Toggle */}
               <button
                 type="button"
                 onClick={() => setSortAscending(!sortAscending)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-xs font-bold transition cursor-pointer whitespace-nowrap"
-                title={sortAscending ? "Sorting: Small to Big (1 → N). Click to reverse." : "Sorting: Big to Small (N → 1). Click to reverse."}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-xs font-bold transition cursor-pointer whitespace-nowrap"
+                title={sortAscending ? "Sorting: Ascending (1 → N). Click for Descending." : "Sorting: Descending (N → 1). Click for Ascending."}
               >
                 <SlidersHorizontal size={13} className="text-purple-400" />
                 <span>{sortAscending ? '1 → N (Asc)' : 'N → 1 (Desc)'}</span>
               </button>
 
-              <div className="relative w-full sm:w-60">
+              {/* Search input */}
+              <div className="relative w-full sm:w-52">
                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Filter chapters..."
-                  className="w-full pl-9 pr-3 py-1.5 rounded-xl glass-input text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                  placeholder="Search chapters..."
+                  className="w-full pl-9 pr-3 py-2 rounded-xl glass-input text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
                 />
               </div>
             </div>
@@ -1837,8 +2472,35 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
 
           {/* Chapters Grid / List */}
           {filteredChapters.length === 0 ? (
-            <div className="p-12 text-center text-gray-500 rounded-2xl border border-white/10 bg-white/[0.02]">
-              No chapters found matching your filter.
+            <div className="p-12 text-center text-gray-400 rounded-2xl border border-white/10 bg-white/[0.02] flex flex-col items-center justify-center gap-3">
+              <BookOpen size={36} className="text-gray-600 mb-1" />
+              <p className="text-sm font-semibold text-gray-300">
+                {search
+                  ? `No chapters found matching "${search}".`
+                  : chapterStatusFilter === 'incomplete'
+                  ? 'No unread chapters! All available chapters are marked completed.'
+                  : chapterStatusFilter === 'completed'
+                  ? 'No completed chapters yet. Start reading from Chapter 1!'
+                  : 'No chapters available.'}
+              </p>
+              {chapterStatusFilter === 'incomplete' && chapters.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setChapterStatusFilter('all')}
+                  className="px-4 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-200 text-xs font-bold transition cursor-pointer"
+                >
+                  Switch to All Chapters ({chapters.length})
+                </button>
+              )}
+              {chapterStatusFilter === 'completed' && chapters.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setChapterStatusFilter('incomplete')}
+                  className="px-4 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-200 text-xs font-bold transition cursor-pointer"
+                >
+                  Switch to Incomplete Chapters ({unreadChaptersCount})
+                </button>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
@@ -2207,11 +2869,23 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
               </div>
 
               <form onSubmit={handleSaveEdit} className="space-y-4">
-                {/* 1. Manga Title */}
+                {/* 1. Manga Title + Auto-Fetch Button */}
                 <div>
-                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
-                    Manga Title *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                      Manga Title *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleFetchEditOnline}
+                      disabled={fetchingEditOnline || !editTitle.trim()}
+                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-purple-600/30 to-pink-600/30 hover:from-purple-600/50 hover:to-pink-600/50 text-purple-200 border border-purple-500/30 hover:border-purple-400 text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Auto-fetch description, volumes, chapters count, and cover from online"
+                    >
+                      <Sparkles size={12} className={fetchingEditOnline ? 'animate-spin text-purple-400' : 'text-purple-300'} />
+                      <span>{fetchingEditOnline ? 'Fetching Online...' : 'Auto-Fetch from Online'}</span>
+                    </button>
+                  </div>
                   <input
                     type="text"
                     required
@@ -2219,21 +2893,41 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
                   />
+                  {editOnlineMessage && (
+                    <p className={`text-[11px] mt-1 font-medium ${editOnlineMessage.startsWith('✓') ? 'text-emerald-400' : 'text-purple-300'}`}>
+                      {editOnlineMessage}
+                    </p>
+                  )}
                 </div>
 
-                {/* 2. Total Chapters Count */}
-                <div>
-                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
-                    Total Chapters
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder={`Current: ${chapters.length}`}
-                    className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
-                    value={editTotalChapters}
-                    onChange={(e) => setEditTotalChapters(e.target.value)}
-                  />
+                {/* 2. Volumes & Total Chapters */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                      Volumes Count
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="e.g. 12 (optional)"
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={editTotalVolumes}
+                      onChange={(e) => setEditTotalVolumes(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                      Total Chapters
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder={`Current: ${chapters.length}`}
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={editTotalChapters}
+                      onChange={(e) => setEditTotalChapters(e.target.value)}
+                    />
+                  </div>
                 </div>
 
                 {/* 3. Description / Synopsis */}
@@ -2243,7 +2937,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                   </label>
                   <textarea
                     rows={3}
-                    placeholder="Enter manga overview, plot or notes..."
+                    placeholder="Enter manga overview, plot or notes, or auto-fetch from online..."
                     className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
                     value={editDescription}
                     onChange={(e) => setEditDescription(e.target.value)}
@@ -2493,6 +3187,539 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                   </button>
                 )}
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Folder Rescan Status & Multi-Option Sync Modal ───────────────── */}
+      <AnimatePresence>
+        {showRescanModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-2xl glass-panel p-5 sm:p-6 rounded-2xl border border-white/15 shadow-neon-border text-left space-y-4 max-h-[92vh] flex flex-col my-auto"
+            >
+              {/* Modal Header */}
+              <div className="flex justify-between items-start border-b border-white/10 pb-3.5 shrink-0">
+                <div>
+                  <h2 className="text-base sm:text-lg font-black flex items-center gap-2 text-white">
+                    <RefreshCw className={`text-neonPurple ${rescanStatus === 'scanning' || rescanStatus === 'applying' ? 'animate-spin' : ''}`} size={20} />
+                    {rescanStatus === 'preview' ? 'Folder Rescan Results & Sync Options' : 'Rescan Manga Folder Directory'}
+                  </h2>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    {rescanStatus === 'preview'
+                      ? 'Review discovered changes and choose how your library should be updated.'
+                      : 'Scanning your disk and checking for library differences...'}
+                  </p>
+                </div>
+                {rescanStatus !== 'scanning' && rescanStatus !== 'applying' && (
+                  <button
+                    onClick={() => setShowRescanModal(false)}
+                    className="p-1.5 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
+                  >
+                    <X size={18} />
+                  </button>
+                )}
+              </div>
+
+              {/* Scanning / Applying State */}
+              {(rescanStatus === 'scanning' || rescanStatus === 'applying') && (
+                <div className="bg-black/40 border border-white/10 rounded-xl p-5 space-y-3 text-xs my-auto">
+                  <div className="flex items-center gap-2.5">
+                    <Loader2 className="animate-spin text-neonPurple" size={18} />
+                    <span className="font-bold text-gray-100 text-sm">
+                      {rescanStatus === 'scanning' ? 'Scanning directory for PDF chapters...' : 'Applying updates to library & cloud...'}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-black/60 rounded-lg border border-white/5 font-mono text-[11px] text-purple-300">
+                    {rescanMessage}
+                  </div>
+                </div>
+              )}
+
+              {/* Preview Diff & Multi-Option Sync State */}
+              {rescanStatus === 'preview' && rescanDiff && (
+                <div className="space-y-4 overflow-y-auto pr-1 flex-1 text-xs">
+                  {/* Summary Metric Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-xl p-2.5 text-center">
+                      <span className="block text-xl font-black text-emerald-400">+{rescanDiff.newChapters.length}</span>
+                      <span className="text-[10px] text-emerald-300/80 font-medium">New Chapters</span>
+                    </div>
+
+                    <div className="bg-purple-500/10 border border-purple-500/25 rounded-xl p-2.5 text-center">
+                      <span className="block text-xl font-black text-neonPurple">+{rescanDiff.addedFolders.length}</span>
+                      <span className="text-[10px] text-purple-300/80 font-medium">New Folders</span>
+                    </div>
+
+                    <div className="bg-blue-500/10 border border-blue-500/25 rounded-xl p-2.5 text-center">
+                      <span className="block text-xl font-black text-blue-400">{rescanDiff.retainedChapters.length}</span>
+                      <span className="text-[10px] text-blue-300/80 font-medium">Existing Kept</span>
+                    </div>
+
+                    <div className="bg-red-500/10 border border-red-500/25 rounded-xl p-2.5 text-center">
+                      <span className="block text-xl font-black text-red-400">-{rescanDiff.removedChapters.length}</span>
+                      <span className="text-[10px] text-red-300/80 font-medium">Missing / Removed</span>
+                    </div>
+                  </div>
+
+                  {/* Sync Mode Selection Options */}
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider block flex items-center gap-1.5">
+                      <SlidersHorizontal size={13} className="text-neonPurple" />
+                      Select Sync Behavior:
+                    </label>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {/* Option 1: Update Normally (Full Sync) */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSyncMode('normal')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between ${
+                          rescanSyncMode === 'normal'
+                            ? 'bg-gradient-to-br from-purple-500/25 to-pink-600/25 border-purple-400/80 shadow-[0_0_15px_rgba(168,85,247,0.25)] text-white'
+                            : 'bg-white/5 border-white/10 hover:bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="font-black text-xs flex items-center gap-1.5 text-white">
+                            <RefreshCw size={14} className={rescanSyncMode === 'normal' ? 'text-neonPurple animate-spin-slow' : 'text-gray-400'} />
+                            Update Normally
+                          </span>
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                            Full Sync
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-300/90 leading-tight">
+                          Add <span className="text-emerald-400 font-bold">+{rescanDiff.newChapters.length}</span> new chapters and clean <span className="text-red-400 font-bold">-{rescanDiff.removedChapters.length}</span> missing items.
+                        </p>
+                      </button>
+
+                      {/* Option 2: Only Update New Chapters (Safe Add) */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSyncMode('new_only')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between ${
+                          rescanSyncMode === 'new_only'
+                            ? 'bg-gradient-to-br from-emerald-500/20 to-teal-600/20 border-emerald-400/80 shadow-[0_0_15px_rgba(16,185,129,0.25)] text-white'
+                            : 'bg-white/5 border-white/10 hover:bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="font-black text-xs flex items-center gap-1.5 text-white">
+                            <PlusCircle size={14} className={rescanSyncMode === 'new_only' ? 'text-emerald-400' : 'text-gray-400'} />
+                            Only New Chapters
+                          </span>
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            Safe Add
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-300/90 leading-tight">
+                          Add <span className="text-emerald-400 font-bold">+{rescanDiff.newChapters.length}</span> new files. Keeps all <span className="text-gray-200 font-bold">{rescanDiff.removedChapters.length}</span> missing items untouched.
+                        </p>
+                      </button>
+
+                      {/* Option 3: Only Update Deleted Items */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSyncMode('deleted_only')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between ${
+                          rescanSyncMode === 'deleted_only'
+                            ? 'bg-gradient-to-br from-red-500/20 to-rose-600/20 border-red-400/80 shadow-[0_0_15px_rgba(239,68,68,0.25)] text-white'
+                            : 'bg-white/5 border-white/10 hover:bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="font-black text-xs flex items-center gap-1.5 text-white">
+                            <Trash2 size={14} className={rescanSyncMode === 'deleted_only' ? 'text-red-400' : 'text-gray-400'} />
+                            Only Deleted Items
+                          </span>
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-red-500/20 text-red-300 border border-red-500/30">
+                            Clean Only
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-300/90 leading-tight">
+                          Remove <span className="text-red-400 font-bold">-{rescanDiff.removedChapters.length}</span> deleted items. Will <span className="text-gray-400 font-semibold">skip</span> adding new chapters.
+                        </p>
+                      </button>
+
+                      {/* Option 4: Custom Granular Checkboxes */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSyncMode('custom')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between ${
+                          rescanSyncMode === 'custom'
+                            ? 'bg-gradient-to-br from-purple-500/20 to-indigo-600/20 border-purple-400/80 shadow-[0_0_15px_rgba(168,85,247,0.25)] text-white'
+                            : 'bg-white/5 border-white/10 hover:bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="font-black text-xs flex items-center gap-1.5 text-white">
+                            <CheckSquare size={14} className={rescanSyncMode === 'custom' ? 'text-purple-400' : 'text-gray-400'} />
+                            Custom Selection
+                          </span>
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                            Checkboxes
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-300/90 leading-tight">
+                          Manually select / unselect individual chapters and folders below.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Summary Live Calculation Pill */}
+                  <div className="bg-black/50 border border-white/10 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                    <div className="flex items-center gap-3">
+                      <span className="text-gray-400">Action Plan:</span>
+                      <span className="text-emerald-400 font-bold">+{selectedNewChIds.size} to add</span>
+                      <span className="text-red-400 font-bold">-{selectedRemovedChIds.size} to remove</span>
+                    </div>
+                    <div className="text-gray-300 font-medium">
+                      Library Total: <span className="text-neonPurple font-bold">{chapters.length}</span> → <span className="text-white font-black">{chapters.length - selectedRemovedChIds.size + selectedNewChIds.size}</span> chs
+                    </div>
+                  </div>
+
+                  {/* Interactive Details Filter Tabs */}
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                      <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => setRescanActiveTab('all')}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                            rescanActiveTab === 'all' ? 'bg-white/20 text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                          }`}
+                        >
+                          All Items
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRescanActiveTab('new')}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                            rescanActiveTab === 'new' ? 'bg-emerald-500/30 text-emerald-300 shadow-sm' : 'text-gray-400 hover:text-emerald-400'
+                          }`}
+                        >
+                          <Sparkles size={12} />
+                          New ({rescanDiff.newChapters.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRescanActiveTab('removed')}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                            rescanActiveTab === 'removed' ? 'bg-red-500/30 text-red-300 shadow-sm' : 'text-gray-400 hover:text-red-400'
+                          }`}
+                        >
+                          <Trash2 size={12} />
+                          Missing ({rescanDiff.removedChapters.length})
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {rescanActiveTab === 'new' && rescanDiff.newChapters.length > 0 && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectAllNew(true)}
+                              className="text-[10px] text-emerald-400 hover:underline font-semibold cursor-pointer"
+                            >
+                              Select All
+                            </button>
+                            <span className="text-gray-600">|</span>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectAllNew(false)}
+                              className="text-[10px] text-gray-400 hover:text-white font-semibold cursor-pointer"
+                            >
+                              Deselect All
+                            </button>
+                          </>
+                        )}
+                        {rescanActiveTab === 'removed' && rescanDiff.removedChapters.length > 0 && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectAllRemoved(true)}
+                              className="text-[10px] text-red-400 hover:underline font-semibold cursor-pointer"
+                            >
+                              Select All (Delete)
+                            </button>
+                            <span className="text-gray-600">|</span>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectAllRemoved(false)}
+                              className="text-[10px] text-gray-400 hover:text-white font-semibold cursor-pointer"
+                            >
+                              Keep All (Don't Delete)
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Scrollable Item Breakdown List */}
+                    <div className="max-h-[220px] overflow-y-auto bg-black/60 rounded-xl border border-white/10 p-3 space-y-3">
+                      {/* Section: New Chapters */}
+                      {(rescanActiveTab === 'all' || rescanActiveTab === 'new') && rescanDiff.newChapters.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-emerald-400">
+                            <span className="flex items-center gap-1.5">
+                              <Sparkles size={13} /> New Chapters Discovered ({rescanDiff.newChapters.length}):
+                            </span>
+                            <div className="flex items-center gap-2 text-[10px]">
+                              <button
+                                type="button"
+                                onClick={() => handleSelectAllNew(true)}
+                                className="text-emerald-400 hover:underline cursor-pointer"
+                              >
+                                Check All
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectAllNew(false)}
+                                className="text-gray-400 hover:text-white cursor-pointer"
+                              >
+                                Uncheck All
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* New Folders Badges */}
+                          {rescanDiff.addedFolders.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 py-1">
+                              {rescanDiff.addedFolders.map(folder => (
+                                <span key={folder} className="text-[10px] bg-purple-500/20 text-neonPurple border border-purple-500/30 px-2 py-0.5 rounded-md flex items-center gap-1 font-mono">
+                                  <FolderPlus size={10} /> New Folder: {folder}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="space-y-1">
+                            {rescanDiff.newChapters.map(ch => {
+                              const isChecked = selectedNewChIds.has(ch.id);
+                              const subf = getSubfolder(ch.filePath, manga?.folderPath || '');
+                              return (
+                                <div
+                                  key={ch.id}
+                                  onClick={() => handleToggleNewChapter(ch.id)}
+                                  className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer select-none text-[11px] ${
+                                    isChecked
+                                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                                      : 'bg-white/5 border-white/5 text-gray-500 opacity-60 hover:opacity-90'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={() => {}}
+                                      className="accent-emerald-500 w-4 h-4 rounded cursor-pointer shrink-0"
+                                    />
+                                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white shrink-0">
+                                      CH {ch.chapterNumber || '?'}
+                                    </span>
+                                    {subf && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 truncate max-w-[120px]">
+                                        📁 {subf}
+                                      </span>
+                                    )}
+                                    <span className="truncate font-mono text-gray-200" title={ch.name || ch.fileName}>
+                                      {ch.name || ch.fileName}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] font-bold text-emerald-400 shrink-0 ml-2">
+                                    {isChecked ? '+ Will Add' : 'Skipped'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Section: Missing / Removed Chapters */}
+                      {(rescanActiveTab === 'all' || rescanActiveTab === 'removed') && rescanDiff.removedChapters.length > 0 && (
+                        <div className="space-y-1.5 pt-2 border-t border-white/5">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-red-400">
+                            <span className="flex items-center gap-1.5">
+                              <Trash2 size={13} /> Missing / Deleted Items on PC ({rescanDiff.removedChapters.length}):
+                            </span>
+                            <div className="flex items-center gap-2 text-[10px]">
+                              <button
+                                type="button"
+                                onClick={() => handleSelectAllRemoved(true)}
+                                className="text-red-400 hover:underline cursor-pointer"
+                              >
+                                Select All (Delete)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectAllRemoved(false)}
+                                className="text-gray-400 hover:text-white cursor-pointer"
+                              >
+                                Keep All
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Removed Folders Badges */}
+                          {rescanDiff.removedFolders.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 py-1">
+                              {rescanDiff.removedFolders.map(folder => (
+                                <span key={folder} className="text-[10px] bg-red-500/20 text-red-300 border border-red-500/30 px-2 py-0.5 rounded-md flex items-center gap-1 font-mono">
+                                  <FolderMinus size={10} /> Deleted Folder: {folder}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="space-y-1">
+                            {rescanDiff.removedChapters.map(ch => {
+                              const isChecked = selectedRemovedChIds.has(ch.id);
+                              const subf = getSubfolder(ch.filePath, manga?.folderPath || '');
+                              const isRead = Boolean(ch.isRead || ch.isWatched || (ch.progress && ch.progress >= 95));
+                              return (
+                                <div
+                                  key={ch.id}
+                                  onClick={() => handleToggleRemovedChapter(ch.id)}
+                                  className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer select-none text-[11px] ${
+                                    isChecked
+                                      ? 'bg-red-500/10 border-red-500/30 text-red-200'
+                                      : 'bg-emerald-500/5 border-emerald-500/20 text-emerald-300/80'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={() => {}}
+                                      className="accent-red-500 w-4 h-4 rounded cursor-pointer shrink-0"
+                                    />
+                                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white shrink-0">
+                                      CH {ch.chapterNumber || '?'}
+                                    </span>
+                                    {subf && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 truncate max-w-[120px]">
+                                        📁 {subf}
+                                      </span>
+                                    )}
+                                    <span className="truncate font-mono text-gray-300" title={ch.name || ch.fileName}>
+                                      {ch.name || ch.fileName}
+                                    </span>
+                                    {isRead && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-semibold shrink-0">
+                                        Read
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-[10px] font-bold shrink-0 ml-2">
+                                    {isChecked ? (
+                                      <span className="text-red-400">- Will Delete</span>
+                                    ) : (
+                                      <span className="text-emerald-400">🛡️ Keep in Library</span>
+                                    )}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Clean state / No changes */}
+                      {rescanDiff.newChapters.length === 0 && rescanDiff.removedChapters.length === 0 && (
+                        <div className="text-center py-6 text-gray-400 text-xs space-y-1">
+                          <CheckCircle2 size={24} className="text-emerald-400 mx-auto mb-1" />
+                          <p className="font-bold text-gray-200">No file or folder changes detected.</p>
+                          <p className="text-[11px] text-gray-500">Your WatchAnime manga library is 100% in sync with your local folder.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Consent & Action Buttons */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-white/10 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowRescanModal(false)}
+                      className="w-full sm:w-auto px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-bold cursor-pointer transition text-center"
+                    >
+                      Cancel
+                    </button>
+
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={handleApplyRescanChanges}
+                        disabled={selectedNewChIds.size === 0 && selectedRemovedChIds.size === 0 && (rescanDiff.newChapters.length > 0 || rescanDiff.removedChapters.length > 0)}
+                        className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-neon-gradient hover:brightness-110 text-white text-xs font-black uppercase tracking-wider shadow-purple-glow cursor-pointer flex items-center justify-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {rescanSyncMode === 'normal' && (
+                          <>
+                            <RefreshCw size={14} />
+                            Update Normally (+{selectedNewChIds.size}, -{selectedRemovedChIds.size})
+                          </>
+                        )}
+                        {rescanSyncMode === 'new_only' && (
+                          <>
+                            <PlusCircle size={14} />
+                            Add {selectedNewChIds.size} New Only (Keep Missing)
+                          </>
+                        )}
+                        {rescanSyncMode === 'deleted_only' && (
+                          <>
+                            <Trash2 size={14} />
+                            Remove {selectedRemovedChIds.size} Missing Only
+                          </>
+                        )}
+                        {rescanSyncMode === 'custom' && (
+                          <>
+                            <Check size={14} />
+                            Apply Custom Selection (+{selectedNewChIds.size}, -{selectedRemovedChIds.size})
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Completed / Error State */}
+              {(rescanStatus === 'completed' || rescanStatus === 'error') && (
+                <div className="space-y-4 my-auto">
+                  <div className="bg-black/40 border border-white/10 rounded-xl p-4 space-y-3 text-xs">
+                    <div className="flex items-center gap-2">
+                      {rescanStatus === 'completed' ? (
+                        <CheckCircle2 className="text-emerald-400" size={18} />
+                      ) : (
+                        <AlertTriangle className="text-red-400" size={18} />
+                      )}
+                      <span className="font-bold text-gray-100 text-sm">
+                        {rescanStatus === 'completed' ? 'Rescan updates applied successfully!' : 'Rescan failed'}
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-black/60 rounded-lg border border-white/5 font-mono text-[11px] text-gray-300">
+                      {rescanMessage}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowRescanModal(false)}
+                      className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-neon-gradient text-white text-xs font-black uppercase tracking-wider hover:brightness-110 shadow-purple-glow cursor-pointer"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
             </motion.div>
           </div>
         )}

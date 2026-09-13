@@ -6,10 +6,23 @@ let cachedPopular = null;
 let cacheTime = 0;
 const CACHE_DURATION_MS = 30 * 60 * 1000; // 30 minutes in-memory cache
 
-export async function GET() {
+export async function GET(request) {
+  let isRefresh = false;
+  if (request && request.url) {
+    try {
+      const { searchParams } = new URL(request.url);
+      isRefresh = searchParams.get('refresh') === '1' || searchParams.get('refresh') === 'true' || searchParams.has('refresh');
+    } catch (e) {}
+  }
+
   const now = Date.now();
-  if (cachedPopular && (now - cacheTime < CACHE_DURATION_MS)) {
+  if (!isRefresh && cachedPopular && (now - cacheTime < CACHE_DURATION_MS)) {
     return NextResponse.json({ success: true, anime: cachedPopular, cached: true });
+  }
+
+  if (isRefresh) {
+    cachedPopular = null;
+    cacheTime = 0;
   }
 
   // ── 1. Primary: AniList GraphQL Trending Query ─────────────────────────────

@@ -107,7 +107,7 @@ watchanime/
     │       │   └── route.js                   # Terminates active yt-dlp background streaming process
     │       ├── duration/
     │       │   └── route.js                   # Fetches YouTube video duration
-    │       ├── playlist/
+    │       ├── playlist
     │       │   └── route.js                   # Parses and extracts YouTube playlist video metadata
     │       ├── qualities/
     │       │   └── route.js                   # Lists available stream video/audio resolutions
