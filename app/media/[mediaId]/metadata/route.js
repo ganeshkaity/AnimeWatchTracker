@@ -95,13 +95,17 @@ export async function GET(request, { params }) {
     }
     if (!duration || duration <= 0) {
       const videoStream = streams.find((s) => s.codec_type === 'video');
+      const audioStream = streams.find((s) => s.codec_type === 'audio');
       if (videoStream?.duration && !isNaN(parseFloat(videoStream.duration))) {
         duration = parseFloat(videoStream.duration);
+      } else if (audioStream?.duration && !isNaN(parseFloat(audioStream.duration))) {
+        duration = parseFloat(audioStream.duration);
       }
     }
     if (!duration || duration <= 0) {
       const videoStream = streams.find((s) => s.codec_type === 'video');
-      const tagDuration = info.format?.tags?.DURATION || videoStream?.tags?.DURATION || streams[0]?.tags?.DURATION;
+      const audioStream = streams.find((s) => s.codec_type === 'audio');
+      const tagDuration = info.format?.tags?.DURATION || videoStream?.tags?.DURATION || audioStream?.tags?.DURATION || streams[0]?.tags?.DURATION;
       if (tagDuration && typeof tagDuration === 'string') {
         const parts = tagDuration.split(':');
         if (parts.length === 3) {

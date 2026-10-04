@@ -16,6 +16,8 @@ const KEYS = {
   EPISODES: (animeId) => `watchanime_episodes_${animeId}`,
   MANGAS: 'watchanime_mangas',
   CHAPTERS: (mangaId) => `watchanime_chapters_${mangaId}`,
+  AUDIO_STORIES: 'watchanime_audio_stories',
+  AUDIO_TRACKS: (storyId) => `watchanime_audio_tracks_${storyId}`,
   NOTES: 'watchanime_notes',
   DIRTY_QUEUE: 'watchanime_dirty_queue',
 };
@@ -208,6 +210,66 @@ export function upsertLocalChapter(mangaId, chapter) {
 export function deleteLocalChapter(mangaId, chapterId) {
   const chapters = getLocalChapters(mangaId).filter(c => c.id !== chapterId);
   setLocalChapters(mangaId, chapters);
+}
+
+// ─── Audio Stories Library ───────────────────────────────────────────────────
+
+export function getLocalAudioStories() {
+  return read(KEYS.AUDIO_STORIES) || [];
+}
+
+export function setLocalAudioStories(stories) {
+  write(KEYS.AUDIO_STORIES, stories);
+}
+
+export function getLocalAudioStory(storyId) {
+  const stories = getLocalAudioStories();
+  return stories.find(s => s.id === storyId) || null;
+}
+
+export function upsertLocalAudioStory(story) {
+  const stories = getLocalAudioStories();
+  const idx = stories.findIndex(s => s.id === story.id);
+  if (idx >= 0) {
+    stories[idx] = { ...stories[idx], ...story };
+  } else {
+    stories.unshift(story);
+  }
+  setLocalAudioStories(stories);
+}
+
+export function deleteLocalAudioStory(storyId) {
+  const stories = getLocalAudioStories().filter(s => s.id !== storyId);
+  setLocalAudioStories(stories);
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(KEYS.AUDIO_TRACKS(storyId));
+  }
+}
+
+// ─── Audio Story Tracks ───────────────────────────────────────────────────────
+
+export function getLocalAudioTracks(storyId) {
+  return read(KEYS.AUDIO_TRACKS(storyId)) || [];
+}
+
+export function setLocalAudioTracks(storyId, tracks) {
+  write(KEYS.AUDIO_TRACKS(storyId), tracks);
+}
+
+export function upsertLocalAudioTrack(storyId, track) {
+  const tracks = getLocalAudioTracks(storyId);
+  const idx = tracks.findIndex(t => t.id === track.id);
+  if (idx >= 0) {
+    tracks[idx] = { ...tracks[idx], ...track };
+  } else {
+    tracks.push(track);
+  }
+  setLocalAudioTracks(storyId, tracks);
+}
+
+export function deleteLocalAudioTrack(storyId, trackId) {
+  const tracks = getLocalAudioTracks(storyId).filter(t => t.id !== trackId);
+  setLocalAudioTracks(storyId, tracks);
 }
 
 // ─── Dirty Queue (pending Firestore writes) ────────────────────────────────────

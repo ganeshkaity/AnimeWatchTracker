@@ -14,6 +14,8 @@ import {
   getLocalEpisodes, setLocalEpisodes,
   getLocalMangas, setLocalMangas,
   getLocalChapters, setLocalChapters,
+  getLocalAudioStories, setLocalAudioStories,
+  getLocalAudioTracks, setLocalAudioTracks,
   getLocalNotes, setLocalNotes,
   getLocalSettings, setLocalSettings,
   getDirtyQueue, clearDirtyQueue,
@@ -98,6 +100,35 @@ export async function pullFromFirestore(db) {
     });
     setLocalMangas(mangas);
     await Promise.all(chapterPromises);
+
+    // Pull audio stories list from user
+    const audioStoriesSnap = await getDocs(collection(db, 'users', userId, 'audioStories'));
+    const audioStories = [];
+    const trackPromises = [];
+    audioStoriesSnap.forEach(d => {
+      const aData = d.data();
+      const isWatched = Boolean(aData.isWatched || aData.progressPercent === 100 || aData.status === 'completed');
+      const story = { id: d.id, userId, ...aData, isWatched };
+      audioStories.push(story);
+      trackPromises.push(
+        getDocs(collection(db, 'users', userId, 'audioStories', d.id, 'tracks'))
+          .then(tSnap => {
+            const tracks = [];
+            tSnap.forEach(td => {
+              const tData = td.data();
+              const isWatchedTrack = Boolean(tData.isWatched || (tData.progress && tData.progress >= 95));
+              tracks.push({
+                id: td.id,
+                ...tData,
+                isWatched: isWatchedTrack,
+              });
+            });
+            setLocalAudioTracks(d.id, tracks);
+          })
+      );
+    });
+    setLocalAudioStories(audioStories);
+    await Promise.all(trackPromises);
 
   } catch (err) {
     console.error('pullFromFirestore error:', err);
@@ -283,6 +314,36 @@ export async function pushToFirestore(db) {
           batch.set(progRef, data, { merge: true });
           batchCount++;
         }
+      } else if (op.type === 'SET_AUDIO_STORY') {
+        const { id, userId: targetUserId, ...data } = op.payload;
+        const ref = doc(db, 'users', targetUserId || userId, 'audioStories', id);
+        batch.set(ref, data, { merge: true });
+        batchCount++;
+      } else if (op.type === 'DELETE_AUDIO_STORY') {
+        const ref = doc(db, 'users', op.payload.userId || userId, 'audioStories', op.payload.id);
+        batch.delete(ref);
+        batchCount++;
+      } else if (op.type === 'SET_AUDIO_TRACK') {
+        const { storyId, id, storyUserId, ...data } = op.payload;
+        const ref = doc(db, 'users', storyUserId || userId, 'audioStories', storyId, 'tracks', id);
+        batch.set(ref, data, { merge: true });
+        batchCount++;
+      } else if (op.type === 'SET_AUDIO_TRACKS_BATCH') {
+        const { storyId, storyUserId, tracks } = op.payload;
+        for (const trk of tracks) {
+          const { id, ...data } = trk;
+          const ref = doc(db, 'users', storyUserId || userId, 'audioStories', storyId, 'tracks', id);
+          batch.set(ref, data, { merge: true });
+          batchCount++;
+          if (batchCount >= 490) {
+            await flushBatch();
+          }
+        }
+      } else if (op.type === 'DELETE_AUDIO_TRACK') {
+        const { storyId, id, storyUserId } = op.payload;
+        const ref = doc(db, 'users', storyUserId || userId, 'audioStories', storyId, 'tracks', id);
+        batch.delete(ref);
+        batchCount++;
       }
 
       if (batchCount >= 490) {

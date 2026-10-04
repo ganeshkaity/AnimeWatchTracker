@@ -29,7 +29,14 @@ export default function PlayerPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!animeId) return;
+    if (playerType === 'audio') {
+      router.replace(`/audio-player/${animeId}${initialEpId ? `?ep=${initialEpId}` : ''}`);
+      return;
+    }
+  }, [playerType, animeId, initialEpId, router]);
+
+  useEffect(() => {
+    if (!animeId || playerType === 'audio') return;
 
     const loadEpisodes = async () => {
       setLoading(true);

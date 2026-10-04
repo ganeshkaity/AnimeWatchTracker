@@ -11,16 +11,18 @@ import {
   getLocalEpisodes, setLocalEpisodes,
   getLocalMangas, setLocalMangas, upsertLocalManga, deleteLocalManga,
   getLocalChapters, setLocalChapters,
+  getLocalAudioStories, setLocalAudioStories, upsertLocalAudioStory, deleteLocalAudioStory,
+  getLocalAudioTracks, setLocalAudioTracks,
   addToDirtyQueue, getUserId
 } from '../utils/localStore';
 import { 
   Plus, Search, Settings, FolderOpen, Loader2, Play, 
   Trash2, SlidersHorizontal, FileVideo, CheckCircle2, ImagePlus,
-  StickyNote, Download, Wifi, WifiOff, RefreshCw, ChevronLeft, ChevronRight,
+  StickyNote, Download, Wifi, WifiOff, RefreshCw, ChevronLeft, ChevronRight, ChevronDown,
   Star, Flame, TrendingUp, Clock, Sparkles, Film, Bookmark, Bell, Menu, X,
   Tv, Eye, ShieldCheck, Heart, User, Filter, Compass, Calendar, AlertTriangle,
   Youtube, Video, CheckSquare, Square, ExternalLink, Globe, Trophy, Award,
-  BookOpen, HardDrive
+  BookOpen, HardDrive, Headphones, Music, Disc
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -212,6 +214,7 @@ export default function Dashboard({ onSelectAnime }) {
   
   const [animes, setAnimes] = useState([]);
   const [mangas, setMangas] = useState([]);
+  const [audioStories, setAudioStories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('recent'); // recent, alpha, progress
@@ -235,6 +238,22 @@ export default function Dashboard({ onSelectAnime }) {
   const [fetchingMangaOnline, setFetchingMangaOnline] = useState(false);
   const [mangaOnlineMessage, setMangaOnlineMessage] = useState('');
 
+  // Audio Story Modal & Form States
+  const [showAddAudioStoryModal, setShowAddAudioStoryModal] = useState(false);
+  const [audioStoryCompleteConfirm, setAudioStoryCompleteConfirm] = useState(null);
+  const [audioStoryFolderPath, setAudioStoryFolderPath] = useState('');
+  const [audioStoryTitle, setAudioStoryTitle] = useState('');
+  const [audioStoryScanning, setAudioStoryScanning] = useState(false);
+  const [audioStoryScanResult, setAudioStoryScanResult] = useState([]);
+  const [audioStoryCoverUrl, setAudioStoryCoverUrl] = useState('');
+  const [uploadingAudioCover, setUploadingAudioCover] = useState(false);
+  const [audioStoryGenres, setAudioStoryGenres] = useState([]);
+  const [showAudioCoverSearch, setShowAudioCoverSearch] = useState(false);
+  const [audioStoryDescription, setAudioStoryDescription] = useState('');
+  const [audioStoryTotalTracks, setAudioStoryTotalTracks] = useState('');
+  const [fetchingAudioOnline, setFetchingAudioOnline] = useState(false);
+  const [audioStoryOnlineMessage, setAudioStoryOnlineMessage] = useState('');
+
   // Hero Carousel State
   const [currentSlide, setCurrentSlide] = useState(0);
   const [slideDirection, setSlideDirection] = useState(1);
@@ -244,6 +263,9 @@ export default function Dashboard({ onSelectAnime }) {
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showActionModal, setShowActionModal] = useState(false);
+  const actionModalTimerRef = useRef(null);
+  const actionModalRef = useRef(null);
   
   // Add Anime Form State
   const [folderPath, setFolderPath] = useState('');
@@ -291,6 +313,8 @@ export default function Dashboard({ onSelectAnime }) {
   const recentlyUpdatedRef = useRef(null);
   // Ref for manga horizontal scroll
   const mangaScrollRef = useRef(null);
+  // Ref for audio story horizontal scroll
+  const audioStoryScrollRef = useRef(null);
 
   // Weekly Popular Anime from Internet (Top 10 of the week) with Local Storage Cache
   const [weeklyPopular, setWeeklyPopular] = useState(() => {
@@ -1061,6 +1085,12 @@ export default function Dashboard({ onSelectAnime }) {
     return (mangas || []).filter(m => (m?.title || '').toLowerCase().includes(q));
   }, [mangas, search]);
 
+  const autocompleteAudioStoryMatches = useMemo(() => {
+    if (!search || !search.trim()) return [];
+    const q = search.trim().toLowerCase();
+    return (audioStories || []).filter(a => (a?.title || '').toLowerCase().includes(q));
+  }, [audioStories, search]);
+
   // Auto Hero Slider Timer
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1078,6 +1108,25 @@ export default function Dashboard({ onSelectAnime }) {
     }
   }, [currentUser]);
 
+  // Close top action modal on outside click or escape
+  useEffect(() => {
+    if (!showActionModal) return;
+    const handleOutsideClick = (e) => {
+      if (actionModalRef.current && !actionModalRef.current.contains(e.target)) {
+        setShowActionModal(false);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setShowActionModal(false);
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showActionModal]);
+
   // Load animes & mangas: localStorage first, then Firestore
   useEffect(() => {
     if (!currentUser) return;
@@ -1093,6 +1142,11 @@ export default function Dashboard({ onSelectAnime }) {
       setMangas(localMangas);
     }
 
+    const localAudioStories = getLocalAudioStories();
+    if (localAudioStories.length > 0) {
+      setAudioStories(localAudioStories);
+    }
+
     if (isOffline || !db) {
       setLoading(false);
       return;
@@ -1101,6 +1155,7 @@ export default function Dashboard({ onSelectAnime }) {
     const targetUserId = getUserId();
     const animeRef = collection(db, 'users', targetUserId, 'anime');
     const mangaRef = collection(db, 'users', targetUserId, 'mangas');
+    const audioStoriesRef = collection(db, 'users', targetUserId, 'audioStories');
 
     const unsubscribeAnime = onSnapshot(query(animeRef), (snapshot) => {
       const list = [];
@@ -1130,9 +1185,24 @@ export default function Dashboard({ onSelectAnime }) {
       setMangas(getLocalMangas());
     });
 
+    const unsubscribeAudioStories = onSnapshot(query(audioStoriesRef), (snapshot) => {
+      const list = [];
+      snapshot.forEach((d) => {
+        const aData = d.data();
+        const isWatched = Boolean(aData.isWatched || aData.progressPercent === 100 || aData.status === 'completed');
+        list.push({ id: d.id, userId: targetUserId, ...aData, isWatched });
+      });
+      setAudioStories(list);
+      setLocalAudioStories(list);
+    }, (err) => {
+      console.warn('Firestore audioStories subscription error:', err);
+      setAudioStories(getLocalAudioStories());
+    });
+
     return () => {
       unsubscribeAnime();
       unsubscribeManga();
+      unsubscribeAudioStories();
     };
   }, [currentUser, isOffline]);
 
@@ -1847,6 +1917,344 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
+  // ── Audio Stories Actions ──────────────────────────────────────────────────
+  const handleBrowseAudioStoryFolder = async () => {
+    setAudioStoryScanning(true);
+    try {
+      const response = await fetch('/api/select-folder');
+      const data = await response.json();
+      if (data.success && data.path) {
+        const path = data.path;
+        setAudioStoryFolderPath(path);
+        const folderName = path.split(/[\\/]/).pop();
+        setAudioStoryTitle(folderName || '');
+
+        const scanRes = await fetch('/api/audio-story/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folderPath: path }),
+        });
+        const scanData = await scanRes.json();
+        if (scanData.success) {
+          setAudioStoryScanResult(scanData.tracks || []);
+        } else {
+          alert("Error scanning folder: " + scanData.error);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Folder dialog error. Please paste the directory path directly.");
+    } finally {
+      setAudioStoryScanning(false);
+    }
+  };
+
+  const handleScanAudioStory = async () => {
+    if (!audioStoryFolderPath) return;
+    setAudioStoryScanning(true);
+    try {
+      const res = await fetch('/api/audio-story/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderPath: audioStoryFolderPath.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAudioStoryScanResult(data.tracks || []);
+        if (!audioStoryTitle) {
+          const folderName = audioStoryFolderPath.trim().split(/[\\/]/).pop();
+          setAudioStoryTitle(folderName || '');
+        }
+      } else {
+        alert("Error scanning folder: " + data.error);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Scan request failed: " + err.message);
+    } finally {
+      setAudioStoryScanning(false);
+    }
+  };
+
+  const handleFetchAudioStoryOnline = async () => {
+    const query = (audioStoryTitle || '').trim();
+    if (!query) {
+      setAudioStoryOnlineMessage('Please enter a story title first.');
+      setTimeout(() => setAudioStoryOnlineMessage(''), 3000);
+      return;
+    }
+    setFetchingAudioOnline(true);
+    setAudioStoryOnlineMessage('Searching online for story details...');
+    try {
+      const res = await fetch(`/api/anime-rating?q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      if (data.success) {
+        if (data.synopsis) setAudioStoryDescription(data.synopsis);
+        if (data.imageUrl && !audioStoryCoverUrl) setAudioStoryCoverUrl(data.imageUrl);
+        if (Array.isArray(data.genres) && data.genres.length > 0) {
+          setAudioStoryGenres(prev => {
+            const set = new Set(prev);
+            data.genres.forEach(g => {
+              const matched = GENRES_LIST.find(gl => gl.toLowerCase() === g.toLowerCase());
+              if (matched && matched !== 'All') set.add(matched);
+            });
+            return Array.from(set);
+          });
+        }
+        setAudioStoryOnlineMessage(`✓ Auto-filled details from ${data.source || 'Online'}`);
+      } else {
+        const mRes = await fetch(`/api/manga-rating?q=${encodeURIComponent(query)}`);
+        const mData = await mRes.json();
+        if (mData.success) {
+          if (mData.synopsis) setAudioStoryDescription(mData.synopsis);
+          if (mData.imageUrl && !audioStoryCoverUrl) setAudioStoryCoverUrl(mData.imageUrl);
+          setAudioStoryOnlineMessage(`✓ Auto-filled details from ${mData.source || 'Online'}`);
+        } else {
+          setAudioStoryOnlineMessage('No story found online. You can enter details manually.');
+        }
+      }
+    } catch (err) {
+      setAudioStoryOnlineMessage('Fetch failed: ' + err.message);
+    } finally {
+      setFetchingAudioOnline(false);
+      setTimeout(() => setAudioStoryOnlineMessage(''), 5000);
+    }
+  };
+
+  const handleAddAudioStory = async (e) => {
+    e.preventDefault();
+    const cleanPath = audioStoryFolderPath.trim();
+    if (!cleanPath || !audioStoryTitle.trim() || audioStoryScanResult.length === 0) {
+      alert('Please select a valid folder, input a title, and scan audio/video files first.');
+      return;
+    }
+
+    setAudioStoryScanning(true);
+    try {
+      let storyId = slugify(audioStoryTitle.trim());
+      if (!storyId) {
+        storyId = `audio_${Date.now()}`;
+      } else {
+        const isDuplicate = audioStories.some(s => s.id === storyId);
+        if (isDuplicate) {
+          storyId = `${storyId}-${Math.floor(Math.random() * 1000)}`;
+        }
+      }
+      const randomGradient = GRADIENTS[Math.floor(Math.random() * GRADIENTS.length)];
+      const totalTrks = audioStoryTotalTracks ? parseInt(audioStoryTotalTracks, 10) : audioStoryScanResult.length;
+
+      const storyData = {
+        title: audioStoryTitle.trim(),
+        folderPath: cleanPath,
+        trackCount: audioStoryScanResult.length,
+        totalTracks: totalTrks,
+        description: audioStoryDescription.trim(),
+        synopsis: audioStoryDescription.trim(),
+        progressPercent: 0,
+        coverGradient: randomGradient,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastPlayedTrack: '',
+        lastOpenedAt: new Date().toISOString(),
+        userId: getUserId(),
+        thumbnailBase64: audioStoryCoverUrl || '',
+        genres: audioStoryGenres,
+        type: 'audio-story',
+      };
+
+      const parsedTracks = audioStoryScanResult.map((tr, idx) => ({
+        id: `track_${idx + 1}_${encodeURIComponent(tr.name || tr.fileName)}`,
+        trackNumber: tr.trackNumber !== undefined ? tr.trackNumber : idx + 1,
+        episodeNumber: tr.trackNumber !== undefined ? tr.trackNumber : idx + 1,
+        name: tr.name || tr.fileName,
+        fileName: tr.fileName || tr.name,
+        filePath: tr.filePath,
+        size: tr.size || 0,
+        isVideo: Boolean(tr.isVideo),
+        fileType: tr.fileType || (tr.isVideo ? 'video' : 'audio'),
+        ext: tr.ext || '',
+        createdAt: tr.createdAt || Date.now(),
+        progress: 0,
+        progressPercent: 0,
+        isWatched: false,
+        flags: [],
+        note: '',
+        updatedAt: new Date().toISOString(),
+      }));
+
+      upsertLocalAudioStory({ id: storyId, ...storyData });
+      setLocalAudioTracks(storyId, parsedTracks);
+      setAudioStories(prev => [{ id: storyId, ...storyData }, ...prev]);
+
+      if (!isOffline && db) {
+        const batch = writeBatch(db);
+        const storyDocRef = doc(db, 'users', getUserId(), 'audioStories', storyId);
+        batch.set(storyDocRef, storyData);
+        parsedTracks.forEach((tr) => {
+          const trDocRef = doc(db, 'users', getUserId(), 'audioStories', storyId, 'tracks', tr.id);
+          batch.set(trDocRef, tr);
+        });
+        await batch.commit();
+      } else {
+        addToDirtyQueue({
+          type: 'SET_AUDIO_STORY',
+          dedupeKey: `SET_AUDIO_STORY_${storyId}`,
+          payload: { id: storyId, ...storyData },
+        });
+        addToDirtyQueue({
+          type: 'SET_AUDIO_TRACKS_BATCH',
+          dedupeKey: `SET_AUDIO_TRACKS_BATCH_${storyId}`,
+          payload: { storyId, storyUserId: getUserId(), tracks: parsedTracks },
+        });
+      }
+
+      setShowAddAudioStoryModal(false);
+      setAudioStoryFolderPath('');
+      setAudioStoryTitle('');
+      setAudioStoryCoverUrl('');
+      setAudioStoryGenres([]);
+      setAudioStoryScanResult([]);
+      setAudioStoryDescription('');
+      setAudioStoryTotalTracks('');
+      setAudioStoryOnlineMessage('');
+    } catch (err) {
+      console.error(err);
+      alert('Error adding audio story: ' + err.message);
+    } finally {
+      setAudioStoryScanning(false);
+    }
+  };
+
+  const handleDeleteAudioStory = async (storyItem, e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!confirm('Are you sure you want to stop tracking this audio story?')) return;
+    try {
+      const storyId = storyItem.id;
+      const targetUserId = storyItem.userId || currentUser?.uid || getUserId();
+      deleteLocalAudioStory(storyId);
+      setAudioStories(prev => prev.filter(s => s.id !== storyId));
+      if (!isOffline && db) {
+        await deleteDoc(doc(db, 'users', targetUserId, 'audioStories', storyId));
+      } else {
+        addToDirtyQueue({
+          type: 'DELETE_AUDIO_STORY',
+          dedupeKey: `DELETE_AUDIO_STORY_${storyId}`,
+          payload: { id: storyId, userId: targetUserId }
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleToggleAudioStoryWatched = async (storyItem, e) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    try {
+      const isCurrentlyWatched = Boolean(storyItem.isWatched || storyItem.progressPercent === 100);
+      const shouldComplete = !isCurrentlyWatched;
+      const storyId = storyItem.id;
+      const targetUserId = storyItem.userId || currentUser?.uid || getUserId();
+
+      const localTrks = getLocalAudioTracks(storyId);
+      const updatedTracks = (localTrks || []).map(tr => ({
+        ...tr,
+        isWatched: shouldComplete,
+        progressPercent: shouldComplete ? 100 : 0,
+        updatedAt: new Date().toISOString(),
+      }));
+      setLocalAudioTracks(storyId, updatedTracks);
+
+      const updatedStory = {
+        ...storyItem,
+        isWatched: shouldComplete,
+        isCompleted: shouldComplete,
+        progressPercent: shouldComplete ? 100 : 0,
+        completedTracks: shouldComplete ? updatedTracks.length : 0,
+        status: shouldComplete ? 'completed' : 'ready',
+        updatedAt: new Date().toISOString(),
+      };
+      upsertLocalAudioStory(updatedStory);
+      setAudioStories(prev => prev.map(s => s.id === storyId ? updatedStory : s));
+
+      if (!isOffline && db && targetUserId) {
+        let batch = writeBatch(db);
+        let bCount = 0;
+
+        for (const tr of updatedTracks) {
+          const trDocRef = doc(db, 'users', targetUserId, 'audioStories', storyId, 'tracks', tr.id);
+          batch.set(trDocRef, {
+            ...tr,
+            isWatched: shouldComplete,
+            progressPercent: shouldComplete ? 100 : 0,
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+          bCount++;
+          if (bCount >= 450) {
+            await batch.commit();
+            batch = writeBatch(db);
+            bCount = 0;
+          }
+        }
+
+        const sRef = doc(db, 'users', targetUserId, 'audioStories', storyId);
+        batch.set(sRef, {
+          progressPercent: shouldComplete ? 100 : 0,
+          completedTracks: shouldComplete ? updatedTracks.length : 0,
+          isWatched: shouldComplete,
+          isCompleted: shouldComplete,
+          status: updatedStory.status,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        await batch.commit();
+      } else {
+        addToDirtyQueue({
+          type: 'SET_AUDIO_TRACKS_BATCH',
+          dedupeKey: `SET_AUDIO_TRACKS_BATCH_${storyId}`,
+          payload: { storyId, storyUserId: targetUserId, tracks: updatedTracks },
+        });
+        addToDirtyQueue({
+          type: 'SET_AUDIO_STORY',
+          dedupeKey: `SET_AUDIO_STORY_${storyId}`,
+          payload: { id: storyId, userId: targetUserId, ...updatedStory },
+        });
+      }
+    } catch (err) {
+      console.error('Error toggling audio story watched:', err);
+    }
+  };
+
+  const handleNewAudioCoverUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setUploadingAudioCover(true);
+    try {
+      const url = await uploadToImgBB(file);
+      setAudioStoryCoverUrl(url);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to upload image: ' + err.message);
+    } finally {
+      setUploadingAudioCover(false);
+    }
+  };
+
+  const handleAudioCoverBrowse = async () => {
+    try {
+      const pickRes = await fetch('/api/select-image');
+      const pickData = await pickRes.json();
+      if (pickData.success && pickData.path) {
+        setAudioStoryCoverUrl(pickData.path);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   // Compress Canvas
   const compressImageToBase64 = (dataUri, maxPx = 400, quality = 0.45) => {
     return new Promise((resolve, reject) => {
@@ -2177,7 +2585,7 @@ export default function Dashboard({ onSelectAnime }) {
       return new Date(b.lastOpenedAt || 0) - new Date(a.lastOpenedAt || 0);
     });
 
-  // Continue Watching & Reading items (user's active tracked anime & manga)
+  // Continue Watching, Reading & Listening items (user's active tracked anime, manga & audio)
   const continueWatchingList = useMemo(() => {
     const activeAnimes = (animes || [])
       .filter(a => {
@@ -2208,8 +2616,25 @@ export default function Dashboard({ onSelectAnime }) {
         };
       });
 
-    return [...activeAnimes, ...activeMangas].sort((a, b) => b.lastActivity - a.lastActivity);
-  }, [animes, mangas]);
+    const activeAudioStories = (audioStories || [])
+      .filter(a => {
+        const pct = Number(a.progressPercent || 0);
+        const isCompleted = Boolean(a.isWatched || a.isCompleted || pct === 100);
+        if (isCompleted) return false;
+        return (pct > 0 && pct < 100) || a.status === 'listening' || (a.completedTracks > 0);
+      })
+      .map(a => {
+        const pct = Number(a.progressPercent || 0);
+        return {
+          ...a,
+          mediaType: 'audioStory',
+          progressPct: pct,
+          lastActivity: new Date(a.lastOpenedAt || a.updatedAt || a.createdAt || 0).getTime(),
+        };
+      });
+
+    return [...activeAnimes, ...activeMangas, ...activeAudioStories].sort((a, b) => b.lastActivity - a.lastActivity);
+  }, [animes, mangas, audioStories]);
 
   // ── Manga List (Filtered by search & sorted new to old) ──────────────────────
   const sortedMangas = useMemo(() => {
@@ -2220,6 +2645,16 @@ export default function Dashboard({ onSelectAnime }) {
       })
       .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   }, [mangas, search]);
+
+  // ── Audio Stories List (Filtered by search & sorted new to old) ──────────────
+  const sortedAudioStories = useMemo(() => {
+    return audioStories
+      .filter((a) => {
+        if (!search || !search.trim()) return true;
+        return (a?.title || '').toLowerCase().includes(search.trim().toLowerCase());
+      })
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }, [audioStories, search]);
 
   // ── Lazy-Load Chunking for Anime Catalog (Initial 24, +24 on scroll) ───────
   const [visibleCount, setVisibleCount] = useState(24);
@@ -2280,6 +2715,14 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
+  const scrollAudioStory = (direction) => {
+    if (audioStoryScrollRef.current) {
+      const { scrollLeft, clientWidth } = audioStoryScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.7 : scrollLeft + clientWidth * 0.7;
+      audioStoryScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
   const scrollGenres = (direction) => {
     if (genresScrollRef.current) {
       const { scrollLeft, clientWidth } = genresScrollRef.current;
@@ -2330,12 +2773,41 @@ export default function Dashboard({ onSelectAnime }) {
               {/* Search Recommendations Dropdown */}
             {search.trim().length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-2 bg-[#111827]/95 backdrop-blur-md border border-white/10 rounded-2xl shadow-2xl z-50 max-h-96 overflow-y-auto no-scrollbar">
-                {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 ? (
+                {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 ? (
                   <div className="p-4 text-center text-xs text-gray-400">
-                    No anime or manga matches found
+                    No anime, manga or audio story matches found
                   </div>
                 ) : (
                   <div className="p-2 space-y-1">
+                    {autocompleteAudioStoryMatches.slice(0, 3).map((a) => (
+                      <div
+                        key={`search-audio-${a.id}`}
+                        onClick={() => {
+                          router.push(`/audio-story/${a.id}`);
+                          setSearch('');
+                        }}
+                        className="flex items-center gap-3 p-2 rounded-xl hover:bg-cyan-950/40 border border-cyan-500/20 transition cursor-pointer"
+                      >
+                        <div className="w-9 h-12 rounded-lg overflow-hidden bg-cyan-950/60 flex-shrink-0 relative flex items-center justify-center">
+                          {a.thumbnailBase64 ? (
+                            <img src={a.thumbnailBase64} alt={a.title} className="w-full h-full object-cover" />
+                          ) : a.thumbnailPath ? (
+                            <img src={`/api/image?path=${encodeURIComponent(a.thumbnailPath)}`} alt={a.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <Headphones size={16} className="text-cyan-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-cyan-600 to-blue-600 text-[8px] font-bold text-white uppercase">Audio</span>
+                            <h4 className="font-bold text-xs text-white truncate">{a.title}</h4>
+                          </div>
+                          <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                            {a.trackCount || a.totalTracks || 0} Tracks • Audio Story
+                          </p>
+                        </div>
+                      </div>
+                    ))}
                     {autocompleteMangaMatches.slice(0, 3).map((m) => (
                       <div
                         key={`search-manga-${m.id}`}
@@ -2418,38 +2890,156 @@ export default function Dashboard({ onSelectAnime }) {
             <span>{isOffline ? 'Offline' : 'Online'}</span>
           </button>
  
-          {/* Add Folder CTA */}
-          <button
-            onClick={() => !isOffline && setShowAddModal(true)}
-            disabled={isOffline}
-            className={`hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold btn-accent transition ${isOffline ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-            title="Track Local Anime Folder"
+          {/* Desktop Unified Media Actions Trigger (Hover or Click Modal) */}
+          <div 
+            ref={actionModalRef}
+            className="relative hidden sm:block"
+            onMouseEnter={() => {
+              if (actionModalTimerRef.current) clearTimeout(actionModalTimerRef.current);
+              setShowActionModal(true);
+            }}
+            onMouseLeave={() => {
+              actionModalTimerRef.current = setTimeout(() => {
+                setShowActionModal(false);
+              }, 220);
+            }}
           >
-            <Plus size={15} />
-            <span>Add Anime</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setShowActionModal(prev => !prev)}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all duration-300 cursor-pointer shadow-lg ${
+                showActionModal 
+                  ? 'bg-gradient-to-r from-[#7c5cff] via-purple-600 to-cyan-500 text-white shadow-purple-500/30 ring-2 ring-[#7c5cff]/40' 
+                  : 'bg-white/10 hover:bg-white/15 text-white border border-white/15 hover:border-white/30'
+              }`}
+              title="Add Media & Stream"
+            >
+              <Plus size={15} className={`transition-transform duration-300 ${showActionModal ? 'rotate-45 text-cyan-300' : 'text-[#7c5cff]'}`} />
+              <span>Add / Stream</span>
+              <ChevronDown size={13} className={`text-gray-300 transition-transform duration-300 ${showActionModal ? 'rotate-180' : ''}`} />
+            </button>
 
-          {/* Add Manga CTA */}
-          <button
-            onClick={() => !isOffline && setShowAddMangaModal(true)}
-            disabled={isOffline}
-            className={`hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-lg shadow-purple-500/20 transition ${isOffline ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-            title="Track Local Manga PDF Folder"
-          >
-            <BookOpen size={15} />
-            <span>Add Manga</span>
-          </button>
+            {/* Small Floating Modal on Hover/Click */}
+            <AnimatePresence>
+              {showActionModal && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="absolute top-full right-0 mt-2.5 w-72 bg-[#0d111b]/95 backdrop-blur-2xl border border-white/15 rounded-2xl p-2 shadow-2xl shadow-black/80 z-50 space-y-1"
+                  onMouseEnter={() => {
+                    if (actionModalTimerRef.current) clearTimeout(actionModalTimerRef.current);
+                    setShowActionModal(true);
+                  }}
+                  onMouseLeave={() => {
+                    actionModalTimerRef.current = setTimeout(() => {
+                      setShowActionModal(false);
+                    }, 220);
+                  }}
+                >
+                  <div className="px-3 py-1.5 flex items-center justify-between border-b border-white/10 mb-1">
+                    <span className="text-[10px] uppercase font-extrabold tracking-wider text-gray-400">Media Actions</span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-bold">Fast Track</span>
+                  </div>
 
-          {/* Local Hotspot Stream Link */}
-          <Link
-            href="/stream"
-            className="hidden md:flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-gradient-to-r from-purple-600/80 to-indigo-600/80 hover:from-purple-600 hover:to-indigo-600 text-white border border-purple-500/30 transition shadow-lg shadow-purple-500/20 cursor-pointer"
-            title="Local Hotspot Stream"
-          >
-            <Wifi size={14} className="text-cyan-300 animate-pulse" />
-            <span>Stream</span>
-          </Link>
- 
+                  {/* 1. Add Anime */}
+                  <button
+                    onClick={() => {
+                      setShowActionModal(false);
+                      if (!isOffline) setShowAddModal(true);
+                    }}
+                    disabled={isOffline}
+                    className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition text-left group ${
+                      isOffline 
+                        ? 'opacity-40 cursor-not-allowed' 
+                        : 'hover:bg-purple-950/40 border border-transparent hover:border-purple-500/30 cursor-pointer'
+                    }`}
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-[#7c5cff]/20 text-[#a855f7] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <Film size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-white group-hover:text-purple-300 transition-colors">Add Anime</h4>
+                        <span className="text-[9px] font-bold text-gray-400">Video</span>
+                      </div>
+                      <p className="text-[10px] text-gray-400 truncate">Track local anime folder</p>
+                    </div>
+                  </button>
+
+                  {/* 2. Add Manga */}
+                  <button
+                    onClick={() => {
+                      setShowActionModal(false);
+                      if (!isOffline) setShowAddMangaModal(true);
+                    }}
+                    disabled={isOffline}
+                    className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition text-left group ${
+                      isOffline 
+                        ? 'opacity-40 cursor-not-allowed' 
+                        : 'hover:bg-pink-950/40 border border-transparent hover:border-pink-500/30 cursor-pointer'
+                    }`}
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-pink-500/20 text-pink-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <BookOpen size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-white group-hover:text-pink-300 transition-colors">Add Manga</h4>
+                        <span className="text-[9px] font-bold text-gray-400">PDF</span>
+                      </div>
+                      <p className="text-[10px] text-gray-400 truncate">Track manga & webtoon folder</p>
+                    </div>
+                  </button>
+
+                  {/* 3. Add Audio */}
+                  <button
+                    onClick={() => {
+                      setShowActionModal(false);
+                      if (!isOffline) setShowAddAudioStoryModal(true);
+                    }}
+                    disabled={isOffline}
+                    className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition text-left group ${
+                      isOffline 
+                        ? 'opacity-40 cursor-not-allowed' 
+                        : 'hover:bg-cyan-950/40 border border-transparent hover:border-cyan-500/30 cursor-pointer'
+                    }`}
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <Headphones size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-white group-hover:text-cyan-300 transition-colors">Add Audio Story</h4>
+                        <span className="text-[9px] font-bold text-gray-400">Audio/Video</span>
+                      </div>
+                      <p className="text-[10px] text-gray-400 truncate">Track audio story folder</p>
+                    </div>
+                  </button>
+
+                  {/* 4. Stream Link */}
+                  <Link
+                    href="/stream"
+                    onClick={() => setShowActionModal(false)}
+                    className="w-full flex items-center gap-3 p-2.5 rounded-xl transition text-left group hover:bg-emerald-950/40 border border-transparent hover:border-emerald-500/30 cursor-pointer"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <Wifi size={16} className="text-cyan-300 animate-pulse" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-white group-hover:text-emerald-300 transition-colors">Local Stream</h4>
+                        <span className="text-[9px] font-bold text-cyan-400 uppercase">Live</span>
+                      </div>
+                      <p className="text-[10px] text-gray-400 truncate">Hotspot wireless stream page</p>
+                    </div>
+                  </Link>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           {/* Settings Trigger */}
           <button
             onClick={() => setShowSettings(true)}
@@ -2494,7 +3084,7 @@ export default function Dashboard({ onSelectAnime }) {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -10, scale: 0.95 }}
               transition={{ duration: 0.2 }}
-              className="absolute top-16 right-4 z-50 w-52 glass-panel rounded-2xl p-4 shadow-xl border border-white/10 flex flex-col gap-3 md:hidden"
+              className="absolute top-16 right-4 z-50 w-56 glass-panel rounded-2xl p-4 shadow-xl border border-white/10 flex flex-col gap-2.5 md:hidden"
             >
               <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Quick Actions</span>
               
@@ -2517,7 +3107,58 @@ export default function Dashboard({ onSelectAnime }) {
                 <span className="text-[9px] opacity-60">Toggle</span>
               </button>
 
-              {/* 2. Stream Page Link */}
+              {/* 2. Add Anime for Mobile */}
+              <button
+                onClick={() => {
+                  setShowAddModal(true);
+                  setQuickActionsOpen(false);
+                }}
+                disabled={isOffline}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition ${
+                  isOffline 
+                    ? 'opacity-40 cursor-not-allowed bg-white/5 text-gray-400' 
+                    : 'bg-purple-600/20 text-purple-300 hover:text-white border border-purple-500/30 cursor-pointer'
+                }`}
+              >
+                <Plus size={14} />
+                <span>Add Anime</span>
+              </button>
+
+              {/* 3. Add Manga for Mobile */}
+              <button
+                onClick={() => {
+                  setShowAddMangaModal(true);
+                  setQuickActionsOpen(false);
+                }}
+                disabled={isOffline}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition ${
+                  isOffline 
+                    ? 'opacity-40 cursor-not-allowed bg-white/5 text-gray-400' 
+                    : 'bg-pink-600/20 text-pink-300 hover:text-white border border-pink-500/30 cursor-pointer'
+                }`}
+              >
+                <BookOpen size={14} />
+                <span>Add Manga</span>
+              </button>
+
+              {/* 4. Add Audio Stories for Mobile */}
+              <button
+                onClick={() => {
+                  setShowAddAudioStoryModal(true);
+                  setQuickActionsOpen(false);
+                }}
+                disabled={isOffline}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition ${
+                  isOffline 
+                    ? 'opacity-40 cursor-not-allowed bg-white/5 text-gray-400' 
+                    : 'bg-cyan-600/20 text-cyan-300 hover:text-white border border-cyan-500/30 cursor-pointer'
+                }`}
+              >
+                <Headphones size={14} />
+                <span>Add Audio</span>
+              </button>
+
+              {/* 5. Stream Page Link */}
               <Link
                 href="/stream"
                 onClick={() => setQuickActionsOpen(false)}
@@ -2527,7 +3168,7 @@ export default function Dashboard({ onSelectAnime }) {
                 <span>Local Stream</span>
               </Link>
 
-              {/* 3. Settings Trigger */}
+              {/* 6. Settings Trigger */}
               <button
                 onClick={() => {
                   setShowSettings(true);
@@ -2604,10 +3245,37 @@ export default function Dashboard({ onSelectAnime }) {
                     {/* Live Autocomplete Matches */}
                     {search.trim().length > 0 && (
                       <div className="absolute top-full left-0 right-0 mt-2 bg-[#0f172a]/95 border border-white/15 rounded-xl shadow-2xl z-50 max-h-64 overflow-y-auto no-scrollbar">
-                        {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 ? (
+                        {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 ? (
                           <div className="p-3 text-center text-xs text-gray-400">No matches found</div>
                         ) : (
                           <div className="p-1 space-y-1">
+                            {autocompleteAudioStoryMatches.slice(0, 3).map((a) => (
+                              <div
+                                key={`side-search-audio-${a.id}`}
+                                onClick={() => {
+                                  router.push(`/audio-story/${a.id}`);
+                                  setSearch('');
+                                  setMobileMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2 p-2 rounded-lg hover:bg-cyan-950/40 border border-cyan-500/20 transition cursor-pointer"
+                              >
+                                <div className="w-8 h-10 rounded overflow-hidden bg-cyan-950/60 flex-shrink-0 relative flex items-center justify-center">
+                                  {a.thumbnailBase64 ? (
+                                    <img src={a.thumbnailBase64} alt={a.title} className="w-full h-full object-cover" />
+                                  ) : a.thumbnailPath ? (
+                                    <img src={`/api/image?path=${encodeURIComponent(a.thumbnailPath)}`} alt={a.title} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <Headphones size={14} className="text-cyan-400" />
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1">
+                                    <span className="px-1 py-0.2 rounded bg-gradient-to-r from-cyan-600 to-blue-600 text-[7px] font-bold text-white uppercase">Audio</span>
+                                    <h4 className="font-bold text-xs text-white truncate">{a.title}</h4>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
                             {autocompleteMangaMatches.slice(0, 3).map((m) => (
                               <div
                                 key={`side-search-manga-${m.id}`}
@@ -2769,7 +3437,21 @@ export default function Dashboard({ onSelectAnime }) {
                       onClick={() => { setMobileMenuOpen(false); setShowAddModal(true); }}
                       className="w-full py-2.5 rounded-xl text-xs font-bold btn-accent flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      <Plus size={16} /> Track New Folder
+                      <Plus size={16} /> Track Anime Folder
+                    </button>
+
+                    <button
+                      onClick={() => { setMobileMenuOpen(false); setShowAddMangaModal(true); }}
+                      className="w-full py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-purple-600 to-pink-600 text-white flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                    >
+                      <BookOpen size={16} /> Track Manga Folder
+                    </button>
+
+                    <button
+                      onClick={() => { setMobileMenuOpen(false); setShowAddAudioStoryModal(true); }}
+                      className="w-full py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-purple-600 text-white flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                    >
+                      <Headphones size={16} /> Track Audio Folder
                     </button>
 
                     <button
@@ -2803,70 +3485,69 @@ export default function Dashboard({ onSelectAnime }) {
         )}
       </AnimatePresence>
 
-      {/* MAIN BODY LAYOUT */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 py-6 space-y-14">
-        
-        {/* 2. HERO BANNER (AUTO SLIDER) */}
-        <section id="hero" className="relative w-full rounded-3xl overflow-hidden shadow-2xl border border-white/10 bg-black/30 min-h-[420px] md:min-h-[500px] flex items-end">
-          
-          {/* Animated Slide Content - Slides Horizontally without empty gap */}
-          <AnimatePresence custom={slideDirection} mode="popLayout">
-            <motion.div
-              key={currentHero.id}
-              custom={slideDirection}
-              initial={(dir) => ({
-                opacity: 0,
-                x: dir > 0 ? '100%' : '-100%'
-              })}
-              animate={{
-                opacity: 1,
-                x: 0
+      {/* 2. HERO BANNER (FULL WIDTH AUTO SLIDER - 2.7:1 ASPECT RATIO, NO GAPS OR MARGINS) */}
+      <section 
+        id="hero" 
+        className="relative w-full overflow-hidden shadow-2xl bg-black/30 border-b border-white/10 aspect-[2.7/1] min-h-[380px] md:min-h-0 flex items-end"
+        style={{ aspectRatio: '2.7 / 1' }}
+      >
+        {/* Animated Slide Content - Slides Horizontally without empty gap */}
+        <AnimatePresence custom={slideDirection} mode="popLayout">
+          <motion.div
+            key={currentHero.id}
+            custom={slideDirection}
+            initial={(dir) => ({
+              opacity: 0,
+              x: dir > 0 ? '100%' : '-100%'
+            })}
+            animate={{
+              opacity: 1,
+              x: 0
+            }}
+            exit={(dir) => ({
+              opacity: 0,
+              x: dir > 0 ? '-100%' : '100%'
+            })}
+            transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
+            className="absolute inset-0 z-10 flex items-end justify-between"
+          >
+            {/* Full Background Image */}
+            <div
+              className="absolute inset-0 z-0 bg-cover bg-center filter blur-[8px] scale-105"
+              style={{ backgroundImage: `url(${currentHero.banner})` }}
+            />
+
+            {/* Dark Backdrop Gradient Overlay */}
+            <div 
+              className="absolute inset-0 z-10 pointer-events-none" 
+              style={{
+                background: 'linear-gradient(90deg, rgba(10, 13, 20, 0.95) 0%, rgba(10, 13, 20, 0.78) 45%, rgba(0, 0, 0, 0.45) 100%)'
               }}
-              exit={(dir) => ({
-                opacity: 0,
-                x: dir > 0 ? '-100%' : '100%'
-              })}
-              transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
-              className="absolute inset-0 z-10 flex items-end justify-between"
-            >
-              {/* Full Background Image - 20px Backdrop Blur */}
+            />
+            <div 
+              className="absolute inset-0 z-10 pointer-events-none bg-gradient-to-t from-[#0a0d14] via-transparent to-black/30" 
+            />
+
+            {/* Right Side Tilted Image (Anchored at Top-Right Corner, 7deg Tilt) */}
+            <div className="absolute right-0 top-0 bottom-0 z-10 w-[50%] md:w-[45%] lg:w-[40%] pointer-events-none hidden md:flex justify-end">
               <div
-                className="absolute inset-0 z-0 bg-cover bg-center filter blur-[12px]"
-                style={{ backgroundImage: `url(${currentHero.banner})` }}
-              />
-
-              {/* Dark Backdrop Gradient Overlay */}
-              <div 
-                className="absolute inset-0 z-10 pointer-events-none" 
-                style={{
-                  background: 'linear-gradient(90deg, rgba(88, 88, 88, 0.52) 0%, rgba(39, 39, 39, 0.7) 45%, rgba(0, 0, 0, 0.59) 100%)'
-                }}
-              />
-
-              {/* Right Side Tilted Image (Anchored at Top-Right Corner, 7deg Tilt) */}
-              <div className="absolute right-0 top-0 bottom-0 z-10 w-[50%] md:w-[45%] lg:w-[40%] pointer-events-none hidden md:flex justify-end">
-                <div
-                  className="relative h-[130%] w-full max-w-[380px] lg:max-w-[440px] rounded-none overflow-hidden origin-top-right transform rotate-[7deg] shadow-[-25px_0_50px_rgba(0,0,0,0.95)]"
-                >
-                  <CachedImage 
-                    src={currentHero.banner} 
-                    alt={currentHero.title}
-                    className="w-full h-full object-cover transform -rotate-[7deg] scale-[1.65] origin-center"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/20" />
-                </div>
+                className="relative h-[130%] w-full max-w-[380px] lg:max-w-[440px] rounded-none overflow-hidden origin-top-right transform rotate-[7deg] shadow-[-25px_0_50px_rgba(0,0,0,0.95)]"
+              >
+                <CachedImage 
+                  src={currentHero.banner} 
+                  alt={currentHero.title}
+                  className="w-full h-full object-cover transform -rotate-[7deg] scale-[1.65] origin-center"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/20" />
               </div>
+            </div>
 
-              {/* Hero Content Overlay */}
-              <div className="relative z-20 p-6 md:p-14 w-full md:max-w-2xl space-y-5">
-                {/* Spotlight Tag
-                <span className="text-amber-400 font-extrabold text-sm uppercase tracking-wider block">
-                  #{currentSlide + 1} Spotlight
-                </span> */}
-
+            {/* Hero Content Overlay (Aligned with max-w-7xl page grid) */}
+            <div className="relative z-20 w-full max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-10">
+              <div className="w-full md:max-w-2xl space-y-3 md:space-y-4">
                 {/* Title */}
                 <div>
-                  <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold uppercase tracking-tight text-amber-300 leading-tight drop-shadow-lg">
+                  <h1 className="text-2xl sm:text-3xl md:text-5xl font-extrabold uppercase tracking-tight text-amber-300 leading-tight drop-shadow-lg">
                     {currentHero.title}
                   </h1>
                   {/* Genres Tag Pills */}
@@ -2888,7 +3569,7 @@ export default function Dashboard({ onSelectAnime }) {
                 </div>
 
                 {/* Metadata Section */}
-                <div className="flex flex-wrap items-center gap-3 md:gap-4 text-xs font-bold text-gray-400">
+                <div className="flex flex-wrap items-center gap-2.5 md:gap-4 text-xs font-bold text-gray-400">
                   <span className="flex items-center gap-1">
                     <Star size={14} className="fill-amber-400 text-amber-400" />
                     <span className="text-amber-400 font-extrabold">{currentHero.rating}</span>
@@ -2913,16 +3594,16 @@ export default function Dashboard({ onSelectAnime }) {
                 </div>
 
                 {/* Description */}
-                <p className="text-xs md:text-sm text-gray-400 leading-relaxed line-clamp-3 max-w-xl">
+                <p className="text-xs md:text-sm text-gray-400 leading-relaxed line-clamp-2 md:line-clamp-3 max-w-xl">
                   {currentHero.description}
                 </p>
 
                 {/* CTA Buttons */}
-                <div className="flex flex-wrap items-center gap-3 pt-2">
+                <div className="flex flex-wrap items-center gap-3 pt-1">
                   {currentHero.isManga ? (
                     <button
                       onClick={() => router.push(`/manga/${currentHero.id}`)}
-                      className="px-6 py-2.5 rounded-full font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:brightness-110 text-white flex items-center gap-2 cursor-pointer shadow-lg shadow-purple-500/30 transition-all duration-300"
+                      className="px-5 py-2.5 md:px-6 md:py-2.5 rounded-full font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:brightness-110 text-white flex items-center gap-2 cursor-pointer shadow-lg shadow-purple-500/30 transition-all duration-300"
                     >
                       <BookOpen size={14} />
                       <span>Read Manga</span>
@@ -2933,7 +3614,7 @@ export default function Dashboard({ onSelectAnime }) {
                         if (animes.length > 0 && currentHero?.id !== 'placeholder') onSelectAnime(currentHero.id);
                         else setShowAddModal(true);
                       }}
-                      className="px-6 py-2.5 rounded-full font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-pink-500 to-[#a855f7] hover:brightness-110 text-white flex items-center gap-2 cursor-pointer shadow-lg shadow-pink-500/20 transition-all duration-300"
+                      className="px-5 py-2.5 md:px-6 md:py-2.5 rounded-full font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-pink-500 to-[#a855f7] hover:brightness-110 text-white flex items-center gap-2 cursor-pointer shadow-lg shadow-pink-500/20 transition-all duration-300"
                     >
                       <Play size={14} fill="currentColor" />
                       <span>Watch Now</span>
@@ -2948,55 +3629,59 @@ export default function Dashboard({ onSelectAnime }) {
                         onSelectAnime(currentHero.id);
                       }
                     }}
-                    className="px-6 py-2.5 rounded-full font-bold text-xs uppercase tracking-wider bg-white/10 hover:bg-white/20 border border-white/10 text-white transition flex items-center gap-1 cursor-pointer"
+                    className="px-5 py-2.5 md:px-6 md:py-2.5 rounded-full font-bold text-xs uppercase tracking-wider bg-white/10 hover:bg-white/20 border border-white/10 text-white transition flex items-center gap-1 cursor-pointer"
                   >
                     <span>Detail</span>
                     <ChevronRight size={14} />
                   </button>
                 </div>
               </div>
-            </motion.div>
-          </AnimatePresence>
-
-          {/* Slider Pagination Controls */}
-          <div className="absolute right-4 bottom-4 md:right-8 md:bottom-8 z-30 flex items-center gap-3">
-            {/* Prev/Next buttons */}
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => {
-                  setSlideDirection(-1);
-                  setCurrentSlide((prev) => (prev === 0 ? heroSlides.length - 1 : prev - 1));
-                }}
-                className="p-2.5 rounded-full bg-black/60 hover:bg-[#7c5cff] border border-white/10 text-white transition cursor-pointer"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <button
-                onClick={() => {
-                  setSlideDirection(1);
-                  setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
-                }}
-                className="p-2.5 rounded-full bg-black/60 hover:bg-[#7c5cff] border border-white/10 text-white transition cursor-pointer"
-              >
-                <ChevronRight size={16} />
-              </button>
             </div>
+          </motion.div>
+        </AnimatePresence>
 
-            {/* Indicators */}
-            <div className="flex items-center gap-1.5 bg-black/40 px-3 py-2 rounded-full border border-white/10">
-              {heroSlides.map((_, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => {
-                    setSlideDirection(idx > currentSlide ? 1 : -1);
-                    setCurrentSlide(idx);
-                  }}
-                  className={`h-2 rounded-full transition-all duration-300 ${idx === currentSlide ? 'w-6 bg-[#7c5cff]' : 'w-2 bg-white/30'}`}
-                />
-              ))}
-            </div>
+        {/* Slider Pagination Controls */}
+        <div className="absolute right-4 bottom-4 md:right-8 md:bottom-8 lg:right-12 z-30 flex items-center gap-3">
+          {/* Prev/Next buttons */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => {
+                setSlideDirection(-1);
+                setCurrentSlide((prev) => (prev === 0 ? heroSlides.length - 1 : prev - 1));
+              }}
+              className="p-2.5 rounded-full bg-black/60 hover:bg-[#7c5cff] border border-white/10 text-white transition cursor-pointer"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              onClick={() => {
+                setSlideDirection(1);
+                setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
+              }}
+              className="p-2.5 rounded-full bg-black/60 hover:bg-[#7c5cff] border border-white/10 text-white transition cursor-pointer"
+            >
+              <ChevronRight size={16} />
+            </button>
           </div>
-        </section>
+
+          {/* Indicators */}
+          <div className="flex items-center gap-1.5 bg-black/40 px-3 py-2 rounded-full border border-white/10">
+            {heroSlides.map((_, idx) => (
+              <button
+                key={idx}
+                onClick={() => {
+                  setSlideDirection(idx > currentSlide ? 1 : -1);
+                  setCurrentSlide(idx);
+                }}
+                className={`h-2 rounded-full transition-all duration-300 ${idx === currentSlide ? 'w-6 bg-[#7c5cff]' : 'w-2 bg-white/30'}`}
+              />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* MAIN BODY LAYOUT */}
+      <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-14">
 
         {/* 3. EXPLORE GENRES CATEGORY CHIPS (2-ROW HORIZONTAL SCROLLER) */}
         <section id="genres" className="space-y-4">
@@ -3055,7 +3740,7 @@ export default function Dashboard({ onSelectAnime }) {
           </div>
         </section>
 
-        {/* 4. CONTINUE WATCHING & READING (USER'S ACTIVE TRACKED ANIME & MANGA) */}
+        {/* 4. CONTINUE WATCHING, READING & LISTENING (USER'S ACTIVE TRACKED ANIME, MANGA & AUDIO) */}
         {continueWatchingList.length > 0 && (
           <section id="continue-watching" className="space-y-4">
             <div className="flex items-center justify-between">
@@ -3065,15 +3750,85 @@ export default function Dashboard({ onSelectAnime }) {
                 </div>
                 <div>
                   <h2 className="text-xl font-extrabold tracking-wide text-white flex items-center gap-2">
-                    <span>Continue Watching & Reading</span>
+                    <span>Continue Watching, Reading & Listening</span>
                   </h2>
-                  <p className="text-[11px] text-gray-400 font-medium">Resume your local playback and reading progress</p>
+                  <p className="text-[11px] text-gray-400 font-medium">Resume your local playback, reading and audio story progress</p>
                 </div>
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {continueWatchingList.map((item) => {
+                if (item.mediaType === 'audioStory') {
+                  const aPct = item.progressPct || 0;
+                  return (
+                    <div
+                      key={`continue-audio-${item.id}`}
+                      onClick={() => router.push(`/audio-story/${item.id}`)}
+                      className="glass-card p-4 rounded-2xl flex gap-4 items-center group cursor-pointer border border-cyan-500/20 hover:border-cyan-500/50 hover:bg-cyan-950/20 transition-all duration-300"
+                    >
+                      <div className="relative w-20 h-24 rounded-xl overflow-hidden bg-[#181c24] flex-shrink-0">
+                        {item.thumbnailBase64 ? (
+                          <CachedImage src={item.thumbnailBase64} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                        ) : item.thumbnailPath ? (
+                          <CachedImage src={`/api/image?path=${encodeURIComponent(item.thumbnailPath)}`} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-cyan-700 to-indigo-900 flex items-center justify-center font-bold text-white/40 text-xl">
+                            <Headphones size={24} className="text-cyan-300/60" />
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                          <div className="p-2 rounded-full bg-cyan-600 text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-lg shadow-cyan-600/50">
+                            <Headphones size={14} />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex-1 min-w-0 space-y-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-extrabold text-[8px] uppercase tracking-wider shrink-0">
+                            Audio
+                          </span>
+                          <h3 className="font-bold text-sm text-white truncate group-hover:text-cyan-300 transition-colors">
+                            {item.title}
+                          </h3>
+                        </div>
+                        <p className="text-[10px] text-gray-400 truncate">
+                          Last played: {item.lastWatchedTrack || (item.completedTracks ? `Track ${item.completedTracks}` : 'In progress')}
+                        </p>
+
+                        <div>
+                          <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
+                            <span className="truncate">
+                              {item.completedTracks || 0}/{item.totalTracks || item.trackCount || '?'} Tracks
+                            </span>
+                            <span className="font-bold text-cyan-400 shrink-0 ml-1">{aPct}%</span>
+                          </div>
+                          <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-500"
+                              style={{ width: `${aPct}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setAudioStoryCompleteConfirm(item);
+                        }}
+                        className="p-2 rounded-xl bg-white/5 hover:bg-emerald-600/30 border border-white/10 hover:border-emerald-500/40 text-gray-400 hover:text-emerald-300 transition cursor-pointer self-center shrink-0"
+                        title="Mark Audio Story Complete"
+                      >
+                        <CheckCircle2 size={15} />
+                      </button>
+                    </div>
+                  );
+                }
+
                 if (item.mediaType === 'manga') {
                   const mPct = item.progressPct || 0;
                   return (
@@ -3551,6 +4306,171 @@ export default function Dashboard({ onSelectAnime }) {
                             </>
                           ) : (
                             m.progressPercent ? `${m.progressPercent}%` : 'Ready'
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* AUDIO STORIES SECTION */}
+        <section id="audio-stories" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
+                <Headphones size={20} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-extrabold tracking-wide text-white">Audio Stories</h2>
+                  <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-[10px] font-mono font-bold">
+                    {sortedAudioStories.length}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400 font-medium">Local audio dramas, podcasts, narrations & video audiobooks (New to Old)</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddAudioStoryModal(true)}
+                className="px-3 py-1.5 rounded-xl bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/30 text-cyan-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+              >
+                <Plus size={14} />
+                <span className="hidden sm:inline">Add Audio</span>
+              </button>
+
+              {sortedAudioStories.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => scrollAudioStory('left')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll left"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollAudioStory('right')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll right"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {sortedAudioStories.length === 0 ? (
+            <div className="p-8 rounded-2xl glass-card border border-white/10 text-center space-y-3 bg-white/[0.01]">
+              <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center mx-auto">
+                <Headphones size={24} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">No Audio Stories Tracked Yet</h3>
+                <p className="text-xs text-gray-400 max-w-sm mx-auto mt-1">
+                  Connect any local folder with audio chapters (MP3, M4A, FLAC) or narrative video files (MP4, MKV) to start listening!
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddAudioStoryModal(true)}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-black font-bold text-xs uppercase tracking-wider inline-flex items-center gap-2 shadow-lg cursor-pointer"
+              >
+                <Plus size={14} />
+                <span>Track Audio Stories Folder</span>
+              </button>
+            </div>
+          ) : (
+            /* Horizontal Slider (X-Axis Scrollable) */
+            <div
+              ref={audioStoryScrollRef}
+              className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+            >
+              {sortedAudioStories.map((s) => {
+                const isWatched = Boolean(s.isWatched || s.progressPercent === 100 || s.status === 'completed');
+                const coverImg = s.thumbnailBase64 || (s.thumbnailPath ? `/api/image?path=${encodeURIComponent(s.thumbnailPath)}` : null);
+                return (
+                  <div
+                    key={`audio-${s.id}`}
+                    onClick={() => router.push(`/audio-story/${s.id}`)}
+                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-cyan-500/50 transition-all duration-300 shadow-md hover:shadow-xl"
+                  >
+                    <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
+                      {coverImg ? (
+                        <CachedImage
+                          src={coverImg}
+                          alt={s.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-cyan-400/80 bg-gradient-to-br from-cyan-950/30 to-purple-950/20 gap-1.5">
+                          <Headphones size={36} />
+                          <span className="text-[9px] font-mono uppercase tracking-wider">Audio Story</span>
+                        </div>
+                      )}
+
+                      {/* Status / Track Badge */}
+                      <div className="absolute top-2 left-2 flex items-center gap-1">
+                        {isWatched ? (
+                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/90 backdrop-blur-md text-[9px] uppercase font-bold text-white flex items-center gap-1 shadow">
+                            <CheckCircle2 size={10} /> Listened
+                          </span>
+                        ) : (
+                          <div className="px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-md text-cyan-300 font-bold text-[9px] border border-white/10">
+                            {s.trackCount || s.totalTracks || 0} Tracks
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-cyan-500 text-black font-extrabold text-[8px] shadow">
+                        AUDIO
+                      </div>
+
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center p-3 gap-2">
+                        <div className="px-3 py-1.5 rounded-xl bg-cyan-500 text-black text-xs font-bold flex items-center gap-1.5 shadow-lg">
+                          <Play size={14} fill="currentColor" />
+                          <span>Listen</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setAudioStoryCompleteConfirm(s);
+                          }}
+                          className={`p-2 rounded-xl border transition cursor-pointer ${
+                            isWatched
+                              ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
+                              : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
+                          }`}
+                          title={isWatched ? 'Mark Unlistened' : 'Mark Listened (Complete)'}
+                        >
+                          <CheckCircle2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
+                      <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-cyan-300 transition-colors">
+                        {s.title}
+                      </h4>
+                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
+                        <span>Audio / Video</span>
+                        <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-1" : "text-cyan-400 font-semibold"}>
+                          {isWatched ? (
+                            <>
+                              <CheckCircle2 size={10} /> Completed
+                            </>
+                          ) : (
+                            s.progressPercent ? `${s.progressPercent}%` : 'Ready'
                           )}
                         </span>
                       </div>
@@ -5485,6 +6405,301 @@ export default function Dashboard({ onSelectAnime }) {
               setShowMangaCoverSearch(false);
             }}
             onClose={() => setShowMangaCoverSearch(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Quick Mark Audio Story Watched Confirmation Modal */}
+      <AnimatePresence>
+        {audioStoryCompleteConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl space-y-4 bg-[#0d1117] text-white text-center"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center mx-auto">
+                <CheckCircle2 size={24} />
+              </div>
+              <h3 className="text-base font-bold">
+                {audioStoryCompleteConfirm.isWatched ? 'Mark Audio Story Unlistened?' : 'Mark Entire Story as Listened?'}
+              </h3>
+              <p className="text-xs text-gray-400">
+                {audioStoryCompleteConfirm.isWatched
+                  ? `Reset "${audioStoryCompleteConfirm.title}" progress back to unlistened.`
+                  : `Mark all tracks in "${audioStoryCompleteConfirm.title}" as completed (100%).`}
+              </p>
+              <div className="flex justify-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAudioStoryCompleteConfirm(null)}
+                  className="px-4 py-2 rounded-xl bg-white/10 text-xs font-semibold text-gray-300 hover:text-white cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = audioStoryCompleteConfirm;
+                    setAudioStoryCompleteConfirm(null);
+                    handleToggleAudioStoryWatched(target);
+                  }}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-black text-xs font-bold cursor-pointer"
+                >
+                  Yes, Confirm
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Add Audio Story Modal */}
+      <AnimatePresence>
+        {showAddAudioStoryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-xl glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl modal-scroll space-y-4 bg-[#0d1117]/95 text-white"
+            >
+              <div className="flex justify-between items-center border-b border-white/10 pb-3">
+                <h2 className="text-lg font-extrabold flex items-center gap-2 text-white">
+                  <Headphones className="text-cyan-400" size={20} />
+                  <span>Track Local Audio Story Folder</span>
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setShowAddAudioStoryModal(false)}
+                  className="p-1 rounded-lg text-gray-400 hover:text-white transition cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddAudioStory} className="space-y-4">
+                {/* 1. Directory Path */}
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                    Select Audio Story Folder Directory *
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Browse your PC or paste audio / video story directory path..."
+                      className="flex-grow px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={audioStoryFolderPath}
+                      onChange={(e) => setAudioStoryFolderPath(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleBrowseAudioStoryFolder}
+                      disabled={audioStoryScanning}
+                      className="px-3 py-2 rounded-xl bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 hover:text-white text-xs font-bold whitespace-nowrap transition cursor-pointer disabled:opacity-50"
+                    >
+                      {audioStoryScanning ? 'Scanning...' : 'Browse PC Folder'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleScanAudioStory}
+                      disabled={audioStoryScanning || !audioStoryFolderPath}
+                      className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold whitespace-nowrap transition cursor-pointer disabled:opacity-50"
+                    >
+                      Scan
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scanned files alert */}
+                {audioStoryScanResult.length > 0 && (
+                  <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-bold">
+                      <CheckCircle2 size={16} className="text-emerald-400" />
+                      <span>Found {audioStoryScanResult.length} tracks ({audioStoryScanResult.filter(t => !t.isVideo).length} audio, {audioStoryScanResult.filter(t => t.isVideo).length} video)</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-gray-400">Ready to track</span>
+                  </div>
+                )}
+
+                {/* 2. Story Title + Auto-Fetch Button */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                      Audio Story Title *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleFetchAudioStoryOnline}
+                      disabled={fetchingAudioOnline || !audioStoryTitle.trim()}
+                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-cyan-600/30 to-purple-600/30 hover:from-cyan-600/50 hover:to-purple-600/50 text-cyan-200 border border-cyan-500/30 hover:border-cyan-400 text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Auto-fetch synopsis and artwork from online"
+                    >
+                      <Sparkles size={12} className={fetchingAudioOnline ? 'animate-spin text-cyan-400' : 'text-cyan-300'} />
+                      <span>{fetchingAudioOnline ? 'Fetching Online...' : 'Auto-Fetch from Online'}</span>
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="e.g. Lord of the Mysteries, The Sandman, Welcome to Night Vale..."
+                    className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                    value={audioStoryTitle}
+                    onChange={(e) => setAudioStoryTitle(e.target.value)}
+                  />
+                  {audioStoryOnlineMessage && (
+                    <p className={`text-[11px] mt-1 font-medium ${audioStoryOnlineMessage.startsWith('✓') ? 'text-emerald-400' : 'text-cyan-300'}`}>
+                      {audioStoryOnlineMessage}
+                    </p>
+                  )}
+                </div>
+
+                {/* 3. Total Tracks */}
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                    Total Tracks / Parts
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder={audioStoryScanResult.length > 0 ? `Scanned: ${audioStoryScanResult.length} (or enter total)` : 'e.g. 24'}
+                    className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                    value={audioStoryTotalTracks}
+                    onChange={(e) => setAudioStoryTotalTracks(e.target.value)}
+                  />
+                </div>
+
+                {/* 4. Description / Synopsis */}
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                    Description / Synopsis
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Enter audio story description, synopsis, narrator, or auto-fetch..."
+                    className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                    value={audioStoryDescription}
+                    onChange={(e) => setAudioStoryDescription(e.target.value)}
+                  />
+                </div>
+
+                {/* 5. Cover Picture */}
+                <div className="space-y-2">
+                  <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                    Cover Picture Artwork
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowAudioCoverSearch(true)}
+                      className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-purple-600 hover:from-cyan-500 hover:to-purple-500 text-black text-xs font-bold flex items-center gap-1.5 transition shadow-md cursor-pointer"
+                    >
+                      <Sparkles size={14} />
+                      <span>Search Online Covers</span>
+                    </button>
+
+                    <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-gray-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border border-white/10">
+                      <ImagePlus size={14} />
+                      <span>Upload Image</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleNewAudioCoverUpload}
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={handleAudioCoverBrowse}
+                      className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-gray-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border border-white/10"
+                    >
+                      <HardDrive size={14} />
+                      <span>Browse PC</span>
+                    </button>
+                  </div>
+
+                  {audioStoryCoverUrl && (
+                    <div className="relative w-24 h-32 rounded-xl overflow-hidden border border-white/20 shadow-lg mt-2">
+                      <img
+                        src={audioStoryCoverUrl}
+                        alt="Cover Preview"
+                        className="w-full h-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAudioStoryCoverUrl('')}
+                        className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white hover:bg-red-500 transition cursor-pointer"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* 6. Genres */}
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                    Select Genres
+                  </label>
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto custom-scrollbar p-1">
+                    {GENRES_LIST.filter(g => g !== 'All').map((g) => {
+                      const isSel = audioStoryGenres.includes(g);
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => {
+                            if (isSel) setAudioStoryGenres(audioStoryGenres.filter((item) => item !== g));
+                            else setAudioStoryGenres([...audioStoryGenres, g]);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer border ${
+                            isSel
+                              ? 'bg-cyan-500 border-cyan-400 text-black'
+                              : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
+                          }`}
+                        >
+                          {g}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Submit / Cancel buttons */}
+                <div className="flex justify-end gap-3 pt-4 border-t border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddAudioStoryModal(false)}
+                    className="px-4 py-2 text-xs text-gray-400 hover:text-white transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={audioStoryScanning || !audioStoryFolderPath || !audioStoryTitle || audioStoryScanResult.length === 0}
+                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 disabled:opacity-40 text-black text-xs font-bold uppercase tracking-wider transition shadow-lg cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    {audioStoryScanning ? 'Processing...' : 'Track Audio Story Folder'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Online Audio Cover Search Modal */}
+      <AnimatePresence>
+        {showAudioCoverSearch && (
+          <MangaCoverSearch
+            initialQuery={audioStoryTitle}
+            uploadToImgBB={uploadToImgBB}
+            onSelectCover={(url) => {
+              setAudioStoryCoverUrl(url);
+              setShowAudioCoverSearch(false);
+            }}
+            onClose={() => setShowAudioCoverSearch(false)}
           />
         )}
       </AnimatePresence>

@@ -37,14 +37,32 @@ export async function GET(request, { params }) {
     }
 
     const ext = path.extname(filePath).toLowerCase();
-    const isNativeFormat = (ext === '.mp4' || ext === '.mov' || ext === '.m4v' || ext === '.webm') && !audioIndexStr;
+    const audioContentTypes = {
+      '.mp3': 'audio/mpeg',
+      '.m4a': 'audio/mp4',
+      '.aac': 'audio/aac',
+      '.wav': 'audio/wav',
+      '.flac': 'audio/flac',
+      '.ogg': 'audio/ogg',
+      '.opus': 'audio/ogg',
+      '.m4b': 'audio/mp4',
+    };
+    const videoContentTypes = {
+      '.mov': 'video/quicktime',
+      '.webm': 'video/webm',
+      '.mp4': 'video/mp4',
+      '.m4v': 'video/mp4',
+    };
+    const isNativeAudio = Boolean(audioContentTypes[ext]);
+    const isNativeVideo = Boolean(videoContentTypes[ext]) && !audioIndexStr;
+    const isNativeFormat = isNativeAudio || isNativeVideo;
     const stat = fs.statSync(filePath);
     const fileSize = stat.size;
     const range = request.headers.get('range');
-    const contentType = ext === '.mov' ? 'video/quicktime' : (ext === '.webm' ? 'video/webm' : 'video/mp4');
+    const contentType = audioContentTypes[ext] || videoContentTypes[ext] || 'video/mp4';
     const corsHeaders = getMediaCorsHeaders();
 
-    // ── Native HTTP Range Request Streaming (MP4/MOV/WEBM) ───────────────────
+    // ── Native HTTP Range Request Streaming (Audio / MP4 / MOV / WEBM) ───────
     if (isNativeFormat) {
       if (range) {
         const parts = range.replace(/bytes=/, '').split('-');
@@ -100,21 +118,32 @@ export async function GET(request, { params }) {
 
     args.push('-i', filePath);
 
-    if (audioIndexStr) {
-      const audioIndex = parseInt(audioIndexStr, 10);
-      args.push('-map', '0:v:0', '-map', `0:${audioIndex}`);
+    const isAudioOnly = ['.wma', '.alac', '.aiff', '.ape'].includes(ext);
+    if (!isAudioOnly) {
+      if (audioIndexStr) {
+        const audioIndex = parseInt(audioIndexStr, 10);
+        args.push('-map', '0:v:0', '-map', `0:${audioIndex}`);
+      }
+      args.push(
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-ac', '2',
+        '-avoid_negative_ts', 'make_zero',
+        '-f', 'mp4',
+        '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+        'pipe:1'
+      );
+    } else {
+      args.push(
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-ac', '2',
+        '-f', 'mp4',
+        '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+        'pipe:1'
+      );
     }
-
-    args.push(
-      '-c:v', 'copy',
-      '-c:a', 'aac',
-      '-b:a', '192k',
-      '-ac', '2',
-      '-avoid_negative_ts', 'make_zero',
-      '-f', 'mp4',
-      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-      'pipe:1'
-    );
 
     const ffmpeg = spawn('ffmpeg', args);
 
