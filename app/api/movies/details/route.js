@@ -93,7 +93,7 @@ export async function GET(request) {
       backdrops: Array.isArray(d.images?.backdrops)
         ? d.images.backdrops.slice(0, 30).map((img) => ({
           filePath: img.file_path,
-          url: `https://image.tmdb.org/t/p/w720${img.file_path}`,
+          url: `https://image.tmdb.org/t/p/original${img.file_path}`,
           width: img.width,
           height: img.height,
           voteAverage: img.vote_average || 0,
