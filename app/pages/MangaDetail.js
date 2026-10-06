@@ -12,13 +12,13 @@ import { useAuth } from '../context/AuthContext';
 import { useOffline } from '../context/OfflineContext';
 import { doc, getDocs, collection, setDoc, deleteDoc, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import {
+import{
   ArrowLeft, BookOpen, Clock, Folder, CheckCircle2, Bookmark,
   StickyNote, Star, RefreshCw, FolderPlus, FolderTree, Search,
   ChevronDown, ChevronUp, Trash2, Edit3, Check, ExternalLink, HardDrive,
   FileText, Sparkles, Heart, SlidersHorizontal, ImagePlus, X, FilePlus,
   Move, CornerDownRight, ArrowRight, Layers, Loader2, RotateCcw,
-  PlusCircle, CheckSquare, FolderMinus, AlertTriangle, Menu
+  PlusCircle, CheckSquare, FolderMinus, AlertTriangle, Menu, FolderOpen
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MangaCoverSearch from '../components/MangaCoverSearch';
@@ -153,6 +153,14 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
   const [editGenres, setEditGenres] = useState([]);
   const [editDescription, setEditDescription] = useState('');
   const [editCoverUrl, setEditCoverUrl] = useState('');
+  const [editBannerUrl, setEditBannerUrl] = useState('');
+  const [editLogoUrl, setEditLogoUrl] = useState('');
+  const [enableEditMangaLogo, setEnableEditMangaLogo] = useState(false);
+  const [editMangaImages, setEditMangaImages] = useState({ covers: [], banners: [], logos: [] });
+  const [searchingEditArtwork, setSearchingEditArtwork] = useState(false);
+  const [editArtworkSearchQuery, setEditArtworkSearchQuery] = useState('');
+  const [bannerSectionOpen, setBannerSectionOpen] = useState(true);
+  const [logoSectionOpen, setLogoSectionOpen] = useState(true);
   const [showOnlineSearchEdit, setShowOnlineSearchEdit] = useState(false);
   const [uploadingEditCover, setUploadingEditCover] = useState(false);
   const [fetchingEditOnline, setFetchingEditOnline] = useState(false);
@@ -1173,9 +1181,79 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
     setEditGenres(Array.isArray(manga?.genres) ? manga.genres : typeof manga?.genres === 'string' ? manga.genres.split(',').map(s => s.trim()) : []);
     setEditDescription(manga?.description || manga?.synopsis || '');
     setEditCoverUrl(manga?.thumbnailBase64 || manga?.thumbnailPath || '');
+    setEditBannerUrl(manga?.bannerUrl || manga?.backdropUrl || '');
+    setEditLogoUrl(manga?.logoUrl || '');
+    setEnableEditMangaLogo(Boolean(manga?.logoUrl));
+    setEditArtworkSearchQuery(manga?.title || '');
+    setEditMangaImages({ covers: [], banners: [], logos: [] });
+    setBannerSectionOpen(true);
+    setLogoSectionOpen(true);
     setEditOnlineMessage('');
     setShowOnlineSearchEdit(false);
     setShowEditModal(true);
+  };
+
+  const fetchEditMangaArtwork = async (term) => {
+    const q = (term || editArtworkSearchQuery || editTitle || manga?.title || '').trim();
+    if (!q) return;
+    setSearchingEditArtwork(true);
+    try {
+      const res = await fetch(`/api/manga/details?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      const banners = [];
+      const logos = [];
+      const covers = [];
+
+      if (data.success && data.manga) {
+        if (Array.isArray(data.manga.images?.banners)) {
+          banners.push(...data.manga.images.banners);
+        }
+        if (Array.isArray(data.manga.images?.logos)) {
+          logos.push(...data.manga.images.logos);
+        }
+        if (Array.isArray(data.manga.images?.covers)) {
+          covers.push(...data.manga.images.covers);
+        }
+        if (data.manga.bannerUrl && !banners.some(b => b.url === data.manga.bannerUrl)) {
+          banners.unshift({ url: data.manga.bannerUrl, source: 'AniList' });
+        }
+        if (data.manga.logoUrl && !logos.some(l => l.url === data.manga.logoUrl)) {
+          logos.unshift({ url: data.manga.logoUrl, source: 'Fanart.tv' });
+        }
+      }
+
+      // Fallback query to /api/anime/details if needed for title art / backdrops
+      if (banners.length === 0 || logos.length === 0) {
+        try {
+          const animeRes = await fetch(`/api/anime/details?q=${encodeURIComponent(q)}`);
+          const animeData = await animeRes.json();
+          if (animeData.success && animeData.anime) {
+            if (Array.isArray(animeData.anime.images?.banners)) {
+              for (const b of animeData.anime.images.banners) {
+                if (!banners.some(item => item.url === b.url)) banners.push(b);
+              }
+            }
+            if (Array.isArray(animeData.anime.images?.logos)) {
+              for (const l of animeData.anime.images.logos) {
+                if (!logos.some(item => item.url === l.url)) logos.push(l);
+              }
+            }
+            if (animeData.anime.bannerUrl && !banners.some(b => b.url === animeData.anime.bannerUrl)) {
+              banners.unshift({ url: animeData.anime.bannerUrl, source: 'AniList' });
+            }
+            if (animeData.anime.logoUrl && !logos.some(l => l.url === animeData.anime.logoUrl)) {
+              logos.unshift({ url: animeData.anime.logoUrl, source: 'Fanart.tv' });
+            }
+          }
+        } catch (_) {}
+      }
+
+      setEditMangaImages({ covers, banners, logos });
+    } catch (err) {
+      console.error('Error fetching online manga artwork:', err);
+    } finally {
+      setSearchingEditArtwork(false);
+    }
   };
 
   const handleFetchEditOnline = async () => {
@@ -1254,6 +1332,52 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
     }
   };
 
+  const handleEditBannerUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setEditBannerUrl(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleEditBannerBrowse = async () => {
+    try {
+      const pickRes = await fetch('/api/select-image');
+      const pickData = await pickRes.json();
+      if (pickData.success && pickData.path) {
+        setEditBannerUrl(pickData.path);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleEditLogoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setEditLogoUrl(ev.target.result);
+      setEnableEditMangaLogo(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleEditLogoBrowse = async () => {
+    try {
+      const pickRes = await fetch('/api/select-image');
+      const pickData = await pickRes.json();
+      if (pickData.success && pickData.path) {
+        setEditLogoUrl(pickData.path);
+        setEnableEditMangaLogo(true);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleSaveEdit = async (e) => {
     if (e) e.preventDefault();
     if (!editTitle.trim()) return;
@@ -1272,6 +1396,9 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
         description: editDescription,
         synopsis: editDescription,
         thumbnailBase64: editCoverUrl || manga?.thumbnailBase64,
+        bannerUrl: editBannerUrl || manga?.bannerUrl || manga?.backdropUrl || '',
+        backdropUrl: editBannerUrl || manga?.bannerUrl || manga?.backdropUrl || '',
+        logoUrl: enableEditMangaLogo ? (editLogoUrl || '') : '',
         updatedAt: new Date().toISOString()
       };
 
@@ -2009,13 +2136,17 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
       <main className="max-w-7xl mx-auto px-4 sm:px-8 py-8 space-y-8">
         {/* ── Hero Banner / Overview Card ────────────────────────────────────── */}
         <div className="relative rounded-3xl overflow-hidden border border-white/10 p-6 sm:p-8 bg-[#0d1117]/90 md:bg-gradient-to-br md:from-purple-900/20 md:via-[#10141d] md:to-[#0d1117] shadow-2xl flex flex-col md:flex-row gap-8 items-start">
-          {/* Ambient Background Cover: on mobile, clearly and vibrantly covers the hero card */}
-          {mangaCoverImg && (
+          {/* Ambient Background Cover: uses bannerUrl if present, otherwise cover */}
+          {(manga?.bannerUrl || mangaCoverImg) && (
             <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
               <img
-                src={mangaCoverImg}
+                src={
+                  manga?.bannerUrl
+                    ? (manga.bannerUrl.startsWith('http') || manga.bannerUrl.startsWith('data:') ? manga.bannerUrl : `/api/image?path=${encodeURIComponent(manga.bannerUrl)}`)
+                    : mangaCoverImg
+                }
                 alt=""
-                className="w-full h-full object-cover object-top opacity-45 md:opacity-20 blur-[1.5px] md:blur-xl scale-105"
+                className="w-full h-full object-cover object-center opacity-45 md:opacity-25 blur-[1.5px] md:blur-md scale-105"
                 aria-hidden="true"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-[#0d1117] via-[#0d1117]/65 to-black/30 md:bg-gradient-to-b md:from-[#0d1117]/40 md:via-[#0d1117]/80 md:to-[#0d1117]" />
@@ -2063,9 +2194,19 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                     <Edit3 size={11} /> Change Cover
                   </button>
                 </div>
-                <h1 className="text-2xl sm:text-3xl font-black tracking-wide text-white drop-shadow-md">
-                  {manga?.title || 'Untitled Manga'}
-                </h1>
+                {manga?.logoUrl ? (
+                  <div className="h-14 sm:h-16 flex items-center mb-1">
+                    <img
+                      src={manga.logoUrl.startsWith('http') || manga.logoUrl.startsWith('data:') ? manga.logoUrl : `/api/image?path=${encodeURIComponent(manga.logoUrl)}`}
+                      alt={manga.title}
+                      className="max-h-14 sm:max-h-16 w-auto object-contain filter drop-shadow-lg"
+                    />
+                  </div>
+                ) : (
+                  <h1 className="text-2xl sm:text-3xl font-black tracking-wide text-white drop-shadow-md">
+                    {manga?.title || 'Untitled Manga'}
+                  </h1>
+                )}
                 {manga?.folderPath && (
                   <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-1 font-mono truncate">
                     <HardDrive size={13} className="text-purple-400 shrink-0" />
@@ -2853,7 +2994,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-xl glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl modal-scroll space-y-4 bg-[#0d1117]/95 text-white"
+              className="w-[90vw] max-w-[90vw] glass-panel p-6 md:p-8 rounded-3xl border border-white/10 shadow-2xl modal-scroll space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar bg-[#0d1117]/95 text-white"
             >
               <div className="flex justify-between items-center border-b border-white/10 pb-3">
                 <h2 className="text-lg font-extrabold flex items-center gap-2 text-white">
@@ -3048,6 +3189,339 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                         <X size={12} />
                       </button>
                     </div>
+                  )}
+                </div>
+
+                {/* ── Online Artwork Search (AniList & Fanart.tv) ── */}
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-900/20 via-pink-900/20 to-black/30 border border-purple-500/20 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Sparkles size={14} className="text-purple-400" />
+                      Search Artwork Online (AniList & Fanart.tv)
+                    </span>
+                    {searchingEditArtwork && (
+                      <span className="text-[11px] text-purple-300 flex items-center gap-1 font-semibold">
+                        <Loader2 size={12} className="animate-spin" /> Searching...
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Enter title to search online banners and logos..."
+                      value={editArtworkSearchQuery}
+                      onChange={(e) => setEditArtworkSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          fetchEditMangaArtwork(editArtworkSearchQuery);
+                        }
+                      }}
+                      className="flex-1 px-3 py-1.5 rounded-xl glass-input text-xs text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fetchEditMangaArtwork(editArtworkSearchQuery)}
+                      disabled={searchingEditArtwork || !editArtworkSearchQuery.trim()}
+                      className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md transition"
+                    >
+                      {searchingEditArtwork ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                      Search
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── Backdrop Banner Artwork (16:9) ── */}
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                      Backdrop Banner Artwork (16:9)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <label className="text-[11px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 cursor-pointer">
+                        <ImagePlus size={13} />
+                        <span>Upload Local</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleEditBannerUpload}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleEditBannerBrowse}
+                        className="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <FolderOpen size={13} />
+                        <span>Browse PC</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {bannerSectionOpen ? (
+                    <div className="space-y-3 pt-1">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Paste wide banner URL or select below from AniList / Fanart.tv..."
+                          className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                          value={editBannerUrl}
+                          onChange={(e) => setEditBannerUrl(e.target.value)}
+                        />
+                        {editBannerUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setEditBannerUrl('')}
+                            className="p-2 rounded-xl bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+
+                      {editBannerUrl && (
+                        <div className="relative w-full h-28 sm:h-36 rounded-xl overflow-hidden border border-white/20 shadow-lg group">
+                          <img
+                            src={editBannerUrl.startsWith('http') || editBannerUrl.startsWith('data:') ? editBannerUrl : `/api/image?path=${encodeURIComponent(editBannerUrl)}`}
+                            alt="Backdrop Preview"
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end justify-between p-2.5">
+                            <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1 bg-black/60 px-2 py-0.5 rounded">
+                              <Check size={11} /> Active 16:9 Banner
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setEditBannerUrl('')}
+                              className="p-1.5 rounded-full bg-red-600 text-white hover:bg-red-700 transition cursor-pointer"
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {Array.isArray(editMangaImages?.banners) && editMangaImages.banners.length > 0 && (
+                        <div className="space-y-1.5 pt-1">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                            Choose from Fetched Online Banners ({editMangaImages.banners.length} found):
+                          </span>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 max-h-52 overflow-y-auto custom-scrollbar p-1 rounded-xl bg-black/40 border border-white/5">
+                            {editMangaImages.banners.map((ban, idx) => {
+                              const isSelected = editBannerUrl === ban.url;
+                              return (
+                                <div
+                                  key={ban.url || idx}
+                                  onClick={() => setEditBannerUrl(ban.url)}
+                                  className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
+                                    isSelected
+                                      ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
+                                      : 'border-white/10 hover:border-white/30 opacity-80 hover:opacity-100'
+                                  }`}
+                                >
+                                  <img
+                                    src={ban.url}
+                                    alt={`Banner ${idx + 1}`}
+                                    className="w-full h-full object-cover"
+                                  />
+                                  <div className="absolute inset-x-0 bottom-0 bg-black/80 p-1 flex items-center justify-between text-[9px] text-gray-300">
+                                    <span className="truncate">{ban.source || 'Banner'}</span>
+                                    {isSelected && (
+                                      <span className="text-emerald-400 font-bold shrink-0 flex items-center gap-0.5">
+                                        <Check size={10} />
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    editBannerUrl && (
+                      <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-black/40 border border-white/10">
+                        <div className="w-16 h-9 rounded-lg overflow-hidden shrink-0 border border-white/10">
+                          <img
+                            src={editBannerUrl.startsWith('http') || editBannerUrl.startsWith('data:') ? editBannerUrl : `/api/image?path=${encodeURIComponent(editBannerUrl)}`}
+                            alt="Banner preview"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <span className="text-[11px] text-gray-300 truncate flex-1 font-mono">{editBannerUrl}</span>
+                        <span className="text-[10px] text-emerald-400 font-bold shrink-0 flex items-center gap-1">
+                          <Check size={11} /> Active Banner
+                        </span>
+                      </div>
+                    )
+                  )}
+
+                  {/* Bottom Chevron Toggle Button for Banner Section */}
+                  <button
+                    type="button"
+                    onClick={() => setBannerSectionOpen((prev) => !prev)}
+                    className="w-full pt-2.5 pb-1 flex items-center justify-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-white transition cursor-pointer border-t border-white/5"
+                  >
+                    <span>{bannerSectionOpen ? 'Collapse Banner Selection' : 'Open Banner Selection'}</span>
+                    {bannerSectionOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                  </button>
+                </div>
+
+                {/* ── Custom Manga Logo / Title Art (Transparent PNG) ── */}
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={enableEditMangaLogo}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setEnableEditMangaLogo(checked);
+                          if (checked && !editLogoUrl && editMangaImages?.logos?.length > 0) {
+                            setEditLogoUrl(editMangaImages.logos[0].url);
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-white/20 bg-black/40 text-purple-500 focus:ring-purple-500 cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <ImagePlus size={14} className="text-purple-400" />
+                        Custom Manga Logo / Title Art
+                      </span>
+                    </label>
+                    {enableEditMangaLogo && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-[11px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 cursor-pointer">
+                          <ImagePlus size={13} />
+                          <span>Upload Local</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handleEditLogoUpload}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleEditLogoBrowse}
+                          className="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <FolderOpen size={13} />
+                          <span>Browse PC</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {enableEditMangaLogo && (
+                    <>
+                      {logoSectionOpen ? (
+                        <div className="space-y-3 pt-1">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              placeholder="Select below, upload, or paste transparent logo URL..."
+                              value={editLogoUrl}
+                              onChange={(e) => setEditLogoUrl(e.target.value)}
+                              className="flex-1 px-3 py-2 rounded-xl glass-input text-xs text-white"
+                            />
+                            {editLogoUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setEditLogoUrl('')}
+                                className="p-2 rounded-xl bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer text-xs"
+                              >
+                                <X size={14} />
+                              </button>
+                            )}
+                          </div>
+
+                          {editLogoUrl && (
+                            <div className="p-3 rounded-xl bg-black/60 border border-white/15 flex items-center justify-between gap-3">
+                              <div className="max-h-14 max-w-[200px] flex items-center justify-center p-1 bg-white/5 rounded-lg border border-white/5">
+                                <img
+                                  src={editLogoUrl.startsWith('http') || editLogoUrl.startsWith('data:') ? editLogoUrl : `/api/image?path=${encodeURIComponent(editLogoUrl)}`}
+                                  alt="Selected Logo"
+                                  className="max-h-12 w-auto max-w-full object-contain"
+                                />
+                              </div>
+                              <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
+                                <Check size={12} /> Active Logo
+                              </span>
+                            </div>
+                          )}
+
+                          {Array.isArray(editMangaImages?.logos) && editMangaImages.logos.length > 0 && (
+                            <div className="space-y-1.5 pt-1">
+                              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                                Choose from Fetched Transparent Logos ({editMangaImages.logos.length} found):
+                              </span>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 max-h-48 overflow-y-auto custom-scrollbar p-1.5 rounded-xl bg-black/50 border border-white/5">
+                                {editMangaImages.logos.map((logo, idx) => {
+                                  const isSelected = editLogoUrl === logo.url;
+                                  return (
+                                    <div
+                                      key={logo.url || idx}
+                                      onClick={() => setEditLogoUrl(logo.url)}
+                                      className={`relative h-20 p-2 rounded-xl bg-white/[0.04] border flex items-center justify-center cursor-pointer transition ${
+                                        isSelected
+                                          ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)] bg-purple-500/10'
+                                          : 'border-white/10 hover:border-white/30 hover:bg-white/[0.08]'
+                                      }`}
+                                    >
+                                      <img
+                                        src={logo.url}
+                                        alt={`Logo ${idx + 1}`}
+                                        className="max-h-14 w-auto max-w-full object-contain filter drop-shadow-md"
+                                      />
+                                      <div className="absolute bottom-1 right-1 flex items-center gap-1">
+                                        {logo.lang && (
+                                          <span className="text-[8px] uppercase font-bold px-1 rounded bg-black/70 text-gray-300">
+                                            {logo.lang}
+                                          </span>
+                                        )}
+                                        {isSelected && (
+                                          <span className="text-emerald-400 p-0.5 rounded bg-black/70">
+                                            <Check size={10} />
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        editLogoUrl && (
+                          <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-black/40 border border-white/10">
+                            <div className="h-7 max-w-[80px] p-0.5 rounded-md bg-white/5 shrink-0 flex items-center justify-center border border-white/10">
+                              <img
+                                src={editLogoUrl.startsWith('http') || editLogoUrl.startsWith('data:') ? editLogoUrl : `/api/image?path=${encodeURIComponent(editLogoUrl)}`}
+                                alt="Selected Logo"
+                                className="max-h-6 w-auto max-w-full object-contain"
+                              />
+                            </div>
+                            <span className="text-[11px] text-gray-300 truncate flex-1 font-mono">{editLogoUrl}</span>
+                            <span className="text-[10px] text-emerald-400 font-bold shrink-0 flex items-center gap-1">
+                              <Check size={11} /> Active Logo
+                            </span>
+                          </div>
+                        )
+                      )}
+
+                      {/* Bottom Chevron Toggle Button for Logo Section */}
+                      <button
+                        type="button"
+                        onClick={() => setLogoSectionOpen((prev) => !prev)}
+                        className="w-full pt-2.5 pb-1 flex items-center justify-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-white transition cursor-pointer border-t border-white/5"
+                      >
+                        <span>{logoSectionOpen ? 'Collapse Logo Section' : 'Open Logo Section'}</span>
+                        {logoSectionOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                      </button>
+                    </>
                   )}
                 </div>
 
