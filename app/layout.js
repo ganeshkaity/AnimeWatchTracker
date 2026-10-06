@@ -12,10 +12,10 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
       </head>
-      <body className={`bg-bgDark text-white min-h-screen ${inter.className}`}>
+      <body className={`bg-bgDark text-white min-h-screen ${inter.className}`} suppressHydrationWarning>
         {/* Animated neon gradient background — fixed behind all pages */}
         <div className="neon-bg" aria-hidden="true">
           <div className="neon-bg-orb neon-bg-orb-1" />

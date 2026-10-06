@@ -73,6 +73,7 @@ export default function MoviesLibrary() {
   // Add / Edit Modal State
   const [showAddModal, setShowAddModal] = useState(false);
   const [movieEditing, setMovieEditing] = useState(null);
+  const [movieCompleteConfirm, setMovieCompleteConfirm] = useState(null);
 
   // Load Movies
   useEffect(() => {
@@ -121,6 +122,54 @@ export default function MoviesLibrary() {
           payload: { id: movieId, userId: targetUserId }
         });
       });
+    }
+  };
+
+  // Handle Toggle Watched / Completed Status
+  const handleToggleMovieWatched = async (movieItem, e) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    try {
+      const isCurrentlyWatched = Boolean(movieItem.watched || movieItem.completed || movieItem.watchStatus === 'Completed' || (movieItem.watchProgress && movieItem.watchProgress >= 95));
+      const shouldComplete = !isCurrentlyWatched;
+      const movieId = movieItem.id;
+      const targetUserId = movieItem.userId || currentUser?.uid || getUserId();
+
+      const updatedMovie = {
+        ...movieItem,
+        watched: shouldComplete,
+        completed: shouldComplete,
+        watchStatus: shouldComplete ? 'Completed' : 'Not Started',
+        watchProgress: shouldComplete ? 100 : 0,
+        progressPercentage: shouldComplete ? 100 : 0,
+        currentTime: shouldComplete ? (movieItem.duration || 0) : 0,
+        updatedAt: new Date().toISOString(),
+      };
+
+      upsertLocalMovie(updatedMovie);
+      setMovies(prev => prev.map(m => m.id === movieId ? updatedMovie : m));
+
+      if (db && targetUserId) {
+        updateDoc(doc(db, 'users', targetUserId, 'movies', movieId), {
+          watched: shouldComplete,
+          completed: shouldComplete,
+          watchStatus: shouldComplete ? 'Completed' : 'Not Started',
+          watchProgress: shouldComplete ? 100 : 0,
+          progressPercentage: shouldComplete ? 100 : 0,
+          currentTime: shouldComplete ? (movieItem.duration || 0) : 0,
+          updatedAt: new Date().toISOString(),
+        }).catch(err => {
+          addToDirtyQueue({
+            type: 'UPDATE_MOVIE',
+            dedupeKey: `UPDATE_MOVIE_${movieId}`,
+            payload: { id: movieId, userId: targetUserId, data: updatedMovie }
+          });
+        });
+      }
+    } catch (err) {
+      console.error('[MoviesLibrary] Failed to toggle movie watched status:', err);
     }
   };
 
@@ -242,16 +291,13 @@ export default function MoviesLibrary() {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 hover:text-white text-xs font-semibold transition cursor-pointer"
           >
             <ChevronLeft size={16} />
-            <span>Dashboard</span>
+            <span>Home</span>
           </button>
 
           <div className="flex items-center gap-2">
             <h1 className="text-base sm:text-lg font-extrabold tracking-wide text-white">
               Movies Library
             </h1>
-            <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-mono font-bold">
-              {movies.length}
-            </span>
           </div>
         </div>
 
@@ -261,7 +307,7 @@ export default function MoviesLibrary() {
           className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-black text-xs font-extrabold flex items-center gap-1.5 shadow-lg shadow-amber-500/20 transition cursor-pointer active:scale-95"
         >
           <Plus size={15} />
-          <span>Add Movie</span>
+          <span>Add</span>
         </button>
       </header>
 
@@ -509,6 +555,21 @@ export default function MoviesLibrary() {
                           onClick={(e) => {
                             e.stopPropagation();
                             e.preventDefault();
+                            setMovieCompleteConfirm(movie);
+                          }}
+                          className={`p-1.5 rounded-lg border transition cursor-pointer ${isWatched
+                              ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
+                              : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
+                            }`}
+                          title={isWatched ? 'Mark Incomplete' : 'Mark Complete'}
+                        >
+                          <CheckCircle2 size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
                             handleDeleteMovie(movie.id, movie.title);
                           }}
                           className="p-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-300 transition cursor-pointer"
@@ -532,7 +593,7 @@ export default function MoviesLibrary() {
                         <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-0.5" : pct > 0 ? "text-amber-400 font-semibold" : "text-gray-500"}>
                           {isWatched ? (
                             <>
-                              <CheckCircle2 size={10} /> Completed
+                              <CheckCircle2 size={10} /> Watched
                             </>
                           ) : (
                             pct > 0 ? `${pct}%` : 'Unwatched'
@@ -721,6 +782,54 @@ export default function MoviesLibrary() {
           }}
         />
       )}
+
+      {/* ── Movie Complete Confirmation Modal ──────────────────────────────── */}
+      <AnimatePresence>
+        {movieCompleteConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl space-y-4 bg-[#0d1117] text-white text-center"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+                <CheckCircle2 size={24} />
+              </div>
+              <h3 className="text-base font-bold">
+                {movieCompleteConfirm.watched || movieCompleteConfirm.completed || movieCompleteConfirm.watchStatus === 'Completed'
+                  ? 'Mark Movie Incomplete?'
+                  : 'Mark Movie as Completed?'}
+              </h3>
+              <p className="text-xs text-gray-400">
+                {movieCompleteConfirm.watched || movieCompleteConfirm.completed || movieCompleteConfirm.watchStatus === 'Completed'
+                  ? `Reset "${movieCompleteConfirm.title}" progress back to uncompleted.`
+                  : `Mark "${movieCompleteConfirm.title}" as fully watched (100%).`}
+              </p>
+              <div className="flex justify-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setMovieCompleteConfirm(null)}
+                  className="px-4 py-2 rounded-xl bg-white/10 text-xs font-semibold text-gray-300 hover:text-white cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = movieCompleteConfirm;
+                    setMovieCompleteConfirm(null);
+                    handleToggleMovieWatched(target);
+                  }}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 text-black text-xs font-bold cursor-pointer"
+                >
+                  Yes, Confirm
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

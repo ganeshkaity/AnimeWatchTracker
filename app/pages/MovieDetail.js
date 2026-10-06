@@ -1033,7 +1033,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                   title="Stream in Web Browser via Windows Media Server"
                 >
                   <Server size={14} className="text-purple-400" />
-                  <span>Media Server Player</span>
+                  <span>M.S Player</span>
                 </button>
 
                 {/* Option 2: PC's VLC Player */}
@@ -1044,7 +1044,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                   title="Launch directly in PC's desktop VLC Player"
                 >
                   <VLCIcon className="w-4 h-4" />
-                  <span>VLC Player</span>
+                  <span>VLC</span>
                 </button>
               </div>
 
@@ -1219,9 +1219,6 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                 <h2 className="text-sm sm:text-base font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
                   <Video size={17} className="text-rose-400" /> Videos & Trailers
                 </h2>
-                <span className="px-2 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[10px] font-bold">
-                  {movie.videos.length} Available
-                </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <button
@@ -1297,9 +1294,6 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                 <h2 className="text-sm sm:text-base font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
                   <ImageIcon size={17} className="text-cyan-400" /> More Images & Artwork
                 </h2>
-                <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold">
-                  {totalGalleryCount} Images
-                </span>
               </div>
 
               {/* Tabs */}

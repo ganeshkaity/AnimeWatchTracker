@@ -6,7 +6,7 @@ import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { useOffline } from '../context/OfflineContext';
 import {
-  getLocalAnime, upsertLocalAnime,
+  getLocalAnime, upsertLocalAnime, deleteLocalAnime,
   getLocalEpisodes, upsertLocalEpisode, setLocalEpisodes, deleteLocalEpisode,
   addToDirtyQueue, getUserId
 } from '../utils/localStore';
@@ -136,6 +136,10 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   const [fmNewName, setFmNewName] = useState('');
   const [fmMoveTarget, setFmMoveTarget] = useState(null);
   const [fmDestPath, setFmDestPath] = useState('');
+
+  // Delete Folder & Anime confirmation state
+  const [showDeleteFolderConfirm, setShowDeleteFolderConfirm] = useState(false);
+  const [deletingAnime, setDeletingAnime] = useState(false);
 
   // Manual fetch YouTube qualities for player selection modal
   const handleFetchYtModalQualities = useCallback(() => {
@@ -1622,6 +1626,54 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     await handleRescan();
   };
 
+  // Delete this folder & anime from DB (Firestore) and local storage
+  const handleDeleteFolderAndAnime = async () => {
+    if (!anime) return;
+    setDeletingAnime(true);
+    try {
+      const targetUserId = anime.userId || (currentUser ? currentUser.uid : getUserId()) || getUserId();
+
+      // 1. Remove from local store
+      deleteLocalAnime(animeId);
+
+      // 2. Remove from Firestore (subcollection episodes + main anime doc)
+      if (!isOffline && db && targetUserId) {
+        try {
+          const epsSnap = await getDocs(collection(db, 'users', targetUserId, 'anime', animeId, 'episodes'));
+          if (!epsSnap.empty) {
+            const batch = writeBatch(db);
+            epsSnap.forEach((d) => batch.delete(d.ref));
+            await batch.commit().catch((err) => console.warn('Batch delete episodes subcollection warning:', err));
+          }
+        } catch (subErr) {
+          console.warn('Could not query/delete episodes subcollection:', subErr);
+        }
+
+        await deleteDoc(doc(db, 'users', targetUserId, 'anime', animeId));
+      } else {
+        addToDirtyQueue({
+          type: 'DELETE_ANIME',
+          dedupeKey: `DELETE_ANIME_${animeId}`,
+          payload: { id: animeId, userId: targetUserId }
+        });
+      }
+
+      setShowDeleteFolderConfirm(false);
+      setShowFileManagerModal(false);
+
+      // 3. Return to previous page or home
+      if (onBack) {
+        onBack();
+      } else if (typeof window !== 'undefined') {
+        window.location.href = '/';
+      }
+    } catch (err) {
+      console.error('Failed to delete anime folder from db:', err);
+      alert('Error deleting anime from database: ' + (err?.message || err));
+      setDeletingAnime(false);
+    }
+  };
+
   // Poll Next.js proxy API endpoint to check VLC status
   const startPollingVlc = (episode) => {
     if (pollIntervalRef.current) {
@@ -2687,6 +2739,25 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                     )}
                   </div>
                 )}
+
+                {/* 4. Delete Folder & Anime from DB */}
+                <div className="space-y-2 pt-2 border-t border-rose-500/10">
+                  <h4 className="font-semibold text-rose-400 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                    <Trash2 size={12} className="text-rose-400" />
+                    Delete Folder
+                  </h4>
+                  <p className="text-[11px] text-gray-400">
+                    Delete this folder from your library. This will permanently remove this anime and its episodes from Firestore (database).
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteFolderConfirm(true)}
+                    className="w-full py-2.5 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 hover:border-rose-500/50 text-rose-400 hover:text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition shadow-sm"
+                  >
+                    <Trash2 size={14} />
+                    Delete This Folder from DB
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -3718,6 +3789,13 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                   >
                     <RefreshCw size={14} className={fmLoading ? 'animate-spin' : ''} /> Refresh
                   </button>
+                  <button
+                    onClick={() => setShowDeleteFolderConfirm(true)}
+                    className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 border border-rose-500/30 cursor-pointer transition"
+                    title="Delete this entire folder & anime from database"
+                  >
+                    <Trash2 size={14} /> Delete Folder
+                  </button>
                 </div>
               </div>
 
@@ -3890,6 +3968,79 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Delete Folder & Anime Confirmation Modal ──────────────────────── */}
+      <AnimatePresence>
+        {showDeleteFolderConfirm && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.93, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.93, y: 12 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="w-full max-w-md glass-panel p-6 rounded-2xl border border-rose-500/30 shadow-[0_0_50px_rgba(244,63,94,0.18)] relative"
+            >
+              {/* Icon + Title */}
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2.5 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-400">
+                  <Trash2 size={22} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base tracking-wide">Delete Folder & Anime?</h3>
+                  <p className="text-[11px] text-rose-400 font-semibold mt-0.5">Permanent Database Action</p>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="bg-rose-950/20 border border-rose-500/20 rounded-xl p-4 mb-5 space-y-3">
+                <p className="text-sm text-gray-300 leading-relaxed">
+                  Are you sure you want to delete this folder from your library?
+                </p>
+                <div className="bg-black/40 rounded-lg p-2.5 border border-white/5 space-y-1">
+                  <div className="text-xs font-bold text-white truncate">{anime?.title}</div>
+                  <div className="text-[10px] text-gray-400 font-mono break-all line-clamp-2">{anime?.folderPath}</div>
+                </div>
+                <p className="text-xs text-rose-300/90 leading-relaxed flex items-start gap-1.5">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-400" />
+                  <span>
+                    This will delete this anime and all tracked progress ({episodes.length} episodes) from <strong>Firestore database</strong> and local cache. Local media files on your disk will NOT be erased.
+                  </span>
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  disabled={deletingAnime}
+                  onClick={() => setShowDeleteFolderConfirm(false)}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:bg-white/10 text-xs font-bold uppercase tracking-wider cursor-pointer transition disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deletingAnime}
+                  onClick={handleDeleteFolderAndAnime}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold uppercase tracking-wider cursor-pointer transition shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {deletingAnime ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={14} />
+                      Yes, Delete Folder
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
           </div>
         )}
       </AnimatePresence>

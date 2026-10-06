@@ -1207,12 +1207,12 @@ export default function Dashboard({ onSelectAnime }) {
     );
   }, [movies, search]);
 
-  // Auto Hero Slider Timer
+  // Auto Hero Slider Timer (Advances every 20 seconds)
   useEffect(() => {
     const timer = setInterval(() => {
       setSlideDirection(1);
       setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
-    }, 11000);
+    }, 20000);
     return () => clearInterval(timer);
   }, [heroSlides.length]);
 
@@ -3062,6 +3062,44 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
+  const handleSectionJump = (sectionId) => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.history.pushState(null, '', `#${sectionId}`);
+    } catch (e) {}
+
+    const targetElement = document.getElementById(sectionId) ||
+      (sectionId === 'manga' ? document.getElementById('manga-webtoons') : null) ||
+      (sectionId === 'audios' ? document.getElementById('audio-stories') : null) ||
+      (sectionId === 'anime' ? document.getElementById('catalog') : null);
+
+    if (targetElement) {
+      const headerOffset = 80;
+      const elementPosition = targetElement.getBoundingClientRect().top;
+      const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: 'smooth'
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const initialHash = window.location.hash.replace('#', '');
+    if (['anime', 'movies', 'manga', 'audios', 'manga-webtoons', 'audio-stories', 'catalog'].includes(initialHash)) {
+      setTimeout(() => {
+        handleSectionJump(initialHash);
+      }, 400);
+    }
+    const handleHash = () => {
+      const h = window.location.hash.replace('#', '');
+      if (h) handleSectionJump(h);
+    };
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
   const currentHero = heroSlides[currentSlide] || heroSlides[0];
 
   return (
@@ -3094,16 +3132,26 @@ export default function Dashboard({ onSelectAnime }) {
 
         {/* Right Actions & Search */}
         <div className="flex items-center gap-3">
-          {/* Quick Search Input */}
-          <div className="relative hidden md:block w-56 lg:w-72">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white pointer-events-none" size={16} />
+          {/* Quick Search Input with Liquid-Glass Effect */}
+          <div className="relative hidden md:block w-56 lg:w-72 group">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/80 group-hover:text-white group-focus-within:text-cyan-400 pointer-events-none z-10 transition-colors drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]" size={16} />
             <input
               type="text"
               placeholder="Search titles or names..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 text-xs rounded-full glass-input placeholder-gray-500 focus:w-80 transition-all duration-300"
+              className="w-full pl-10 pr-9 py-2 text-xs rounded-full liquid-glass-search placeholder-gray-400/80 focus:w-80 transition-all duration-300"
             />
+            {search.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white transition cursor-pointer z-10"
+                title="Clear search"
+              >
+                <X size={12} />
+              </button>
+            )}
             {/* Search Recommendations Dropdown */}
             {search.trim().length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-2 bg-[#111827]/95 backdrop-blur-md border border-white/10 rounded-2xl shadow-2xl z-50 max-h-96 overflow-y-auto no-scrollbar">
@@ -3624,14 +3672,14 @@ export default function Dashboard({ onSelectAnime }) {
                   <span className="text-[11px] font-black uppercase tracking-wider text-pink-400 flex items-center gap-1.5">
                     <Search size={14} /> Catalog Search
                   </span>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                  <div className="relative group">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-cyan-300/80 group-hover:text-white group-focus-within:text-cyan-400 z-10 pointer-events-none transition-colors drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]" size={16} />
                     <input
                       type="text"
                       placeholder="Search title..."
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      className="w-full pl-9 pr-4 py-2.5 text-xs rounded-xl glass-input"
+                      className="w-full pl-9 pr-4 py-2.5 text-xs rounded-xl liquid-glass-search placeholder-gray-400/80"
                     />
                     {/* Live Autocomplete Matches */}
                     {search.trim().length > 0 && (
@@ -3753,31 +3801,31 @@ export default function Dashboard({ onSelectAnime }) {
                     Quick Jump
                   </span>
                   <nav className="flex flex-col gap-1 text-xs font-semibold text-gray-300">
-                    <a href="#hero" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
+                    <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('hero'); }} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition text-left cursor-pointer w-full">
                       <Sparkles size={15} className="text-[#a855f7]" /> Spotlight Hero
-                    </a>
-                    <a href="#continue-watching" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
+                    </button>
+                    <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('continue-watching'); }} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition text-left cursor-pointer w-full">
                       <Play size={15} className="text-[#7c5cff]" /> Continue Watching
-                    </a>
-                    <a href="#trending" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
+                    </button>
+                    <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('trending'); }} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition text-left cursor-pointer w-full">
                       <Flame size={15} className="text-amber-400" /> Trending Today
-                    </a>
-                    <a href="#manga-webtoons" onClick={() => setMobileMenuOpen(false)} className="hover:text-purple-400 p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
+                    </button>
+                    <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('manga'); }} className="hover:text-purple-400 p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition text-left cursor-pointer w-full">
                       <BookOpen size={15} className="text-purple-400" /> Manga / Webtoons
-                    </a>
-                    <a href="#audio-stories" onClick={() => setMobileMenuOpen(false)} className="hover:text-cyan-400 p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
+                    </button>
+                    <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('audios'); }} className="hover:text-cyan-400 p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition text-left cursor-pointer w-full">
                       <Headphones size={15} className="text-cyan-400" /> Audio Stories
-                    </a>
-                    <a href="#movies" onClick={() => setMobileMenuOpen(false)} className="hover:text-amber-400 p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition">
+                    </button>
+                    <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('movies'); }} className="hover:text-amber-400 p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition text-left cursor-pointer w-full">
                       <span className="flex items-center gap-2"><Film size={15} className="text-amber-400" /> Movies Section</span>
-                    </a>
+                    </button>
                     <Link href="/movies" onClick={() => setMobileMenuOpen(false)} className="hover:text-amber-400 p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition">
                       <span className="flex items-center gap-2"><Sparkles size={15} className="text-amber-400" /> All Movies (Library)</span>
                       <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">See All</span>
                     </Link>
-                    <a href="#catalog" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
-                      <Tv size={15} className="text-cyan-400" /> Local Catalog
-                    </a>
+                    <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('anime'); }} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition text-left cursor-pointer w-full">
+                      <Tv size={15} className="text-cyan-400" /> Anime Catalog
+                    </button>
                     <Link href="/notes" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
                       <StickyNote size={15} className="text-emerald-400" /> Personal Notes
                     </Link>
@@ -3944,14 +3992,26 @@ export default function Dashboard({ onSelectAnime }) {
             transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
             className="absolute inset-0 z-10 flex items-end justify-between"
           >
-            {/* Background Image: Soft blur for movies, crisp sharp for anime/manga/audio */}
-            <div
-              className={`absolute inset-0 z-0 bg-cover bg-center transition-all duration-700 ${currentHero.isMovie
-                  ? 'filter blur-[4px] scale-105 brightness-110 saturate-[1.2]'
-                  : 'filter blur-none scale-100 brightness-105 saturate-[1.1]'
-                }`}
-              style={{ backgroundImage: `url(${currentHero.banner})` }}
-            />
+            {/* Background Image: Crisp movie poster on mobile; soft blurred backdrop on desktop for movies; crisp sharp for anime/manga/audio */}
+            {currentHero.isMovie ? (
+              <>
+                {/* Mobile Movie Banner: Crisp, sharp movie poster matching anime/manga banner style without blur */}
+                <div
+                  className="md:hidden absolute inset-0 z-0 bg-cover bg-center filter blur-none scale-100 brightness-105 saturate-[1.1] transition-all duration-700"
+                  style={{ backgroundImage: `url(${currentHero.poster || currentHero.banner})` }}
+                />
+                {/* Desktop Movie Banner: Blurred backdrop with right-side tilted poster */}
+                <div
+                  className="hidden md:block absolute inset-0 z-0 bg-cover bg-center filter blur-[4px] scale-105 brightness-110 saturate-[1.2] transition-all duration-700"
+                  style={{ backgroundImage: `url(${currentHero.banner})` }}
+                />
+              </>
+            ) : (
+              <div
+                className="absolute inset-0 z-0 bg-cover bg-center filter blur-none scale-100 brightness-105 saturate-[1.1] transition-all duration-700"
+                style={{ backgroundImage: `url(${currentHero.banner})` }}
+              />
+            )}
 
             {/* Top Dark Vignette (Prime Video Style - deep dark gradient behind fixed navbar) */}
             <div
@@ -4175,6 +4235,123 @@ export default function Dashboard({ onSelectAnime }) {
 
       {/* MAIN BODY LAYOUT */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-14">
+
+        {/* 3. MEDIA FORMAT QUICK NAVIGATION (ANIME, MOVIES, MANGA, AUDIOS) */}
+        <section id="media-categories" className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Compass size={18} className="text-[#7c5cff]" />
+              <h2 className="text-xs sm:text-sm font-extrabold tracking-wider uppercase text-gray-300">
+                Browse by Category
+              </h2>
+            </div>
+            <span className="text-[11px] text-gray-400 font-medium hidden sm:inline">
+              Jump directly to library sections
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 md:gap-5">
+            {/* 1. ANIME */}
+            <button
+              type="button"
+              onClick={() => handleSectionJump('anime')}
+              className="group relative flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] hover:from-[#7c5cff]/20 hover:to-indigo-950/40 border border-white/10 hover:border-[#7c5cff]/50 backdrop-blur-md shadow-lg hover:shadow-[0_8px_30px_rgba(124,92,255,0.25)] transition-all duration-300 hover:-translate-y-1 active:scale-[0.98] text-left cursor-pointer overflow-hidden"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-tr from-[#7c5cff] to-indigo-500 flex items-center justify-center text-white shadow-md shadow-[#7c5cff]/30 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300 flex-shrink-0">
+                  <Tv size={20} />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-sm sm:text-base font-extrabold text-white tracking-wide block group-hover:text-purple-300 transition-colors">
+                    Anime
+                  </span>
+                  <span className="text-[11px] text-gray-400 group-hover:text-purple-200/80 font-medium block truncate">
+                    {animes.length} Series
+                  </span>
+                </div>
+              </div>
+              <div className="w-7 h-7 rounded-full bg-white/5 group-hover:bg-[#7c5cff]/30 flex items-center justify-center text-gray-400 group-hover:text-white transition-all flex-shrink-0">
+                <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#7c5cff] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+
+            {/* 2. MOVIES */}
+            <button
+              type="button"
+              onClick={() => handleSectionJump('movies')}
+              className="group relative flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] hover:from-amber-500/20 hover:to-rose-950/40 border border-white/10 hover:border-amber-500/50 backdrop-blur-md shadow-lg hover:shadow-[0_8px_30px_rgba(245,158,11,0.25)] transition-all duration-300 hover:-translate-y-1 active:scale-[0.98] text-left cursor-pointer overflow-hidden"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-tr from-amber-500 to-rose-600 flex items-center justify-center text-black font-extrabold shadow-md shadow-amber-500/30 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300 flex-shrink-0">
+                  <Film size={20} />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-sm sm:text-base font-extrabold text-white tracking-wide block group-hover:text-amber-300 transition-colors">
+                    Movies
+                  </span>
+                  <span className="text-[11px] text-gray-400 group-hover:text-amber-200/80 font-medium block truncate">
+                    {movies.length} Films
+                  </span>
+                </div>
+              </div>
+              <div className="w-7 h-7 rounded-full bg-white/5 group-hover:bg-amber-500/30 flex items-center justify-center text-gray-400 group-hover:text-white transition-all flex-shrink-0">
+                <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+
+            {/* 3. MANGA */}
+            <button
+              type="button"
+              onClick={() => handleSectionJump('manga')}
+              className="group relative flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] hover:from-pink-500/20 hover:to-purple-950/40 border border-white/10 hover:border-pink-500/50 backdrop-blur-md shadow-lg hover:shadow-[0_8px_30px_rgba(236,72,153,0.25)] transition-all duration-300 hover:-translate-y-1 active:scale-[0.98] text-left cursor-pointer overflow-hidden"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-tr from-pink-500 to-purple-600 flex items-center justify-center text-white shadow-md shadow-pink-500/30 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300 flex-shrink-0">
+                  <BookOpen size={20} />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-sm sm:text-base font-extrabold text-white tracking-wide block group-hover:text-pink-300 transition-colors">
+                    Manga
+                  </span>
+                  <span className="text-[11px] text-gray-400 group-hover:text-pink-200/80 font-medium block truncate">
+                    {mangas.length} Webtoons
+                  </span>
+                </div>
+              </div>
+              <div className="w-7 h-7 rounded-full bg-white/5 group-hover:bg-pink-500/30 flex items-center justify-center text-gray-400 group-hover:text-white transition-all flex-shrink-0">
+                <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-pink-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+
+            {/* 4. AUDIOS */}
+            <button
+              type="button"
+              onClick={() => handleSectionJump('audios')}
+              className="group relative flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] hover:from-cyan-500/20 hover:to-blue-950/40 border border-white/10 hover:border-cyan-500/50 backdrop-blur-md shadow-lg hover:shadow-[0_8px_30px_rgba(6,182,212,0.25)] transition-all duration-300 hover:-translate-y-1 active:scale-[0.98] text-left cursor-pointer overflow-hidden"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/30 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300 flex-shrink-0">
+                  <Headphones size={20} />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-sm sm:text-base font-extrabold text-white tracking-wide block group-hover:text-cyan-300 transition-colors">
+                    Audios
+                  </span>
+                  <span className="text-[11px] text-gray-400 group-hover:text-cyan-200/80 font-medium block truncate">
+                    {audioStories.length} Stories
+                  </span>
+                </div>
+              </div>
+              <div className="w-7 h-7 rounded-full bg-white/5 group-hover:bg-cyan-500/30 flex items-center justify-center text-gray-400 group-hover:text-white transition-all flex-shrink-0">
+                <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+          </div>
+        </section>
 
 
         {/* 4. CONTINUE WATCHING, READING & LISTENING (USER'S ACTIVE TRACKED ANIME, MANGA & AUDIO) */}
@@ -4660,7 +4837,8 @@ export default function Dashboard({ onSelectAnime }) {
         )}
 
         {/* MANGA OR WEBTOONS SECTION */}
-        <section id="manga-webtoons" className="space-y-4">
+        <section id="manga" className="space-y-4 scroll-mt-24">
+          <span id="manga-webtoons" className="sr-only" />
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
@@ -4823,7 +5001,8 @@ export default function Dashboard({ onSelectAnime }) {
         </section>
 
         {/* AUDIO STORIES SECTION */}
-        <section id="audio-stories" className="space-y-4">
+        <section id="audios" className="space-y-4 scroll-mt-24">
+          <span id="audio-stories" className="sr-only" />
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
@@ -4832,23 +5011,11 @@ export default function Dashboard({ onSelectAnime }) {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-xl font-extrabold tracking-wide text-white">Audio Stories</h2>
-                  <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-[10px] font-mono font-bold">
-                    {sortedAudioStories.length}
-                  </span>
                 </div>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowAddAudioStoryModal(true)}
-                className="px-3 py-1.5 rounded-xl bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/30 text-cyan-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-              >
-                <Plus size={14} />
-                <span className="hidden sm:inline">Add Audio</span>
-              </button>
-
               {sortedAudioStories.length > 0 && (
                 <>
                   <button
@@ -4986,7 +5153,7 @@ export default function Dashboard({ onSelectAnime }) {
         </section>
 
         {/* MOVIES SECTION */}
-        <section id="movies" className="space-y-4">
+        <section id="movies" className="space-y-4 scroll-mt-24">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
@@ -4995,9 +5162,6 @@ export default function Dashboard({ onSelectAnime }) {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-xl font-extrabold tracking-wide text-white">Movies</h2>
-                  <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-mono font-bold">
-                    {sortedMovies.length}
-                  </span>
                 </div>
               </div>
             </div>
@@ -5005,20 +5169,11 @@ export default function Dashboard({ onSelectAnime }) {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setShowAddMovieModal(true)}
-                className="px-3 py-1.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-              >
-                <Plus size={14} />
-                <span className="hidden sm:inline">Add</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={() => router.push('/movies')}
                 className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
                 title="View All Movies in Library"
               >
-                <span>See All</span>
+                <span>All</span>
                 <ChevronRight size={14} />
               </button>
 
@@ -5047,18 +5202,18 @@ export default function Dashboard({ onSelectAnime }) {
 
           {loadingMovies ? (
             /* Hardcoded same-sized skeleton loader (6 items matching exact width & height of movie cards) */
-            <div className="flex gap-4 overflow-x-auto no-scrollbar py-2">
+            <div className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2">
               {[1, 2, 3, 4, 5, 6].map((i) => (
                 <div
                   key={`movie-skeleton-${i}`}
-                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden border border-white/5 bg-[#0f141f]/70 animate-pulse flex flex-col justify-between"
+                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden border border-white/5 bg-[#0f141f]/70 animate-pulse flex flex-col self-start"
                 >
-                  <div className="relative h-60 md:h-64 bg-white/[0.04] overflow-hidden">
+                  <div className="relative aspect-[2/3] bg-white/[0.04] overflow-hidden">
                     <div className="absolute inset-0 bg-gradient-to-t from-[#07090f] via-transparent to-transparent opacity-80" />
                     <div className="absolute top-2 left-2 w-14 h-4 rounded-lg bg-white/10" />
                     <div className="absolute top-2 right-2 w-10 h-4 rounded-lg bg-amber-500/20" />
                   </div>
-                  <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30 space-y-2">
+                  <div className="p-3 bg-white/[0.03] space-y-2">
                     <div className="h-4 bg-white/10 rounded-md w-4/5" />
                     <div className="flex justify-between items-center pt-1">
                       <div className="h-3 bg-white/5 rounded w-16" />
@@ -5092,7 +5247,7 @@ export default function Dashboard({ onSelectAnime }) {
             /* Horizontal Slider (X-Axis Scrollable - Max 10 on Home) */
             <div
               ref={movieScrollRef}
-              className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+              className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
             >
               {sortedMovies.slice(0, 10).map((movie) => {
                 const isWatched = Boolean(movie.watched || movie.completed || movie.watchStatus === 'Completed' || (movie.watchProgress && movie.watchProgress >= 95));
@@ -5105,9 +5260,9 @@ export default function Dashboard({ onSelectAnime }) {
                   <div
                     key={`movie-${movie.id}`}
                     onClick={() => router.push(`/movies/${movie.id}`)}
-                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-xl relative"
+                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-xl relative self-start"
                   >
-                    <div className="relative h-60 md:h-64 overflow-hidden bg-[#181c24] flex items-center justify-center">
+                    <div className="relative aspect-[2/3] overflow-hidden bg-[#181c24] flex items-center justify-center">
                       {coverImg ? (
                         <CachedImage
                           src={coverImg}
@@ -5209,7 +5364,7 @@ export default function Dashboard({ onSelectAnime }) {
                       </div>
                     </div>
 
-                    <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
+                    <div className="p-3 bg-white/[0.03]">
                       <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-amber-300 transition-colors">
                         {movie.title}
                       </h4>
@@ -5241,18 +5396,20 @@ export default function Dashboard({ onSelectAnime }) {
               {sortedMovies.length > 10 && (
                 <div
                   onClick={() => router.push('/movies')}
-                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col items-center justify-center border border-white/10 hover:border-amber-500/50 p-6 text-center space-y-3 transition shadow-md hover:shadow-xl bg-amber-950/10 hover:bg-amber-950/20 min-h-[300px]"
+                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col border border-white/10 hover:border-amber-500/50 transition shadow-md hover:shadow-xl bg-amber-950/10 hover:bg-amber-950/20 self-start"
                 >
-                  <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-300 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Film size={24} />
+                  <div className="aspect-[2/3] flex flex-col items-center justify-center p-6 text-center space-y-3">
+                    <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-300 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <Film size={24} />
+                    </div>
+                    <div>
+                      <span className="text-sm font-bold text-white block">See All Movies</span>
+                      <span className="text-xs text-amber-400/80 font-mono mt-0.5 block">{movies.length} total</span>
+                    </div>
+                    <span className="px-3 py-1.5 rounded-xl bg-amber-500 text-black text-xs font-extrabold flex items-center gap-1 group-hover:bg-amber-400 transition">
+                      View All <ChevronRight size={14} />
+                    </span>
                   </div>
-                  <div>
-                    <span className="text-sm font-bold text-white block">See All Movies</span>
-                    <span className="text-xs text-amber-400/80 font-mono mt-0.5 block">{movies.length} total</span>
-                  </div>
-                  <span className="px-3 py-1.5 rounded-xl bg-amber-500 text-black text-xs font-extrabold flex items-center gap-1 group-hover:bg-amber-400 transition">
-                    View All <ChevronRight size={14} />
-                  </span>
                 </div>
               )}
             </div>
@@ -5667,7 +5824,8 @@ export default function Dashboard({ onSelectAnime }) {
 
 
         {/* 9. LATEST RELEASES & LOCAL LIBRARY CATALOG */}
-        <section id="catalog" className="space-y-6 pt-4">
+        <section id="anime" className="space-y-6 pt-4 scroll-mt-24">
+          <span id="catalog" className="sr-only" />
           {/* Header Controls Panel */}
           <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center glass-panel p-4 md:p-6 rounded-3xl border border-white/10">
             <div>
