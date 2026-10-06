@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Loader2, Download, Check, ExternalLink, X, BookOpen, Image as ImageIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toFanartPreview, toFanartFull } from '../lib/fanartUtils';
 
 export default function MangaCoverSearch({
   initialQuery = '',
@@ -91,7 +92,7 @@ export default function MangaCoverSearch({
     if (!item?.imageUrl) return;
     // Direct link saving without uploading to ImgBB
     if (onSelectCover) {
-      onSelectCover(item.imageUrl);
+      onSelectCover(toFanartFull(item.imageUrl));
     }
     if (onClose) {
       onClose();
@@ -230,7 +231,7 @@ export default function MangaCoverSearch({
                     {/* Poster */}
                     <div className="relative aspect-[3/4] w-full overflow-hidden bg-black/60">
                       <img
-                        src={item.imageUrl}
+                        src={toFanartPreview(item.imageUrl)}
                         alt={item.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />

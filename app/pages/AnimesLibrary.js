@@ -18,6 +18,7 @@ import {
 } from '../utils/localStore';
 import AnimeCoverSearch from '../components/AnimeCoverSearch';
 import CachedImage from '../utils/imageCache';
+import { toFanartPreview, toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 
 const GENRES_LIST = [
   "All", "Action", "Adventure", "Comedy", "Crime", "Demons", "Detective", "Drama",
@@ -76,6 +77,17 @@ const getAnimeProgressPercent = (anime) => {
   return Math.round(anime.progressPercent || 0);
 };
 
+let persistedAnimeVisibleCount = 0;
+
+const getAnimeInitialScreenCount = () => {
+  if (typeof window === 'undefined') return 12;
+  const w = window.innerWidth;
+  if (w < 640) return 6;   // mobile: 2 cols x 3 rows = 6 cards
+  if (w < 768) return 9;   // sm: 3 cols x 3 rows = 9 cards
+  if (w < 1024) return 12; // md: 4 cols x 3 rows = 12 cards
+  return 15;               // lg+: 5 cols x 3 rows = 15 cards
+};
+
 export default function AnimesLibrary() {
   const router = useRouter();
   const { currentUser } = useAuth();
@@ -88,6 +100,33 @@ export default function AnimesLibrary() {
     return [];
   });
   const [loading, setLoading] = useState(false);
+
+  // Progressive loading & screen-filling card count state with session persistence
+  const [visibleCount, setVisibleCount] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = sessionStorage.getItem('watchanime_anime_lib_visible_count');
+        const parsed = stored ? parseInt(stored, 10) : 0;
+        const saved = Math.max(parsed || 0, persistedAnimeVisibleCount || 0);
+        if (saved > 0) return saved;
+      } catch (e) {}
+      return getAnimeInitialScreenCount();
+    }
+    return 12;
+  });
+
+  const loadMoreRef = useRef(null);
+  const isLoadingMoreRef = useRef(false);
+
+  // Persist visibleCount to module and sessionStorage so re-opening library retains all loaded cards
+  useEffect(() => {
+    if (visibleCount > 0) {
+      persistedAnimeVisibleCount = visibleCount;
+      try {
+        sessionStorage.setItem('watchanime_anime_lib_visible_count', String(visibleCount));
+      } catch (e) {}
+    }
+  }, [visibleCount]);
 
   // Search & Filter State
   const [search, setSearch] = useState('');
@@ -491,6 +530,37 @@ export default function AnimesLibrary() {
     setSearch('');
   };
 
+  // Reset lock when visibleCount updates
+  useEffect(() => {
+    isLoadingMoreRef.current = false;
+  }, [visibleCount]);
+
+  // Infinite scroll observer to progressively load more cards as user scrolls down
+  useEffect(() => {
+    if (visibleCount >= filteredAndSortedAnimes.length) return;
+    const target = loadMoreRef.current;
+    if (!target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !isLoadingMoreRef.current) {
+          isLoadingMoreRef.current = true;
+          setVisibleCount((prev) => prev + getAnimeInitialScreenCount());
+        }
+      },
+      { rootMargin: '350px' }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [visibleCount, filteredAndSortedAnimes.length]);
+
+  const displayedAnimes = useMemo(() => {
+    return filteredAndSortedAnimes.slice(0, visibleCount);
+  }, [filteredAndSortedAnimes, visibleCount]);
+
+  const skeletonCount = Math.max(visibleCount || 0, getAnimeInitialScreenCount());
+
   return (
     <div className="min-h-screen bg-[#07090f] text-white flex flex-col selection:bg-[#7c5cff] selection:text-white">
       {/* ── Sticky Navigation Header ────────────────────────────────────────── */}
@@ -654,8 +724,27 @@ export default function AnimesLibrary() {
       <main className="max-w-7xl w-full mx-auto px-4 md:px-8 pb-16 flex-1">
         {loading ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((idx) => (
-              <div key={idx} className="h-72 rounded-2xl bg-white/5 shimmer border border-white/5" />
+            {Array.from({ length: skeletonCount }).map((_, idx) => (
+              <div
+                key={`anime-skel-${idx}`}
+                className="h-72 glass-card rounded-2xl flex flex-col justify-between overflow-hidden border border-white/5 bg-[#111827]/40"
+              >
+                {/* Poster skeleton */}
+                <div className="h-44 relative bg-white/[0.04] shimmer overflow-hidden flex items-center justify-center">
+                  <div className="absolute top-2.5 left-2.5 w-14 h-4 rounded bg-white/10" />
+                </div>
+                {/* Details skeleton */}
+                <div className="p-3.5 flex flex-col justify-between flex-1 bg-[#111827]/40 space-y-2">
+                  <div>
+                    <div className="h-3.5 w-3/4 rounded bg-white/10 shimmer" />
+                    <div className="h-2.5 w-1/2 rounded bg-white/5 shimmer mt-2" />
+                  </div>
+                  <div className="flex justify-between items-center pt-2">
+                    <div className="h-2.5 w-1/3 rounded bg-white/10 shimmer" />
+                    <div className="h-2.5 w-8 rounded bg-white/10 shimmer" />
+                  </div>
+                </div>
+              </div>
             ))}
           </div>
         ) : filteredAndSortedAnimes.length === 0 ? (
@@ -696,7 +785,7 @@ export default function AnimesLibrary() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
             {/* STRICTLY PRESERVED ANIME CARD STYLINGS AND UIS */}
-            {filteredAndSortedAnimes.map((anime) => (
+            {displayedAnimes.map((anime) => (
               <div
                 key={anime.id}
                 onClick={() => router.push(`/${anime.id}`)}
@@ -706,7 +795,7 @@ export default function AnimesLibrary() {
                 <div className="h-44 relative overflow-hidden bg-[#181c24] flex items-center justify-center">
                   {anime.thumbnailBase64 ? (
                     <CachedImage
-                      src={anime.thumbnailBase64}
+                      src={toFanartBigPreview(anime.thumbnailBase64)}
                       alt={anime.title}
                       className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
@@ -821,6 +910,16 @@ export default function AnimesLibrary() {
                 </div>
               </div>
             ))}
+
+            {/* Infinite Scroll Sentinel */}
+            {visibleCount < filteredAndSortedAnimes.length && (
+              <div ref={loadMoreRef} className="col-span-full py-8 flex justify-center items-center">
+                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 text-xs text-gray-400 backdrop-blur-md">
+                  <Loader2 size={15} className="animate-spin text-[#7c5cff]" />
+                  <span>Loading more anime...</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
@@ -1264,7 +1363,7 @@ export default function AnimesLibrary() {
                               return (
                                 <div
                                   key={ban.url || idx}
-                                  onClick={() => setEditBannerUrl(ban.url)}
+                                  onClick={() => setEditBannerUrl(toFanartFull(ban.url))}
                                   className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
                                     isSelected
                                       ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
@@ -1272,7 +1371,7 @@ export default function AnimesLibrary() {
                                   }`}
                                 >
                                   <img
-                                    src={ban.url}
+                                    src={toFanartPreview(ban.url)}
                                     alt={`Banner ${idx + 1}`}
                                     className="w-full h-full object-cover"
                                   />
@@ -1414,7 +1513,7 @@ export default function AnimesLibrary() {
                                   return (
                                     <div
                                       key={logo.url || idx}
-                                      onClick={() => setEditLogoUrl(logo.url)}
+                                      onClick={() => setEditLogoUrl(toFanartFull(logo.url))}
                                       className={`relative h-20 p-2 rounded-xl bg-white/[0.04] border flex items-center justify-center cursor-pointer transition ${
                                         isSelected
                                           ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)] bg-purple-500/10'
@@ -1422,7 +1521,7 @@ export default function AnimesLibrary() {
                                       }`}
                                     >
                                       <img
-                                        src={logo.url}
+                                        src={toFanartPreview(logo.url)}
                                         alt={`Logo ${idx + 1}`}
                                         className="max-h-14 w-auto max-w-full object-contain filter drop-shadow-md"
                                       />

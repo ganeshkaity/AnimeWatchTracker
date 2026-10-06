@@ -321,24 +321,24 @@ async function fetchTmdbMedia(query, apiKey) {
           type: 'tv',
           logos: Array.isArray(imgData.logos)
             ? imgData.logos.slice(0, 15).map((img) => ({
-                url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
-                width: img.width,
-                height: img.height,
-              }))
+              url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
+              width: img.width,
+              height: img.height,
+            }))
             : [],
           backdrops: Array.isArray(imgData.backdrops)
             ? imgData.backdrops.slice(0, 20).map((img) => ({
-                url: `https://image.tmdb.org/t/p/original${img.file_path}`,
-                width: img.width,
-                height: img.height,
-              }))
+              url: `https://image.tmdb.org/t/p/original${img.file_path}`,
+              width: img.width,
+              height: img.height,
+            }))
             : [],
           posters: Array.isArray(imgData.posters)
             ? imgData.posters.slice(0, 20).map((img) => ({
-                url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
-                width: img.width,
-                height: img.height,
-              }))
+              url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
+              width: img.width,
+              height: img.height,
+            }))
             : [],
         };
       }
@@ -364,24 +364,24 @@ async function fetchTmdbMedia(query, apiKey) {
           type: 'movie',
           logos: Array.isArray(imgData.logos)
             ? imgData.logos.slice(0, 15).map((img) => ({
-                url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
-                width: img.width,
-                height: img.height,
-              }))
+              url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
+              width: img.width,
+              height: img.height,
+            }))
             : [],
           backdrops: Array.isArray(imgData.backdrops)
             ? imgData.backdrops.slice(0, 20).map((img) => ({
-                url: `https://image.tmdb.org/t/p/original${img.file_path}`,
-                width: img.width,
-                height: img.height,
-              }))
+              url: `https://image.tmdb.org/t/p/original${img.file_path}`,
+              width: img.width,
+              height: img.height,
+            }))
             : [],
           posters: Array.isArray(imgData.posters)
             ? imgData.posters.slice(0, 20).map((img) => ({
-                url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
-                width: img.width,
-                height: img.height,
-              }))
+              url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
+              width: img.width,
+              height: img.height,
+            }))
             : [],
         };
       }

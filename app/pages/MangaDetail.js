@@ -23,6 +23,7 @@ import{
 import { motion, AnimatePresence } from 'framer-motion';
 import MangaCoverSearch from '../components/MangaCoverSearch';
 import { getSubfolder } from '../utils/parser';
+import { toFanartPreview, toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 
 const GENRES_LIST = [
   "All", "Action", "Adventure", "Comedy", "Crime", "Demons", "Detective", "Drama", 
@@ -2142,7 +2143,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
               <img
                 src={
                   manga?.bannerUrl
-                    ? (manga.bannerUrl.startsWith('http') || manga.bannerUrl.startsWith('data:') ? manga.bannerUrl : `/api/image?path=${encodeURIComponent(manga.bannerUrl)}`)
+                    ? (manga.bannerUrl.startsWith('http') || manga.bannerUrl.startsWith('data:') ? toFanartFull(manga.bannerUrl) : `/api/image?path=${encodeURIComponent(manga.bannerUrl)}`)
                     : mangaCoverImg
                 }
                 alt=""
@@ -2197,7 +2198,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                 {manga?.logoUrl ? (
                   <div className="h-14 sm:h-16 flex items-center mb-1">
                     <img
-                      src={manga.logoUrl.startsWith('http') || manga.logoUrl.startsWith('data:') ? manga.logoUrl : `/api/image?path=${encodeURIComponent(manga.logoUrl)}`}
+                      src={manga.logoUrl.startsWith('http') || manga.logoUrl.startsWith('data:') ? toFanartBigPreview(manga.logoUrl) : `/api/image?path=${encodeURIComponent(manga.logoUrl)}`}
                       alt={manga.title}
                       className="max-h-14 sm:max-h-16 w-auto object-contain filter drop-shadow-lg"
                     />
@@ -3313,7 +3314,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                               return (
                                 <div
                                   key={ban.url || idx}
-                                  onClick={() => setEditBannerUrl(ban.url)}
+                                  onClick={() => setEditBannerUrl(toFanartFull(ban.url))}
                                   className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
                                     isSelected
                                       ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
@@ -3321,7 +3322,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                                   }`}
                                 >
                                   <img
-                                    src={ban.url}
+                                    src={toFanartPreview(ban.url)}
                                     alt={`Banner ${idx + 1}`}
                                     className="w-full h-full object-cover"
                                   />
@@ -3463,7 +3464,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                                   return (
                                     <div
                                       key={logo.url || idx}
-                                      onClick={() => setEditLogoUrl(logo.url)}
+                                      onClick={() => setEditLogoUrl(toFanartFull(logo.url))}
                                       className={`relative h-20 p-2 rounded-xl bg-white/[0.04] border flex items-center justify-center cursor-pointer transition ${
                                         isSelected
                                           ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)] bg-purple-500/10'
@@ -3471,7 +3472,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
                                       }`}
                                     >
                                       <img
-                                        src={logo.url}
+                                        src={toFanartPreview(logo.url)}
                                         alt={`Logo ${idx + 1}`}
                                         className="max-h-14 w-auto max-w-full object-contain filter drop-shadow-md"
                                       />

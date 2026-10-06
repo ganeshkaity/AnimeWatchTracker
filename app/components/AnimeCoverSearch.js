@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Loader2, Download, Check, ExternalLink, X, Sparkles, Image as ImageIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toFanartPreview, toFanartFull } from '../lib/fanartUtils';
 
 export default function AnimeCoverSearch({
   initialQuery = '',
@@ -91,7 +92,7 @@ export default function AnimeCoverSearch({
     if (!item?.imageUrl) return;
     // Direct link saving without uploading to ImgBB
     if (onSelectCover) {
-      onSelectCover(item.imageUrl);
+      onSelectCover(toFanartFull(item.imageUrl || item.thumbnailUrl));
     }
   };
 
@@ -237,7 +238,7 @@ export default function AnimeCoverSearch({
               >
                 {/* Poster Image */}
                 <img
-                  src={item.thumbnailUrl || item.imageUrl}
+                  src={toFanartPreview(item.thumbnailUrl || item.imageUrl)}
                   alt={item.title}
                   loading="lazy"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"

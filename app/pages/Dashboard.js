@@ -33,6 +33,7 @@ import MangaCoverSearch from '../components/MangaCoverSearch';
 import AddMovieModal from '../components/AddMovieModal';
 import EditMovieModal from '../components/EditMovieModal';
 import CachedImage from '../utils/imageCache';
+import { toFanartPreview, toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 
 const GRADIENTS = [
   "from-violet-600 to-indigo-700",
@@ -86,6 +87,12 @@ export const getAnimeProgressPercent = (anime) => {
   return Math.round(anime.progressPercent || 0);
 };
 
+const resolveHeroImg = (urlOrPath) => {
+  if (!urlOrPath || typeof urlOrPath !== 'string') return null;
+  if (urlOrPath.startsWith('http') || urlOrPath.startsWith('data:')) return urlOrPath;
+  return `/api/image?path=${encodeURIComponent(urlOrPath)}`;
+};
+
 const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], moviesList = []) => {
   const formattedAnimes = (animesList || []).map(anime => {
     let genres = [];
@@ -105,6 +112,9 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
     }
     const pct = getAnimeProgressPercent(anime);
 
+    const animePoster = anime.posterUrl || anime.coverUrl || anime.coverImage || resolveHeroImg(anime.thumbnailBase64) || resolveHeroImg(anime.thumbnailPath) || null;
+    const animeBanner = anime.bannerUrl || anime.backdropUrl || animePoster || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop';
+
     return {
       id: anime.id,
       mediaType: 'anime',
@@ -114,8 +124,8 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       title: (anime?.title || 'UNTITLED ANIME').toString().toUpperCase(),
       japaneseTitle: anime.japaneseTitle || 'LOCAL LIBRARY',
       logoUrl: anime.logoUrl || null,
-      poster: anime.posterUrl || anime.coverUrl || anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || null,
-      banner: anime.bannerUrl || anime.backdropUrl || anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop',
+      poster: animePoster,
+      banner: animeBanner,
       rating: getDeterministicRating(anime.id, anime.rating),
       episodes: epDisplay,
       totalSeasons: totalSeasons,
@@ -129,6 +139,7 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       progressPercent: pct,
       inProgress: pct > 0 && pct < 100,
       lastActivity: new Date(anime.lastOpenedAt || anime.updatedAt || anime.createdAt || 0).getTime(),
+      createdAt: new Date(anime.createdAt || anime.addedAt || 0).getTime(),
     };
   });
 
@@ -150,6 +161,9 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
     const pct = Number(manga.progressPercent || 0);
     const inProgress = (pct > 0 && pct < 100) || manga.status === 'reading' || (completedChapters > 0 && !manga.isWatched);
 
+    const mangaPoster = manga.posterUrl || manga.coverUrl || resolveHeroImg(manga.thumbnailBase64) || resolveHeroImg(manga.thumbnailPath) || null;
+    const mangaBanner = manga.bannerUrl || manga.backdropUrl || mangaPoster || 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=1600&auto=format&fit=crop';
+
     return {
       id: manga.id,
       mediaType: 'manga',
@@ -159,8 +173,8 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       title: (manga?.title || 'UNTITLED MANGA').toString().toUpperCase(),
       japaneseTitle: manga.japaneseTitle || 'LOCAL MANGA',
       logoUrl: manga.logoUrl || null,
-      poster: manga.posterUrl || manga.coverUrl || manga.thumbnailBase64 || (manga.thumbnailPath ? `/api/image?path=${encodeURIComponent(manga.thumbnailPath)}` : null) || null,
-      banner: manga.bannerUrl || manga.backdropUrl || manga.thumbnailBase64 || (manga.thumbnailPath ? `/api/image?path=${encodeURIComponent(manga.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=1600&auto=format&fit=crop',
+      poster: mangaPoster,
+      banner: mangaBanner,
       rating: getDeterministicRating(manga.id, manga.rating),
       episodes: chDisplay,
       totalSeasons: 0,
@@ -174,6 +188,7 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       progressPercent: pct,
       inProgress,
       lastActivity: new Date(manga.lastOpenedAt || manga.updatedAt || manga.createdAt || 0).getTime(),
+      createdAt: new Date(manga.createdAt || manga.addedAt || 0).getTime(),
     };
   });
 
@@ -231,6 +246,9 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
     const inProgress = (pct > 0 && pct < 95) || movie.watchStatus === 'Watching';
     const runtimeStr = movie.runtime ? `${Math.floor(movie.runtime / 60)}h ${movie.runtime % 60}m` : 'Feature Film';
 
+    const moviePoster = movie.posterUrl || movie.posterPath || resolveHeroImg(movie.thumbnailBase64) || null;
+    const movieBanner = movie.backdropUrl || movie.posterUrl || moviePoster || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=1600&auto=format&fit=crop';
+
     return {
       id: movie.id,
       mediaType: 'movie',
@@ -239,8 +257,8 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       isMovie: true,
       title: (movie?.title || 'UNTITLED MOVIE').toString().toUpperCase(),
       logoUrl: movie.logoUrl || null,
-      poster: movie.posterUrl || movie.posterPath || (movie.thumbnailBase64 || null) || null,
-      banner: movie.backdropUrl || movie.posterUrl || (movie.thumbnailBase64 || null) || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=1600&auto=format&fit=crop',
+      poster: moviePoster,
+      banner: movieBanner,
       rating: movie.rating ? parseFloat(movie.rating).toFixed(1) : getDeterministicRating(movie.id, 8.5),
       episodes: runtimeStr,
       totalSeasons: 0,
@@ -254,6 +272,7 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       progressPercent: pct,
       inProgress,
       lastActivity: new Date(movie.lastWatchedAt || movie.lastOpenedAt || movie.updatedAt || movie.addedAt || 0).getTime(),
+      createdAt: new Date(movie.addedAt || movie.createdAt || 0).getTime(),
     };
   });
 
@@ -278,17 +297,35 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
     }];
   }
 
-  // Prioritize in-progress items, followed by top-rated (excluding audio stories from hero banner slider)
+  // Group watching or reading (in-progress) and recently added items (up to 12 total, maximum 6-6 division, excluding audio stories from hero banner slider)
   const allItems = [...formattedAnimes, ...formattedMangas, ...formattedMovies];
-  const inProgressItems = allItems
+
+  const MAX_TOTAL = 12;
+  const MAX_DIVISION = 6;
+
+  // 1. Watching / reading items (inProgress) sorted by latest activity
+  const watchingOrReading = allItems
     .filter(item => item.inProgress)
-    .sort((a, b) => b.lastActivity - a.lastActivity);
+    .sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0));
+  const selectedWatching = watchingOrReading.slice(0, MAX_DIVISION);
 
-  const otherItems = allItems
-    .filter(item => !item.inProgress)
-    .sort((a, b) => parseFloat(b.rating || 0) - parseFloat(a.rating || 0));
+  // 2. Recently added items (not already in selectedWatching) sorted by creation/added date
+  const candidatesAdded = allItems
+    .filter(item => !selectedWatching.some(w => w.id === item.id))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const selectedAdded = candidatesAdded.slice(0, MAX_DIVISION);
 
-  return [...inProgressItems, ...otherItems].slice(0, 6);
+  let combined = [...selectedWatching, ...selectedAdded];
+
+  // 3. If combined is under 12, backfill remaining slots up to 12 from other available items
+  if (combined.length < MAX_TOTAL) {
+    const remaining = allItems
+      .filter(item => !combined.some(c => c.id === item.id))
+      .sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0) || parseFloat(b.rating || 0) - parseFloat(a.rating || 0));
+    combined = [...combined, ...remaining.slice(0, MAX_TOTAL - combined.length)];
+  }
+
+  return combined.slice(0, MAX_TOTAL);
 };
 
 const GENRES_LIST = [
@@ -644,29 +681,33 @@ export default function Dashboard({ onSelectAnime }) {
   // Helper to extract the current cover photo of an anime folder
   const getAnimeFolderCover = (a) => {
     if (!a) return '';
+    let cover = '';
     if (a.thumbnailBase64) {
-      return (a.thumbnailBase64.startsWith('http') || a.thumbnailBase64.startsWith('data:'))
+      cover = (a.thumbnailBase64.startsWith('http') || a.thumbnailBase64.startsWith('data:'))
         ? a.thumbnailBase64
         : `/api/image?path=${encodeURIComponent(a.thumbnailBase64)}`;
+    } else if (a.thumbnailPath) {
+      cover = `/api/image?path=${encodeURIComponent(a.thumbnailPath)}`;
+    } else {
+      cover = a.coverImage || a.coverUrl || a.image || '';
     }
-    if (a.thumbnailPath) {
-      return `/api/image?path=${encodeURIComponent(a.thumbnailPath)}`;
-    }
-    return a.coverImage || a.coverUrl || a.image || '';
+    return toFanartBigPreview(cover);
   };
 
   // Helper to extract the current cover photo of a manga folder
   const getMangaFolderCover = (m) => {
     if (!m) return '';
+    let cover = '';
     if (m.thumbnailBase64) {
-      return (m.thumbnailBase64.startsWith('http') || m.thumbnailBase64.startsWith('data:'))
+      cover = (m.thumbnailBase64.startsWith('http') || m.thumbnailBase64.startsWith('data:'))
         ? m.thumbnailBase64
         : `/api/image?path=${encodeURIComponent(m.thumbnailBase64)}`;
+    } else if (m.thumbnailPath) {
+      cover = `/api/image?path=${encodeURIComponent(m.thumbnailPath)}`;
+    } else {
+      cover = m.coverUrl || m.banner || m.image || '';
     }
-    if (m.thumbnailPath) {
-      return `/api/image?path=${encodeURIComponent(m.thumbnailPath)}`;
-    }
-    return m.coverUrl || m.banner || m.image || '';
+    return toFanartBigPreview(cover);
   };
 
   const [isDraggingTopRated, setIsDraggingTopRated] = useState(false);
@@ -876,14 +917,74 @@ export default function Dashboard({ onSelectAnime }) {
     );
   }, [movies, search]);
 
-  // Auto Hero Slider Timer (Advances every 20 seconds)
+  // Auto Hero Slider Timer (Advances every 30 seconds)
   useEffect(() => {
     const timer = setInterval(() => {
       setSlideDirection(1);
       setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
-    }, 20000);
+    }, 30000);
     return () => clearInterval(timer);
   }, [heroSlides.length]);
+
+  // Aggressively prefetch and preload all hero slides' logo art and banners ahead of time
+  useEffect(() => {
+    if (typeof document === 'undefined' || !Array.isArray(heroSlides) || heroSlides.length === 0) return;
+
+    const createdPreloadLinks = [];
+
+    heroSlides.forEach((slide) => {
+      // 1. Preload logos with browser <link rel="preload"> and async Image() decode
+      if (slide.logoUrl) {
+        const logoUrl = toFanartBigPreview(slide.logoUrl);
+        try {
+          if (!document.querySelector(`link[rel="preload"][href="${CSS.escape ? CSS.escape(logoUrl) : logoUrl}"]`)) {
+            const link = document.createElement('link');
+            link.rel = 'preload';
+            link.as = 'image';
+            link.href = logoUrl;
+            document.head.appendChild(link);
+            createdPreloadLinks.push(link);
+          }
+        } catch (e) {}
+
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = logoUrl;
+      }
+
+      // 2. Preload full wide backdrops and posters into HTTP disk & memory cache
+      if (slide.banner) {
+        const bImg = new Image();
+        bImg.decoding = 'async';
+        bImg.src = toFanartFull(slide.banner);
+      }
+      if (slide.poster) {
+        const pImg = new Image();
+        pImg.decoding = 'async';
+        pImg.src = toFanartFull(slide.poster);
+      }
+    });
+
+    return () => {
+      createdPreloadLinks.forEach((link) => {
+        try {
+          if (link.parentNode) link.parentNode.removeChild(link);
+        } catch (e) {}
+      });
+    };
+  }, [heroSlides]);
+
+  // Immediately warm upcoming next slide's logo whenever slide changes
+  useEffect(() => {
+    if (!Array.isArray(heroSlides) || heroSlides.length === 0) return;
+    const nextIdx = (currentSlide + 1) % heroSlides.length;
+    const nextSlide = heroSlides[nextIdx];
+    if (nextSlide?.logoUrl) {
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = toFanartBigPreview(nextSlide.logoUrl);
+    }
+  }, [currentSlide, heroSlides]);
 
   // Sync state with currentUser when it updates
   useEffect(() => {
@@ -3380,7 +3481,7 @@ export default function Dashboard({ onSelectAnime }) {
                       >
                         <div className="w-9 h-12 rounded-lg overflow-hidden bg-purple-950/60 flex-shrink-0 relative flex items-center justify-center">
                           {m.thumbnailBase64 ? (
-                            <img src={m.thumbnailBase64} alt={m.title} className="w-full h-full object-cover" />
+                            <img src={toFanartBigPreview(m.thumbnailBase64)} alt={m.title} className="w-full h-full object-cover" />
                           ) : (
                             <BookOpen size={16} className="text-purple-400" />
                           )}
@@ -3904,7 +4005,7 @@ export default function Dashboard({ onSelectAnime }) {
                               >
                                 <div className="w-8 h-10 rounded overflow-hidden bg-purple-950/60 flex-shrink-0 relative flex items-center justify-center">
                                   {m.thumbnailBase64 ? (
-                                    <img src={m.thumbnailBase64} alt={m.title} className="w-full h-full object-cover" />
+                                    <img src={toFanartBigPreview(m.thumbnailBase64)} alt={m.title} className="w-full h-full object-cover" />
                                   ) : (
                                     <BookOpen size={14} className="text-purple-400" />
                                   )}
@@ -4125,6 +4226,38 @@ export default function Dashboard({ onSelectAnime }) {
         className="relative w-full overflow-hidden shadow-2xl bg-[#07090f] h-[98vh] min-h-[580px] max-h-[98vh] flex items-end"
         style={{ aspectRatio: '16 / 9' }}
       >
+        {/* Hidden Eager Prefetcher for Hero Logos & Banners so they are 0ms ready before slide transitions */}
+        <div className="hidden pointer-events-none opacity-0 select-none -z-50 absolute w-0 h-0 overflow-hidden" aria-hidden="true">
+          {heroSlides.map((slide, idx) => (
+            <React.Fragment key={`hero-preload-${slide.id || idx}`}>
+              {slide.logoUrl && (
+                <img
+                  src={toFanartBigPreview(slide.logoUrl)}
+                  alt=""
+                  loading="eager"
+                  decoding="async"
+                />
+              )}
+              {slide.banner && (
+                <img
+                  src={toFanartFull(slide.banner)}
+                  alt=""
+                  loading="eager"
+                  decoding="async"
+                />
+              )}
+              {slide.poster && (
+                <img
+                  src={toFanartFull(slide.poster)}
+                  alt=""
+                  loading="eager"
+                  decoding="async"
+                />
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+
         {/* Animated Slide Content - Slides Horizontally without empty gap */}
         <AnimatePresence custom={slideDirection} mode="popLayout">
           <motion.div
@@ -4145,26 +4278,17 @@ export default function Dashboard({ onSelectAnime }) {
             transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
             className="absolute inset-0 z-10 flex items-end justify-between"
           >
-            {/* Background Image: Crisp movie poster on mobile; soft blurred backdrop on desktop for movies; crisp sharp for anime/manga/audio */}
-            {currentHero.isMovie ? (
-              <>
-                {/* Mobile Movie Banner: Crisp, sharp movie poster matching anime/manga banner style without blur */}
-                <div
-                  className="md:hidden absolute inset-0 z-0 bg-cover bg-center filter blur-none scale-100 brightness-105 saturate-[1.1] transition-all duration-700"
-                  style={{ backgroundImage: `url(${currentHero.poster || currentHero.banner})` }}
-                />
-                {/* Desktop Movie Banner: Blurred backdrop with right-side tilted poster */}
-                <div
-                  className="hidden md:block absolute inset-0 z-0 bg-cover bg-center filter blur-[4px] scale-105 brightness-110 saturate-[1.2] transition-all duration-700"
-                  style={{ backgroundImage: `url(${currentHero.banner})` }}
-                />
-              </>
-            ) : (
-              <div
-                className="absolute inset-0 z-0 bg-cover bg-center filter blur-none scale-100 brightness-105 saturate-[1.1] transition-all duration-700"
-                style={{ backgroundImage: `url(${currentHero.banner})` }}
-              />
-            )}
+            {/* Background Image: Crisp vertical cover poster on mobile devices; crisp sharp wide banner on desktop for all media types (anime, manga, movies) */}
+            {/* Mobile Devices: Show poster cover as background */}
+            <div
+              className="md:hidden absolute inset-0 z-0 bg-cover bg-center filter blur-none scale-100 brightness-105 saturate-[1.1] transition-all duration-700"
+              style={{ backgroundImage: `url(${toFanartFull(currentHero.poster || currentHero.banner)})` }}
+            />
+            {/* Desktop Devices: Show crisp wide banner without extra blur */}
+            <div
+              className="hidden md:block absolute inset-0 z-0 bg-cover bg-center filter blur-none scale-100 brightness-105 saturate-[1.1] transition-all duration-700"
+              style={{ backgroundImage: `url(${toFanartFull(currentHero.banner)})` }}
+            />
 
             {/* Top Dark Vignette (Prime Video Style - deep dark gradient behind fixed navbar) */}
             <div
@@ -4187,22 +4311,6 @@ export default function Dashboard({ onSelectAnime }) {
               className="absolute bottom-0 inset-x-0 h-16 z-10 pointer-events-none bg-gradient-to-t from-[#07090f]/40 to-transparent"
             />
 
-            {/* Right Side Tilted Movie Poster Box (Tilted box style matching reference image) */}
-            {currentHero.isMovie && (
-              <div className="absolute right-0 top-0 bottom-0 z-10 w-[50%] md:w-[46%] lg:w-[42%] pointer-events-none hidden md:flex justify-end">
-                <div
-                  className="relative h-[140%] -top-[10%] w-full max-w-[460px] lg:max-w-[540px] xl:max-w-[620px] overflow-hidden origin-top-right transform rotate-[7deg] shadow-[-30px_0_60px_rgba(0,0,0,0.95)] border-l border-white/10"
-                >
-                  <CachedImage
-                    src={currentHero.poster || currentHero.banner}
-                    alt={currentHero.title}
-                    className="w-full h-full object-cover transform -rotate-[7deg] origin-center scale-[1.25]"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/20 pointer-events-none" />
-                </div>
-              </div>
-            )}
-
             {/* Hero Content Overlay (Positioned in lower two-thirds with comfortable breathing room) */}
             <div className="relative z-30 w-full max-w-7xl mx-auto px-4 md:px-8 pt-36 sm:pt-40 md:pt-48 pb-16 md:pb-24">
               <div className="w-full md:max-w-2xl lg:max-w-3xl space-y-3 md:space-y-4">
@@ -4211,8 +4319,10 @@ export default function Dashboard({ onSelectAnime }) {
                   {currentHero.logoUrl ? (
                     <div className="mb-3 max-w-[280px] sm:max-w-[380px] md:max-w-[480px] max-h-16 sm:max-h-20 md:max-h-28 flex items-center">
                       <img
-                        src={currentHero.logoUrl}
+                        src={toFanartBigPreview(currentHero.logoUrl)}
                         alt={currentHero.title}
+                        fetchPriority="high"
+                        decoding="async"
                         className="max-h-16 sm:max-h-20 md:max-h-28 w-auto max-w-full object-contain object-left drop-shadow-[0_4px_24px_rgba(0,0,0,0.95)]"
                       />
                     </div>
@@ -5869,7 +5979,7 @@ export default function Dashboard({ onSelectAnime }) {
               </div>
               <div>
                 <h2 className="text-xl font-extrabold tracking-wide text-white flex items-center gap-2">
-                  Top 20 Top-Rated Episodes
+                  Top 20 Episodes
                 </h2>
               </div>
             </div>
@@ -6546,12 +6656,12 @@ export default function Dashboard({ onSelectAnime }) {
                               return (
                                 <div
                                   key={cov.url || idx}
-                                  onClick={() => setCoverUrl(cov.url)}
+                                  onClick={() => setCoverUrl(toFanartFull(cov.url))}
                                   className={`relative w-16 h-24 rounded-lg overflow-hidden shrink-0 border cursor-pointer transition ${
                                     isSelected ? 'border-purple-400 ring-2 ring-purple-500/50' : 'border-white/10 hover:border-white/30 opacity-75 hover:opacity-100'
                                   }`}
                                 >
-                                  <img src={cov.url} alt="Cover option" className="w-full h-full object-cover" />
+                                  <img src={toFanartPreview(cov.url)} alt="Cover option" className="w-full h-full object-cover" />
                                   <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[8px] text-center text-gray-300 truncate px-0.5">
                                     {cov.source || 'Poster'}
                                   </span>
@@ -6641,7 +6751,7 @@ export default function Dashboard({ onSelectAnime }) {
                             return (
                               <div
                                 key={ban.url || idx}
-                                onClick={() => setAnimeBannerUrl(ban.url)}
+                                onClick={() => setAnimeBannerUrl(toFanartFull(ban.url))}
                                 className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
                                   isSelected
                                     ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
@@ -6649,7 +6759,7 @@ export default function Dashboard({ onSelectAnime }) {
                                 }`}
                               >
                                 <img
-                                  src={ban.url}
+                                  src={toFanartPreview(ban.url)}
                                   alt={`Banner ${idx + 1}`}
                                   className="w-full h-full object-cover"
                                 />
@@ -6757,7 +6867,7 @@ export default function Dashboard({ onSelectAnime }) {
                                 return (
                                   <div
                                     key={logo.url || idx}
-                                    onClick={() => setAnimeLogoUrl(logo.url)}
+                                    onClick={() => setAnimeLogoUrl(toFanartFull(logo.url))}
                                     className={`p-2 rounded-xl border flex flex-col items-center justify-center gap-1 cursor-pointer transition-all ${
                                       isSelected
                                         ? 'bg-purple-500/20 border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
@@ -6766,7 +6876,7 @@ export default function Dashboard({ onSelectAnime }) {
                                   >
                                     <div className="w-full h-12 flex items-center justify-center overflow-hidden">
                                       <img
-                                        src={logo.url}
+                                        src={toFanartPreview(logo.url)}
                                         alt="Logo"
                                         className="max-h-10 w-auto max-w-full object-contain"
                                       />
@@ -7395,7 +7505,7 @@ export default function Dashboard({ onSelectAnime }) {
                           return (
                             <div
                               key={ban.url || idx}
-                              onClick={() => setEditBannerUrl(ban.url)}
+                              onClick={() => setEditBannerUrl(toFanartFull(ban.url))}
                               className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
                                 isSelected
                                   ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
@@ -7403,7 +7513,7 @@ export default function Dashboard({ onSelectAnime }) {
                               }`}
                             >
                               <img
-                                src={ban.url}
+                                src={toFanartPreview(ban.url)}
                                 alt={`Banner ${idx + 1}`}
                                 className="w-full h-full object-cover"
                               />
@@ -7521,7 +7631,7 @@ export default function Dashboard({ onSelectAnime }) {
                               return (
                                 <div
                                   key={logo.url || idx}
-                                  onClick={() => setEditLogoUrl(logo.url)}
+                                  onClick={() => setEditLogoUrl(toFanartFull(logo.url))}
                                   className={`relative h-20 p-2 rounded-xl bg-white/[0.04] border flex items-center justify-center cursor-pointer transition ${
                                     isSelected
                                       ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)] bg-purple-500/10'
@@ -7529,7 +7639,7 @@ export default function Dashboard({ onSelectAnime }) {
                                   }`}
                                 >
                                   <img
-                                    src={logo.url}
+                                    src={toFanartPreview(logo.url)}
                                     alt={`Logo ${idx + 1}`}
                                     className="max-h-14 w-auto max-w-full object-contain filter drop-shadow-md"
                                   />
@@ -8023,12 +8133,12 @@ export default function Dashboard({ onSelectAnime }) {
                             return (
                               <div
                                 key={cov.url || idx}
-                                onClick={() => setMangaCoverUrl(cov.url)}
+                                onClick={() => setMangaCoverUrl(toFanartFull(cov.url))}
                                 className={`relative w-16 h-24 rounded-lg overflow-hidden shrink-0 border cursor-pointer transition ${
                                   isSelected ? 'border-purple-400 ring-2 ring-purple-500/50' : 'border-white/10 hover:border-white/30 opacity-75 hover:opacity-100'
                                 }`}
                               >
-                                <img src={cov.url} alt="Cover option" className="w-full h-full object-cover" />
+                                <img src={toFanartPreview(cov.url)} alt="Cover option" className="w-full h-full object-cover" />
                                 <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[8px] text-center text-gray-300 truncate px-0.5">
                                   {cov.source || 'Poster'}
                                 </span>
@@ -8118,7 +8228,7 @@ export default function Dashboard({ onSelectAnime }) {
                           return (
                             <div
                               key={ban.url || idx}
-                              onClick={() => setMangaBannerUrl(ban.url)}
+                              onClick={() => setMangaBannerUrl(toFanartFull(ban.url))}
                               className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
                                 isSelected
                                   ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
@@ -8126,7 +8236,7 @@ export default function Dashboard({ onSelectAnime }) {
                               }`}
                             >
                               <img
-                                src={ban.url}
+                                src={toFanartPreview(ban.url)}
                                 alt={`Banner ${idx + 1}`}
                                 className="w-full h-full object-cover"
                               />
@@ -8234,7 +8344,7 @@ export default function Dashboard({ onSelectAnime }) {
                               return (
                                 <div
                                   key={logo.url || idx}
-                                  onClick={() => setMangaLogoUrl(logo.url)}
+                                  onClick={() => setMangaLogoUrl(toFanartFull(logo.url))}
                                   className={`p-2 rounded-xl border flex flex-col items-center justify-center gap-1 cursor-pointer transition-all ${
                                     isSelected
                                       ? 'bg-purple-500/20 border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
@@ -8243,7 +8353,7 @@ export default function Dashboard({ onSelectAnime }) {
                                 >
                                   <div className="w-full h-12 flex items-center justify-center overflow-hidden">
                                     <img
-                                      src={logo.url}
+                                      src={toFanartPreview(logo.url)}
                                       alt="Logo"
                                       className="max-h-10 w-auto max-w-full object-contain"
                                     />

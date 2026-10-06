@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
+import { isFanartUrl, toFanartBigPreview } from '../lib/fanartUtils';
 
 // In-memory cache map for instant 0ms access within the session
 const memoryBlobCache = new Map();
@@ -38,12 +39,15 @@ const isExternalUrl = (src) => {
 export async function getCachedImageUrl(src) {
   if (!src || typeof src !== 'string') return '';
   
-  // Data URLs and Blobs don't need caching
-  if (src.startsWith('data:') || src.startsWith('blob:')) return src;
+  // Normalize Fanart URLs to /bigpreview/ for cards & posters
+  const targetSrc = isFanartUrl(src) ? toFanartBigPreview(src) : src;
 
-  // External URLs (e.g. s4.anilist.co): Return directly to avoid CORS fetch block
-  if (isExternalUrl(src)) {
-    return src;
+  // Data URLs and Blobs don't need caching
+  if (targetSrc.startsWith('data:') || targetSrc.startsWith('blob:')) return targetSrc;
+
+  // External URLs (e.g. s4.anilist.co, fanart.tv): Return directly to avoid CORS fetch block
+  if (isExternalUrl(targetSrc)) {
+    return targetSrc;
   }
 
   // 1. Check in-memory Map first (0ms instantaneous)
@@ -102,10 +106,12 @@ export default function CachedImage({
   onLoad,
   ...props
 }) {
+  const processedSrc = isFanartUrl(src) ? toFanartBigPreview(src) : src;
+
   const [resolvedSrc, setResolvedSrc] = useState(() => {
-    if (!src) return fallbackSrc;
-    if (src.startsWith('data:') || src.startsWith('blob:') || isExternalUrl(src)) return src;
-    if (memoryBlobCache.has(src)) return memoryBlobCache.get(src);
+    if (!processedSrc) return fallbackSrc;
+    if (processedSrc.startsWith('data:') || processedSrc.startsWith('blob:') || isExternalUrl(processedSrc)) return processedSrc;
+    if (memoryBlobCache.has(processedSrc)) return memoryBlobCache.get(processedSrc);
     return '';
   });
 
@@ -117,25 +123,25 @@ export default function CachedImage({
     isMountedRef.current = true;
     setHasError(false);
 
-    if (!src) {
+    if (!processedSrc) {
       setResolvedSrc(fallbackSrc);
       return;
     }
 
     // Direct resolution for external URLs or data/blob URLs
-    if (src.startsWith('data:') || src.startsWith('blob:') || isExternalUrl(src)) {
-      setResolvedSrc(src);
+    if (processedSrc.startsWith('data:') || processedSrc.startsWith('blob:') || isExternalUrl(processedSrc)) {
+      setResolvedSrc(processedSrc);
       return;
     }
 
-    if (memoryBlobCache.has(src)) {
-      setResolvedSrc(memoryBlobCache.get(src));
+    if (memoryBlobCache.has(processedSrc)) {
+      setResolvedSrc(memoryBlobCache.get(processedSrc));
       return;
     }
 
     let isCurrent = true;
 
-    getCachedImageUrl(src)
+    getCachedImageUrl(processedSrc)
       .then((url) => {
         if (isMountedRef.current && isCurrent) {
           setResolvedSrc(url || fallbackSrc);
@@ -143,14 +149,14 @@ export default function CachedImage({
       })
       .catch(() => {
         if (isMountedRef.current && isCurrent) {
-          setResolvedSrc(src || fallbackSrc);
+          setResolvedSrc(processedSrc || fallbackSrc);
         }
       });
 
     return () => {
       isCurrent = false;
     };
-  }, [src, fallbackSrc]);
+  }, [processedSrc, fallbackSrc]);
 
   useEffect(() => {
     return () => {
@@ -158,7 +164,7 @@ export default function CachedImage({
     };
   }, []);
 
-  const currentImgSrc = hasError ? fallbackSrc : (resolvedSrc || src || fallbackSrc);
+  const currentImgSrc = hasError ? fallbackSrc : (resolvedSrc || processedSrc || fallbackSrc);
 
   return (
     <div className={`relative overflow-hidden ${className}`} style={style}>

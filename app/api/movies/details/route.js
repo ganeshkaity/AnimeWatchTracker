@@ -58,71 +58,71 @@ export async function GET(request) {
     // Detailed Cast / Actors with id, image link, character name, actual name
     const cast = Array.isArray(d.credits?.cast)
       ? d.credits.cast.slice(0, 30).map((p) => ({
-          id: p.id,
-          name: p.name,
-          character: p.character || '',
-          profileUrl: p.profile_path ? `https://image.tmdb.org/t/p/w300${p.profile_path}` : null,
-          order: p.order ?? 999,
-        }))
+        id: p.id,
+        name: p.name,
+        character: p.character || '',
+        profileUrl: p.profile_path ? `https://image.tmdb.org/t/p/w300${p.profile_path}` : null,
+        order: p.order ?? 999,
+      }))
       : [];
 
     // Detailed Crew with id, image link, role, actual name
     const crew = Array.isArray(d.credits?.crew)
       ? d.credits.crew
-          .filter((c, idx, arr) => arr.findIndex((x) => x.id === c.id && x.job === c.job) === idx)
-          .slice(0, 30)
-          .map((c) => ({
-            id: c.id,
-            name: c.name,
-            role: c.job || c.department || 'Crew',
-            profileUrl: c.profile_path ? `https://image.tmdb.org/t/p/w300${c.profile_path}` : null,
-          }))
+        .filter((c, idx, arr) => arr.findIndex((x) => x.id === c.id && x.job === c.job) === idx)
+        .slice(0, 30)
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          role: c.job || c.department || 'Crew',
+          profileUrl: c.profile_path ? `https://image.tmdb.org/t/p/w300${c.profile_path}` : null,
+        }))
       : [];
 
     // More Images: posters, backdrops, logos
     const images = {
       posters: Array.isArray(d.images?.posters)
         ? d.images.posters.slice(0, 30).map((img) => ({
-            filePath: img.file_path,
-            url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
-            width: img.width,
-            height: img.height,
-            voteAverage: img.vote_average || 0,
-          }))
+          filePath: img.file_path,
+          url: `https://image.tmdb.org/t/p/w300${img.file_path}`,
+          width: img.width,
+          height: img.height,
+          voteAverage: img.vote_average || 0,
+        }))
         : [],
       backdrops: Array.isArray(d.images?.backdrops)
         ? d.images.backdrops.slice(0, 30).map((img) => ({
-            filePath: img.file_path,
-            url: `https://image.tmdb.org/t/p/original${img.file_path}`,
-            width: img.width,
-            height: img.height,
-            voteAverage: img.vote_average || 0,
-          }))
+          filePath: img.file_path,
+          url: `https://image.tmdb.org/t/p/w720${img.file_path}`,
+          width: img.width,
+          height: img.height,
+          voteAverage: img.vote_average || 0,
+        }))
         : [],
       logos: Array.isArray(d.images?.logos)
         ? d.images.logos.slice(0, 20).map((img) => ({
-            filePath: img.file_path,
-            url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
-            width: img.width,
-            height: img.height,
-            voteAverage: img.vote_average || 0,
-          }))
+          filePath: img.file_path,
+          url: `https://image.tmdb.org/t/p/w300${img.file_path}`,
+          width: img.width,
+          height: img.height,
+          voteAverage: img.vote_average || 0,
+        }))
         : [],
     };
 
     // Trailers, Teasers, and Video Links
     const videos = Array.isArray(d.videos?.results)
       ? d.videos.results
-          .filter((v) => v.site === 'YouTube' && v.key)
-          .map((v) => ({
-            id: v.id,
-            name: v.name,
-            key: v.key,
-            site: v.site,
-            type: v.type, // 'Trailer', 'Teaser', 'Featurette', 'Clip', etc.
-            official: Boolean(v.official),
-            publishedAt: v.published_at || '',
-          }))
+        .filter((v) => v.site === 'YouTube' && v.key)
+        .map((v) => ({
+          id: v.id,
+          name: v.name,
+          key: v.key,
+          site: v.site,
+          type: v.type, // 'Trailer', 'Teaser', 'Featurette', 'Clip', etc.
+          official: Boolean(v.official),
+          publishedAt: v.published_at || '',
+        }))
       : [];
 
     const movieDetails = {
