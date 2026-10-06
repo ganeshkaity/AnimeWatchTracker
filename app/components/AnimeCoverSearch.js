@@ -15,7 +15,6 @@ export default function AnimeCoverSearch({
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [selectedSource, setSelectedSource] = useState('ALL');
-  const [uploadingId, setUploadingId] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
   const [downloadSuccessId, setDownloadSuccessId] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
@@ -88,37 +87,11 @@ export default function AnimeCoverSearch({
     }
   };
 
-  const handleSelectCover = async (item) => {
-    if (uploadingId) return;
-
-    setUploadingId(item.id);
-    try {
-      let finalUrl = '';
-      if (uploadToImgBB) {
-        try {
-          finalUrl = await uploadToImgBB(item.imageUrl);
-        } catch (uploadErr) {
-          console.warn('[AnimeCoverSearch] ImgBB upload fallback to direct URL:', uploadErr);
-          finalUrl = item.imageUrl;
-        }
-      } else {
-        finalUrl = item.imageUrl;
-      }
-
-      if (!finalUrl) {
-        finalUrl = item.imageUrl;
-      }
-
-      if (onSelectCover) {
-        onSelectCover(finalUrl);
-      }
-    } catch (err) {
-      console.warn('[AnimeCoverSearch] Error selecting cover, applying direct URL:', err);
-      if (onSelectCover && item.imageUrl) {
-        onSelectCover(item.imageUrl);
-      }
-    } finally {
-      setUploadingId(null);
+  const handleSelectCover = (item) => {
+    if (!item?.imageUrl) return;
+    // Direct link saving without uploading to ImgBB
+    if (onSelectCover) {
+      onSelectCover(item.imageUrl);
     }
   };
 
@@ -140,7 +113,7 @@ export default function AnimeCoverSearch({
             <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
               Online Anime Cover Search
               <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-normal">
-                AniList & Jikan
+                AniList, Fanart.tv & Jikan
               </span>
             </h4>
             <p className="text-[10px] text-gray-400">Search & pick official anime covers, or download locally</p>
@@ -204,7 +177,7 @@ export default function AnimeCoverSearch({
       {results.length > 0 && (
         <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/5">
           <div className="flex gap-1.5">
-            {['ALL', 'AniList', 'Jikan'].map((src) => {
+            {['ALL', 'AniList', 'Fanart.tv', 'Jikan'].map((src) => {
               const count =
                 src === 'ALL'
                   ? results.length
@@ -218,50 +191,42 @@ export default function AnimeCoverSearch({
                   onClick={() => setSelectedSource(src)}
                   className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition cursor-pointer ${
                     selectedSource === src
-                      ? 'bg-purple-600 text-white shadow-sm'
-                      : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10'
+                      ? 'bg-[#7c5cff] text-white shadow-sm'
+                      : 'bg-white/5 text-gray-400 hover:text-white'
                   }`}
                 >
-                  {src === 'ALL' ? 'All' : src} ({count})
+                  {src} ({count})
                 </button>
               );
             })}
           </div>
 
-          <span className="text-[10px] text-gray-400 italic">Click image to set as cover</span>
+          <span className="text-[10px] text-gray-400">
+            Click any cover to select instantly
+          </span>
         </div>
       )}
 
-      {/* Loading Skeleton */}
-      {loading && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 py-2">
-          {[1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              className="aspect-[2/3] rounded-xl bg-white/5 animate-pulse flex flex-col justify-end p-2 border border-white/5"
-            >
-              <div className="h-3 bg-white/10 rounded w-3/4 mb-1"></div>
-              <div className="h-2 bg-white/10 rounded w-1/2"></div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Error / Empty Message */}
-      {!loading && errorMessage && (
-        <div className="p-3 rounded-xl bg-purple-950/30 border border-purple-800/30 text-center">
-          <p className="text-xs text-purple-200">{errorMessage}</p>
+      {/* Error Message */}
+      {errorMessage && (
+        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 text-center">
+          {errorMessage}
         </div>
       )}
 
       {/* Results Grid */}
-      {!loading && filteredResults.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 max-h-72 overflow-y-auto p-1 pr-1.5 rounded-xl border border-white/5 bg-black/20">
+      {loading ? (
+        <div className="py-12 flex flex-col items-center justify-center gap-2 text-gray-400">
+          <Loader2 size={24} className="animate-spin text-[#7c5cff]" />
+          <span className="text-xs">Fetching covers from AniList & Fanart.tv...</span>
+        </div>
+      ) : filteredResults.length > 0 ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-72 overflow-y-auto custom-scrollbar p-1">
           {filteredResults.map((item) => {
-            const isUploading = uploadingId === item.id;
             const isDownloading = downloadingId === item.id;
             const isDownloaded = downloadSuccessId === item.id;
             const isAniList = item.source.toLowerCase() === 'anilist';
+            const isFanart = item.source.toLowerCase().includes('fanart');
 
             return (
               <div
@@ -284,6 +249,8 @@ export default function AnimeCoverSearch({
                     className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-md shadow-sm uppercase tracking-wider ${
                       isAniList
                         ? 'bg-sky-600/85 text-white'
+                        : isFanart
+                        ? 'bg-pink-600/85 text-white'
                         : 'bg-purple-600/85 text-white'
                     }`}
                   >
@@ -299,9 +266,9 @@ export default function AnimeCoverSearch({
                   className={`absolute top-1.5 right-1.5 z-10 p-1.5 rounded-lg backdrop-blur-md transition shadow-md cursor-pointer ${
                     isDownloaded
                       ? 'bg-emerald-600 text-white'
-                      : 'bg-black/60 hover:bg-black/90 text-white hover:text-purple-300'
+                      : 'bg-black/60 hover:bg-black/80 text-white/80 hover:text-white'
                   }`}
-                  title="Download image locally to PC"
+                  title="Download image locally"
                 >
                   {isDownloading ? (
                     <Loader2 size={12} className="animate-spin" />
@@ -312,30 +279,24 @@ export default function AnimeCoverSearch({
                   )}
                 </button>
 
-                {/* Hover / Bottom Overlay with Title & Action */}
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-2 pt-6 flex flex-col justify-end">
-                  <p className="text-[11px] font-bold text-white line-clamp-1 leading-tight drop-shadow-sm">
+                {/* Hover Overlay with Select Prompt */}
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center justify-end p-2.5 text-center">
+                  <span className="text-[11px] font-bold text-white line-clamp-1 mb-1">
                     {item.title}
-                  </p>
-                  <div className="flex items-center justify-between text-[9px] text-gray-300 mt-0.5">
-                    <span>{item.year || item.format || 'Anime'}</span>
-                    <span className="text-purple-300 group-hover:underline font-semibold">Select</span>
-                  </div>
+                  </span>
+                  <span className="w-full py-1.5 rounded-lg bg-[#7c5cff] text-white text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 shadow-md">
+                    <Check size={12} /> Use Cover
+                  </span>
                 </div>
-
-                {/* Loading / Uploading to ImgBB Overlay */}
-                {isUploading && (
-                  <div className="absolute inset-0 bg-black/85 backdrop-blur-sm z-20 flex flex-col items-center justify-center p-2 text-center">
-                    <Loader2 size={22} className="animate-spin text-[#7c5cff] mb-1.5" />
-                    <span className="text-[10px] font-bold text-white">Uploading to ImgBB...</span>
-                    <span className="text-[9px] text-gray-400">Saving as cover</span>
-                  </div>
-                )}
               </div>
             );
           })}
         </div>
-      )}
+      ) : hasSearched ? (
+        <div className="py-8 text-center text-xs text-gray-500">
+          No covers available for this search.
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+const DEFAULT_TMDB_KEY = '4e44d9029b1270a757cddc766a1bcb63';
+const DEFAULT_FANART_KEY = 'd2d31f9ecabea050fc7d68aa3146015f';
+
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -11,20 +14,25 @@ export async function GET(request) {
       return NextResponse.json({ success: true, results: [] });
     }
 
+    const tmdbApiKey = process.env.TMDB_API_KEY || DEFAULT_TMDB_KEY;
+    const fanartApiKey = process.env.FANART_API_KEY || DEFAULT_FANART_KEY;
+
     const aniListPromise = fetchAniList(query);
+    const fanartPromise = fetchFanartPosters(query, tmdbApiKey, fanartApiKey);
     const jikanPromise = fetchJikan(query);
 
-    const [aniSettled, jikanSettled] = await Promise.allSettled([
+    const [aniSettled, fanartSettled, jikanSettled] = await Promise.allSettled([
       aniListPromise,
+      fanartPromise,
       jikanPromise,
     ]);
 
     const aniResults = aniSettled.status === 'fulfilled' ? aniSettled.value : [];
+    const fanartResults = fanartSettled.status === 'fulfilled' ? fanartSettled.value : [];
     let jikanResults = jikanSettled.status === 'fulfilled' ? jikanSettled.value : [];
 
-    // Resilient fallback: If Jikan failed (e.g. MAL 504 gateway error or rate limit),
-    // fetch from Kitsu as a seamless secondary provider so the user always has 8-10 results.
-    if (jikanResults.length === 0) {
+    // Fallback: If Jikan failed, fetch from Kitsu
+    if (jikanResults.length === 0 && fanartResults.length === 0) {
       try {
         jikanResults = await fetchKitsu(query);
       } catch (kitsuErr) {
@@ -32,11 +40,12 @@ export async function GET(request) {
       }
     }
 
-    // Interleave or combine results
+    // Interleave or combine results with AniList and Fanart prioritized
     const results = [];
-    const maxLen = Math.max(aniResults.length, jikanResults.length);
+    const maxLen = Math.max(aniResults.length, fanartResults.length, jikanResults.length);
     for (let i = 0; i < maxLen; i++) {
       if (aniResults[i]) results.push(aniResults[i]);
+      if (fanartResults[i]) results.push(fanartResults[i]);
       if (jikanResults[i]) results.push(jikanResults[i]);
     }
 
@@ -47,6 +56,7 @@ export async function GET(request) {
       results,
       providers: {
         aniList: aniResults.length,
+        fanart: fanartResults.length,
         jikan: jikanResults.length,
       },
     });
@@ -59,7 +69,7 @@ export async function GET(request) {
 async function fetchAniList(query) {
   const gqlQuery = `
     query ($search: String) {
-      Page(page: 1, perPage: 6) {
+      Page(page: 1, perPage: 8) {
         media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
           id
           title {
@@ -114,6 +124,77 @@ async function fetchAniList(query) {
       format: item.format || 'Anime',
     };
   }).filter((item) => !!item.imageUrl);
+}
+
+async function fetchFanartPosters(query, tmdbApiKey, fanartApiKey) {
+  try {
+    const tvSearchRes = await fetch(
+      `https://api.themoviedb.org/3/search/tv?api_key=${tmdbApiKey}&query=${encodeURIComponent(query)}&page=1`,
+      { signal: AbortSignal.timeout(4000) }
+    );
+    const tvData = await tvSearchRes.json();
+    const tvShow = tvData.results?.[0];
+
+    let tvdbId = null;
+    if (tvShow) {
+      const extRes = await fetch(
+        `https://api.themoviedb.org/3/tv/${tvShow.id}/external_ids?api_key=${tmdbApiKey}`,
+        { signal: AbortSignal.timeout(4000) }
+      );
+      if (extRes.ok) {
+        const extData = await extRes.json();
+        tvdbId = extData.tvdb_id;
+      }
+    }
+
+    if (tvdbId) {
+      const fanartUrl = `https://webservice.fanart.tv/v3/tv/${tvdbId}?api_key=${fanartApiKey}`;
+      const fRes = await fetch(fanartUrl, { signal: AbortSignal.timeout(5000) });
+      if (fRes.ok) {
+        const d = await fRes.json();
+        const rawPosters = [...(d.tvposter || []), ...(d.seasonposter || [])];
+        return rawPosters.slice(0, 8).map((p, idx) => ({
+          id: `fanart-tv-${p.id || idx}`,
+          source: 'Fanart.tv',
+          title: query,
+          imageUrl: p.url,
+          thumbnailUrl: p.url,
+          year: null,
+          format: 'Official Fanart Poster',
+        }));
+      }
+    }
+
+    // Try movie search
+    const movieSearchRes = await fetch(
+      `https://api.themoviedb.org/3/search/movie?api_key=${tmdbApiKey}&query=${encodeURIComponent(query)}&page=1`,
+      { signal: AbortSignal.timeout(4000) }
+    );
+    if (movieSearchRes.ok) {
+      const mData = await movieSearchRes.json();
+      const movie = mData.results?.[0];
+      if (movie) {
+        const fanartUrl = `https://webservice.fanart.tv/v3/movies/${movie.id}?api_key=${fanartApiKey}`;
+        const fRes = await fetch(fanartUrl, { signal: AbortSignal.timeout(5000) });
+        if (fRes.ok) {
+          const d = await fRes.json();
+          const rawPosters = Array.isArray(d.movieposter) ? d.movieposter : [];
+          return rawPosters.slice(0, 8).map((p, idx) => ({
+            id: `fanart-movie-${p.id || idx}`,
+            source: 'Fanart.tv',
+            title: query,
+            imageUrl: p.url,
+            thumbnailUrl: p.url,
+            year: movie.release_date?.split('-')[0] || null,
+            format: 'Official Fanart Poster',
+          }));
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[fetchFanartPosters error]:', err.message);
+  }
+  return [];
 }
 
 async function fetchJikan(query) {

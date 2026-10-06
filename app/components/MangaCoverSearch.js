@@ -15,7 +15,6 @@ export default function MangaCoverSearch({
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [selectedSource, setSelectedSource] = useState('ALL');
-  const [uploadingId, setUploadingId] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
   const [downloadSuccessId, setDownloadSuccessId] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
@@ -88,31 +87,14 @@ export default function MangaCoverSearch({
     }
   };
 
-  const handleSelectCover = async (item) => {
-    if (uploadingId) return;
-
-    setUploadingId(item.id);
-    try {
-      let finalUrl = '';
-      if (uploadToImgBB) {
-        try {
-          finalUrl = await uploadToImgBB(item.imageUrl);
-        } catch (uploadErr) {
-          console.warn('ImgBB upload failed, falling back to direct URL:', uploadErr);
-          finalUrl = item.imageUrl;
-        }
-      } else {
-        finalUrl = item.imageUrl;
-      }
-
-      onSelectCover(finalUrl || item.imageUrl);
-      onClose();
-    } catch (err) {
-      console.error('Error selecting cover:', err);
+  const handleSelectCover = (item) => {
+    if (!item?.imageUrl) return;
+    // Direct link saving without uploading to ImgBB
+    if (onSelectCover) {
       onSelectCover(item.imageUrl);
+    }
+    if (onClose) {
       onClose();
-    } finally {
-      setUploadingId(null);
     }
   };
 
@@ -141,7 +123,7 @@ export default function MangaCoverSearch({
                 Fetch Manga Cover Artwork
               </h2>
               <p className="text-xs text-gray-400">
-                Official covers from AniList, MyAnimeList & Kitsu
+                Official covers from AniList, Fanart.tv, MyAnimeList & Kitsu
               </p>
             </div>
           </div>
@@ -189,22 +171,30 @@ export default function MangaCoverSearch({
 
           {/* Provider Pills */}
           {results.length > 0 && (
-            <div className="flex items-center gap-2 pt-1">
+            <div className="flex items-center gap-2 pt-1 flex-wrap">
               <span className="text-[11px] text-gray-400 font-medium">Provider:</span>
-              {['ALL', 'ANILIST', 'JIKAN', 'KITSU'].map((src) => (
-                <button
-                  key={src}
-                  type="button"
-                  onClick={() => setSelectedSource(src)}
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition cursor-pointer ${
-                    selectedSource === src
-                      ? 'bg-purple-500/20 border border-purple-500/40 text-purple-300 shadow-sm'
-                      : 'bg-white/5 border border-white/10 text-gray-400 hover:text-white'
-                  }`}
-                >
-                  {src}
-                </button>
-              ))}
+              {['ALL', 'ANILIST', 'FANART.TV', 'JIKAN', 'KITSU'].map((src) => {
+                const count =
+                  src === 'ALL'
+                    ? results.length
+                    : results.filter((item) => item.source.toUpperCase() === src).length;
+                if (count === 0 && src !== 'ALL') return null;
+
+                return (
+                  <button
+                    key={src}
+                    type="button"
+                    onClick={() => setSelectedSource(src)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition cursor-pointer ${
+                      selectedSource === src
+                        ? 'bg-purple-500/20 border border-purple-500/40 text-purple-300 shadow-sm'
+                        : 'bg-white/5 border border-white/10 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    {src} ({count})
+                  </button>
+                );
+              })}
               <span className="ml-auto text-[10px] text-gray-500">
                 {filteredResults.length} {filteredResults.length === 1 ? 'cover' : 'covers'} found
               </span>
@@ -217,118 +207,113 @@ export default function MangaCoverSearch({
           {loading ? (
             <div className="h-64 flex flex-col items-center justify-center gap-3 text-gray-400">
               <Loader2 size={32} className="animate-spin text-purple-400" />
-              <p className="text-xs font-medium">Searching verified manga databases...</p>
+              <p className="text-xs font-medium">Searching verified manga databases & Fanart...</p>
             </div>
           ) : errorMessage ? (
-            <div className="h-64 flex flex-col items-center justify-center gap-2 text-center">
-              <p className="text-xs text-amber-400/90 max-w-sm leading-relaxed">{errorMessage}</p>
+            <div className="h-64 flex flex-col items-center justify-center gap-2 text-center text-gray-400">
+              <p className="text-xs text-red-400">{errorMessage}</p>
+              <p className="text-[11px] text-gray-500">Try modifying your search query.</p>
             </div>
           ) : filteredResults.length > 0 ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
               {filteredResults.map((item) => {
-                const isUploading = uploadingId === item.id;
                 const isDownloading = downloadingId === item.id;
                 const isDownloaded = downloadSuccessId === item.id;
+                const isFanart = item.source.toLowerCase().includes('fanart');
 
                 return (
                   <div
                     key={item.id}
                     onClick={() => handleSelectCover(item)}
-                    className="group relative rounded-2xl overflow-hidden glass-card border border-white/10 hover:border-purple-500/50 transition duration-200 cursor-pointer flex flex-col justify-between"
+                    className="group relative rounded-2xl overflow-hidden border border-white/10 hover:border-purple-500/50 bg-black/40 transition-all duration-300 flex flex-col cursor-pointer shadow-lg hover:shadow-purple-500/10 hover:-translate-y-1"
                   >
-                    {/* Cover Image */}
-                    <div className="relative aspect-[2/3] bg-black/40 overflow-hidden">
+                    {/* Poster */}
+                    <div className="relative aspect-[3/4] w-full overflow-hidden bg-black/60">
                       <img
                         src={item.imageUrl}
                         alt={item.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
 
-                      {/* Source Badge */}
-                      <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-md border border-white/10 text-[9px] font-extrabold text-purple-300">
-                        {item.source}
+                      {/* Provider Badge */}
+                      <div className="absolute top-2 left-2 flex gap-1">
+                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider backdrop-blur-md shadow-md ${
+                          item.source === 'AniList'
+                            ? 'bg-[#02a9ff]/80 text-white'
+                            : isFanart
+                            ? 'bg-pink-600/80 text-white'
+                            : item.source === 'Jikan'
+                            ? 'bg-[#2e51a2]/80 text-white'
+                            : 'bg-orange-600/80 text-white'
+                        }`}>
+                          {item.source}
+                        </span>
                       </div>
 
-                      {/* Chapters / Format badge */}
-                      {item.chapters && (
-                        <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[9px] font-mono text-gray-300">
-                          {item.chapters} Ch
-                        </div>
-                      )}
-
-                      {/* Hover Overlay */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3 gap-2">
+                      {/* Action buttons overlay */}
+                      <div className="absolute top-2 right-2 flex gap-1">
                         <button
                           type="button"
-                          className="w-full py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg"
+                          onClick={(e) => handleDownload(item, e)}
+                          disabled={isDownloading}
+                          title="Download Image"
+                          className="p-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-white/80 hover:text-white backdrop-blur-md transition cursor-pointer"
                         >
-                          {isUploading ? (
-                            <>
-                              <Loader2 size={13} className="animate-spin" />
-                              <span>Applying...</span>
-                            </>
+                          {isDownloading ? (
+                            <Loader2 size={12} className="animate-spin text-purple-400" />
+                          ) : isDownloaded ? (
+                            <Check size={12} className="text-emerald-400" />
                           ) : (
-                            <>
-                              <Check size={13} />
-                              <span>Use This Cover</span>
-                            </>
+                            <Download size={12} />
                           )}
                         </button>
+                      </div>
 
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={(e) => handleDownload(item, e)}
-                            className="flex-1 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[10px] font-bold flex items-center justify-center gap-1 backdrop-blur-md"
-                            title="Save cover image to computer"
-                          >
-                            {isDownloading ? (
-                              <Loader2 size={11} className="animate-spin" />
-                            ) : isDownloaded ? (
-                              <Check size={11} className="text-emerald-400" />
-                            ) : (
-                              <Download size={11} />
-                            )}
-                            <span>{isDownloaded ? 'Saved' : 'Save'}</span>
-                          </button>
-
-                          {item.siteUrl && (
-                            <a
-                              href={item.siteUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-gray-300 hover:text-white"
-                              title="Open in database"
-                            >
-                              <ExternalLink size={12} />
-                            </a>
-                          )}
-                        </div>
+                      {/* Select Cover Overlay on Hover */}
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-3 text-center">
+                        <button
+                          type="button"
+                          className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold uppercase tracking-wider shadow-lg flex items-center gap-1.5 transition cursor-pointer"
+                        >
+                          <Check size={14} />
+                          <span>Use Cover</span>
+                        </button>
                       </div>
                     </div>
 
-                    {/* Metadata Footer */}
-                    <div className="p-3 bg-black/40 border-t border-white/5 space-y-0.5">
-                      <h4 className="text-xs font-bold text-white line-clamp-1 group-hover:text-purple-300 transition">
-                        {item.title}
-                      </h4>
-                      <div className="flex items-center justify-between text-[10px] text-gray-400 font-medium">
-                        <span>{item.format}</span>
-                        <span>{item.year}</span>
+                    {/* Metadata summary */}
+                    <div className="p-3 bg-white/[0.02] flex flex-col justify-between flex-1">
+                      <div>
+                        <h4 className="text-xs font-bold text-white line-clamp-1 group-hover:text-purple-400 transition-colors" title={item.title}>
+                          {item.title}
+                        </h4>
+                        {item.romajiTitle && item.romajiTitle !== item.title && (
+                          <p className="text-[10px] text-gray-400 line-clamp-1 italic mt-0.5" title={item.romajiTitle}>
+                            {item.romajiTitle}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5 text-[10px] text-gray-400">
+                        <span>{item.year !== 'N/A' ? item.year : ''}</span>
+                        {item.chapters && <span>{item.chapters} Ch</span>}
+                        {item.format && <span className="uppercase text-[9px]">{item.format}</span>}
                       </div>
                     </div>
                   </div>
                 );
               })}
             </div>
+          ) : hasSearched ? (
+            <div className="h-64 flex flex-col items-center justify-center gap-2 text-center text-gray-400">
+              <p className="text-xs">No manga covers found for "{query}".</p>
+              <p className="text-[11px] text-gray-500">Check spelling or search alternative title.</p>
+            </div>
           ) : (
-            <div className="h-64 flex flex-col items-center justify-center gap-2 text-gray-500 text-center">
-              <ImageIcon size={36} className="text-gray-600 mb-1" />
-              <p className="text-xs font-medium">
-                {hasSearched ? 'No results found. Try a different query.' : 'Search for a manga title to find official cover art.'}
-              </p>
+            <div className="h-64 flex flex-col items-center justify-center gap-2 text-center text-gray-400">
+              <BookOpen size={28} className="text-purple-400/40 mb-1" />
+              <p className="text-xs font-medium">Search to find official manga artwork</p>
+              <p className="text-[11px] text-gray-500">Supports Romanized, English, and Japanese names</p>
             </div>
           )}
         </div>

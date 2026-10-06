@@ -23,7 +23,7 @@ import {
   Star, Flame, TrendingUp, Clock, Sparkles, Film, Bookmark, Bell, Menu, X,
   Tv, Eye, ShieldCheck, Heart, User, Filter, Compass, Calendar, AlertTriangle,
   Youtube, Video, CheckSquare, Square, ExternalLink, Globe, Trophy, Award,
-  BookOpen, HardDrive, Headphones, Music, Disc, Edit3
+  BookOpen, HardDrive, Headphones, Music, Disc, Edit3, Check, Image as ImageIcon
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -113,7 +113,9 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       isMovie: false,
       title: (anime?.title || 'UNTITLED ANIME').toString().toUpperCase(),
       japaneseTitle: anime.japaneseTitle || 'LOCAL LIBRARY',
-      banner: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop',
+      logoUrl: anime.logoUrl || null,
+      poster: anime.posterUrl || anime.coverUrl || anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || null,
+      banner: anime.bannerUrl || anime.backdropUrl || anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop',
       rating: getDeterministicRating(anime.id, anime.rating),
       episodes: epDisplay,
       totalSeasons: totalSeasons,
@@ -156,7 +158,9 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       isMovie: false,
       title: (manga?.title || 'UNTITLED MANGA').toString().toUpperCase(),
       japaneseTitle: manga.japaneseTitle || 'LOCAL MANGA',
-      banner: manga.thumbnailBase64 || (manga.thumbnailPath ? `/api/image?path=${encodeURIComponent(manga.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=1600&auto=format&fit=crop',
+      logoUrl: manga.logoUrl || null,
+      poster: manga.posterUrl || manga.coverUrl || manga.thumbnailBase64 || (manga.thumbnailPath ? `/api/image?path=${encodeURIComponent(manga.thumbnailPath)}` : null) || null,
+      banner: manga.bannerUrl || manga.backdropUrl || manga.thumbnailBase64 || (manga.thumbnailPath ? `/api/image?path=${encodeURIComponent(manga.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=1600&auto=format&fit=crop',
       rating: getDeterministicRating(manga.id, manga.rating),
       episodes: chDisplay,
       totalSeasons: 0,
@@ -197,7 +201,8 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       isMovie: false,
       title: (story?.title || 'UNTITLED AUDIO STORY').toString().toUpperCase(),
       japaneseTitle: story.japaneseTitle || 'LOCAL AUDIO STORY',
-      banner: story.thumbnailBase64 || (story.thumbnailPath ? `/api/image?path=${encodeURIComponent(story.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=1600&auto=format&fit=crop',
+      logoUrl: story.logoUrl || null,
+      banner: story.bannerUrl || story.backdropUrl || story.thumbnailBase64 || (story.thumbnailPath ? `/api/image?path=${encodeURIComponent(story.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=1600&auto=format&fit=crop',
       rating: getDeterministicRating(story.id, story.rating),
       episodes: trackDisplay,
       totalSeasons: 0,
@@ -252,7 +257,7 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
     };
   });
 
-  if (formattedAnimes.length === 0 && formattedMangas.length === 0 && formattedAudioStories.length === 0 && formattedMovies.length === 0) {
+  if (formattedAnimes.length === 0 && formattedMangas.length === 0 && formattedMovies.length === 0) {
     return [{
       id: 'placeholder',
       mediaType: 'anime',
@@ -273,8 +278,8 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
     }];
   }
 
-  // Prioritize in-progress items, followed by top-rated
-  const allItems = [...formattedAnimes, ...formattedMangas, ...formattedAudioStories, ...formattedMovies];
+  // Prioritize in-progress items, followed by top-rated (excluding audio stories from hero banner slider)
+  const allItems = [...formattedAnimes, ...formattedMangas, ...formattedMovies];
   const inProgressItems = allItems
     .filter(item => item.inProgress)
     .sort((a, b) => b.lastActivity - a.lastActivity);
@@ -315,7 +320,11 @@ export default function Dashboard({ onSelectAnime }) {
 
   useEffect(() => {
     const handleWindowScroll = () => {
-      setIsScrolled(window.scrollY > 20);
+      // Trigger after scrolling 15% of the hero banner (10-20% range)
+      const heroElement = document.getElementById('hero');
+      const bannerHeight = heroElement ? heroElement.offsetHeight : window.innerHeight;
+      const threshold = bannerHeight * 0.15;
+      setIsScrolled(window.scrollY > threshold);
     };
     window.addEventListener('scroll', handleWindowScroll, { passive: true });
     handleWindowScroll();
@@ -338,6 +347,20 @@ export default function Dashboard({ onSelectAnime }) {
   const [mangaTotalChapters, setMangaTotalChapters] = useState('');
   const [fetchingMangaOnline, setFetchingMangaOnline] = useState(false);
   const [mangaOnlineMessage, setMangaOnlineMessage] = useState('');
+  // Manga Online Search & Artwork State (AniList, Fanart.tv, TMDB)
+  const [mangaSearchQuery, setMangaSearchQuery] = useState('');
+  const [mangaSearchResults, setMangaSearchResults] = useState([]);
+  const [mangaSearching, setMangaSearching] = useState(false);
+  const [mangaSearchError, setMangaSearchError] = useState('');
+  const [mangaFetchingDetails, setMangaFetchingDetails] = useState(false);
+  const [hasSearchedManga, setHasSearchedManga] = useState(false);
+  const [selectedMangaOnline, setSelectedMangaOnline] = useState(null);
+  const [mangaBannerUrl, setMangaBannerUrl] = useState('');
+  const [mangaLogoUrl, setMangaLogoUrl] = useState('');
+  const [enableMangaLogo, setEnableMangaLogo] = useState(false);
+  const [mangaImages, setMangaImages] = useState({ covers: [], banners: [], logos: [] });
+  const [mangaRomajiTitle, setMangaRomajiTitle] = useState('');
+  const [mangaYear, setMangaYear] = useState('');
 
   // Audio Story Modal & Form States
   const [showAddAudioStoryModal, setShowAddAudioStoryModal] = useState(false);
@@ -391,6 +414,21 @@ export default function Dashboard({ onSelectAnime }) {
   const [showOnlineSearchAdd, setShowOnlineSearchAdd] = useState(false);
   const [addTotalSeasons, setAddTotalSeasons] = useState('1');
   const [addTotalEpisodes, setAddTotalEpisodes] = useState('');
+  // Anime Online Search & Artwork State (AniList, Fanart.tv, TMDB)
+  const [animeSearchQuery, setAnimeSearchQuery] = useState('');
+  const [animeSearchResults, setAnimeSearchResults] = useState([]);
+  const [animeSearching, setAnimeSearching] = useState(false);
+  const [animeSearchError, setAnimeSearchError] = useState('');
+  const [animeFetchingDetails, setAnimeFetchingDetails] = useState(false);
+  const [hasSearchedAnime, setHasSearchedAnime] = useState(false);
+  const [selectedAnimeOnline, setSelectedAnimeOnline] = useState(null);
+  const [animeBannerUrl, setAnimeBannerUrl] = useState('');
+  const [animeLogoUrl, setAnimeLogoUrl] = useState('');
+  const [enableAnimeLogo, setEnableAnimeLogo] = useState(false);
+  const [animeImages, setAnimeImages] = useState({ covers: [], banners: [], logos: [] });
+  const [animeRomajiTitle, setAnimeRomajiTitle] = useState('');
+  const [animeOverview, setAnimeOverview] = useState('');
+  const [animeYear, setAnimeYear] = useState('');
 
   // YouTube Playlist tab state
   const [addModalTab, setAddModalTab] = useState('local'); // 'local' | 'youtube'
@@ -408,6 +446,12 @@ export default function Dashboard({ onSelectAnime }) {
   const [editTitle, setEditTitle] = useState('');
   const [editGenres, setEditGenres] = useState([]);
   const [editCoverUrl, setEditCoverUrl] = useState('');
+  const [editBannerUrl, setEditBannerUrl] = useState('');
+  const [editLogoUrl, setEditLogoUrl] = useState('');
+  const [enableEditAnimeLogo, setEnableEditAnimeLogo] = useState(false);
+  const [editAnimeImages, setEditAnimeImages] = useState({ covers: [], banners: [], logos: [] });
+  const [searchingEditArtwork, setSearchingEditArtwork] = useState(false);
+  const [editArtworkSearchQuery, setEditArtworkSearchQuery] = useState('');
   const [uploadingEditCover, setUploadingEditCover] = useState(false);
   const [showOnlineSearchEdit, setShowOnlineSearchEdit] = useState(false);
   const [editTotalSeasons, setEditTotalSeasons] = useState('1');
@@ -422,6 +466,8 @@ export default function Dashboard({ onSelectAnime }) {
   const mangaScrollRef = useRef(null);
   // Ref for audio story horizontal scroll
   const audioStoryScrollRef = useRef(null);
+  // Ref for local anime library horizontal scroll
+  const animeScrollRef = useRef(null);
 
   // Weekly Popular Anime from Internet (Top 10 of the week) with Local Storage Cache
   const [weeklyPopular, setWeeklyPopular] = useState(() => {
@@ -1243,6 +1289,19 @@ export default function Dashboard({ onSelectAnime }) {
     };
   }, [showActionModal]);
 
+  // Open Add Anime Modal if redirected with ?addAnime=true
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('addAnime') === 'true') {
+          setShowAddModal(true);
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      } catch (e) {}
+    }
+  }, []);
+
   // Load animes & mangas: localStorage first, then Firestore
   useEffect(() => {
     if (!currentUser) return;
@@ -1585,6 +1644,157 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
+  // ── Anime Online Search & Details Handlers ──────────────────────────────────
+  const handleSearchAnimeOnline = async (e) => {
+    if (e) e.preventDefault();
+    const q = (animeSearchQuery || animeTitle).trim();
+    if (!q) return;
+
+    setAnimeSearching(true);
+    setAnimeSearchError('');
+    setHasSearchedAnime(true);
+
+    try {
+      const res = await fetch(`/api/anime/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.results)) {
+        setAnimeSearchResults(data.results);
+        if (data.results.length === 0) {
+          setAnimeSearchError(`No anime found matching "${q}".`);
+        }
+      } else {
+        setAnimeSearchError(data.error || 'Failed to search anime.');
+      }
+    } catch (err) {
+      console.error('[handleSearchAnimeOnline error]:', err);
+      setAnimeSearchError('Network error while searching online.');
+    } finally {
+      setAnimeSearching(false);
+    }
+  };
+
+  const handleSelectAnimeOnline = async (item) => {
+    setSelectedAnimeOnline(item);
+    setAnimeFetchingDetails(true);
+    setAnimeSearchError('');
+
+    try {
+      const res = await fetch(
+        `/api/anime/details?id=${encodeURIComponent(item.id || item.aniListId || '')}&q=${encodeURIComponent(item.title || '')}`
+      );
+      const data = await res.json();
+
+      if (data.success && data.anime) {
+        const a = data.anime;
+        setAnimeTitle(a.title || item.title || '');
+        setAnimeRomajiTitle(a.romajiTitle || item.romajiTitle || '');
+        if (a.overview) setAnimeOverview(a.overview);
+        if (a.year) setAnimeYear(a.year);
+        if (a.episodes) setAddTotalEpisodes(String(a.episodes));
+        if (a.totalSeasons) setAddTotalSeasons(String(a.totalSeasons));
+
+        // Auto-match and select genres (Item 4)
+        if (Array.isArray(a.genres) && a.genres.length > 0) {
+          const matched = a.genres
+            .map((g) =>
+              GENRES_LIST.find(
+                (gl) =>
+                  gl.toLowerCase() === g.toLowerCase() ||
+                  gl.toLowerCase().includes(g.toLowerCase()) ||
+                  g.toLowerCase().includes(gl.toLowerCase())
+              )
+            )
+            .filter(Boolean);
+          const uniqueMatched = Array.from(new Set(matched))
+            .filter((g) => g !== 'All')
+            .slice(0, 5);
+          if (uniqueMatched.length > 0) {
+            setAddGenres(uniqueMatched);
+          }
+        }
+
+        // Cover picture (Item 1 & 3: direct AniList cover picture)
+        if (a.coverUrl || a.posterUrl || item.posterUrl) {
+          setCoverUrl(a.coverUrl || a.posterUrl || item.posterUrl);
+        }
+
+        // Banner picture (Item 2 & 3: AniList and Fanart.tv wide banner)
+        if (a.bannerUrl || item.backdropUrl) {
+          setAnimeBannerUrl(a.bannerUrl || item.backdropUrl);
+        }
+
+        // Title art / Logo (Item 1: Fanart.tv logo)
+        if (a.logoUrl) {
+          setAnimeLogoUrl(a.logoUrl);
+          setEnableAnimeLogo(true);
+        }
+
+        setAnimeImages(a.images || { covers: [], banners: [], logos: [] });
+      } else {
+        setAnimeTitle(item.title || '');
+        if (item.posterUrl) setCoverUrl(item.posterUrl);
+        if (item.backdropUrl) setAnimeBannerUrl(item.backdropUrl);
+        if (item.episodes) setAddTotalEpisodes(String(item.episodes));
+        if (Array.isArray(item.genres) && item.genres.length > 0) {
+          const matched = item.genres
+            .map((g) =>
+              GENRES_LIST.find(
+                (gl) =>
+                  gl.toLowerCase() === g.toLowerCase() ||
+                  gl.toLowerCase().includes(g.toLowerCase()) ||
+                  g.toLowerCase().includes(gl.toLowerCase())
+              )
+            )
+            .filter(Boolean);
+          const uniqueMatched = Array.from(new Set(matched))
+            .filter((g) => g !== 'All')
+            .slice(0, 5);
+          if (uniqueMatched.length > 0) {
+            setAddGenres(uniqueMatched);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[handleSelectAnimeOnline error]:', err);
+      setAnimeTitle(item.title || '');
+      if (item.posterUrl) setCoverUrl(item.posterUrl);
+      if (item.backdropUrl) setAnimeBannerUrl(item.backdropUrl);
+    } finally {
+      setAnimeFetchingDetails(false);
+    }
+  };
+
+  const handleAnimeCoverUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setCoverUrl(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAnimeBannerUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setAnimeBannerUrl(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAnimeLogoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setAnimeLogoUrl(ev.target.result);
+      setEnableAnimeLogo(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Add Anime
   const handleAddAnime = async (e) => {
     e.preventDefault();
@@ -1612,10 +1822,14 @@ export default function Dashboard({ onSelectAnime }) {
 
       const animeData = {
         title: animeTitle.trim(),
+        romajiTitle: animeRomajiTitle || '',
+        japaneseTitle: animeRomajiTitle || '',
         folderPath: cleanPath,
         episodeCount: scanResult.length,
         totalSeasons: totalSeasonsVal,
         totalEpisodes: totalEpisodesVal,
+        year: animeYear || new Date().getFullYear().toString(),
+        description: animeOverview || '',
         progressPercent: 0,
         coverGradient: randomGradient,
         createdAt: new Date().toISOString(),
@@ -1624,6 +1838,11 @@ export default function Dashboard({ onSelectAnime }) {
         lastOpenedAt: new Date().toISOString(),
         userId: getUserId(),
         thumbnailBase64: coverUrl || '',
+        coverUrl: coverUrl || '',
+        posterUrl: coverUrl || '',
+        bannerUrl: animeBannerUrl || '',
+        backdropUrl: animeBannerUrl || '',
+        logoUrl: enableAnimeLogo ? (animeLogoUrl || '') : '',
         genres: addGenres,
       };
 
@@ -1676,7 +1895,18 @@ export default function Dashboard({ onSelectAnime }) {
       setShowAddModal(false);
       setFolderPath('');
       setAnimeTitle('');
+      setAnimeRomajiTitle('');
+      setAnimeOverview('');
+      setAnimeYear('');
       setCoverUrl('');
+      setAnimeBannerUrl('');
+      setAnimeLogoUrl('');
+      setEnableAnimeLogo(false);
+      setAnimeImages({ covers: [], banners: [], logos: [] });
+      setSelectedAnimeOnline(null);
+      setAnimeSearchQuery('');
+      setAnimeSearchResults([]);
+      setAnimeSearchError('');
       setAddGenres([]);
       setAddTotalSeasons('1');
       setAddTotalEpisodes('');
@@ -1769,6 +1999,158 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
+  // ── Manga Online Search & Details Handlers ──────────────────────────────────
+  const handleSearchMangaOnline = async (e) => {
+    if (e) e.preventDefault();
+    const q = (mangaSearchQuery || mangaTitle || '').trim();
+    if (!q) return;
+
+    setMangaSearching(true);
+    setMangaSearchError('');
+    setHasSearchedManga(true);
+
+    try {
+      const res = await fetch(`/api/manga/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.results)) {
+        setMangaSearchResults(data.results);
+        if (data.results.length === 0) {
+          setMangaSearchError(`No manga found matching "${q}".`);
+        }
+      } else {
+        setMangaSearchError(data.error || 'Failed to search manga.');
+      }
+    } catch (err) {
+      console.error('[handleSearchMangaOnline error]:', err);
+      setMangaSearchError('Network error while searching online.');
+    } finally {
+      setMangaSearching(false);
+    }
+  };
+
+  const handleSelectMangaOnline = async (item) => {
+    setSelectedMangaOnline(item);
+    setMangaFetchingDetails(true);
+    setMangaSearchError('');
+
+    try {
+      const res = await fetch(
+        `/api/manga/details?id=${encodeURIComponent(item.id || item.aniListId || '')}&q=${encodeURIComponent(item.title || '')}`
+      );
+      const data = await res.json();
+
+      if (data.success && data.manga) {
+        const m = data.manga;
+        setMangaTitle(m.title || item.title || '');
+        setMangaRomajiTitle(m.romajiTitle || item.romajiTitle || '');
+        if (m.synopsis || m.overview) setMangaDescription(m.synopsis || m.overview);
+        if (m.year) setMangaYear(String(m.year));
+        if (m.chapters) setMangaTotalChapters(String(m.chapters));
+        if (m.volumes) setMangaTotalVolumes(String(m.volumes));
+
+        // Auto-match and select genres (Requirement 4)
+        if (Array.isArray(m.genres) && m.genres.length > 0) {
+          const matched = m.genres
+            .map((g) =>
+              GENRES_LIST.find(
+                (gl) =>
+                  gl.toLowerCase() === g.toLowerCase() ||
+                  gl.toLowerCase().includes(g.toLowerCase()) ||
+                  g.toLowerCase().includes(gl.toLowerCase())
+              )
+            )
+            .filter(Boolean);
+          const uniqueMatched = Array.from(new Set(matched))
+            .filter((g) => g !== 'All')
+            .slice(0, 5);
+          if (uniqueMatched.length > 0) {
+            setMangaGenres(uniqueMatched);
+          }
+        }
+
+        // Cover picture (Item 1 & 3: direct AniList cover picture)
+        if (m.coverUrl || m.posterUrl || item.posterUrl) {
+          setMangaCoverUrl(m.coverUrl || m.posterUrl || item.posterUrl);
+        }
+
+        // Banner picture (Item 2 & 3: AniList and Fanart.tv wide banner)
+        if (m.bannerUrl || item.backdropUrl) {
+          setMangaBannerUrl(m.bannerUrl || item.backdropUrl);
+        }
+
+        // Title art / Logo (Item 1: Fanart.tv logo)
+        if (m.logoUrl) {
+          setMangaLogoUrl(m.logoUrl);
+          setEnableMangaLogo(true);
+        }
+
+        setMangaImages(m.images || { covers: [], banners: [], logos: [] });
+      } else {
+        setMangaTitle(item.title || '');
+        if (item.posterUrl) setMangaCoverUrl(item.posterUrl);
+        if (item.backdropUrl) setMangaBannerUrl(item.backdropUrl);
+        if (item.chapters) setMangaTotalChapters(String(item.chapters));
+        if (item.volumes) setMangaTotalVolumes(String(item.volumes));
+        if (Array.isArray(item.genres) && item.genres.length > 0) {
+          const matched = item.genres
+            .map((g) =>
+              GENRES_LIST.find(
+                (gl) =>
+                  gl.toLowerCase() === g.toLowerCase() ||
+                  gl.toLowerCase().includes(g.toLowerCase()) ||
+                  g.toLowerCase().includes(gl.toLowerCase())
+              )
+            )
+            .filter(Boolean);
+          const uniqueMatched = Array.from(new Set(matched))
+            .filter((g) => g !== 'All')
+            .slice(0, 5);
+          if (uniqueMatched.length > 0) {
+            setMangaGenres(uniqueMatched);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[handleSelectMangaOnline error]:', err);
+      setMangaTitle(item.title || '');
+      if (item.posterUrl) setMangaCoverUrl(item.posterUrl);
+      if (item.backdropUrl) setMangaBannerUrl(item.backdropUrl);
+    } finally {
+      setMangaFetchingDetails(false);
+    }
+  };
+
+  const handleMangaCoverUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setMangaCoverUrl(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleMangaBannerUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setMangaBannerUrl(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleMangaLogoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setMangaLogoUrl(ev.target.result);
+      setEnableMangaLogo(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleFetchMangaOnline = async () => {
     const query = (mangaTitle || '').trim();
     if (!query) {
@@ -1845,6 +2227,8 @@ export default function Dashboard({ onSelectAnime }) {
       const totalVols = mangaTotalVolumes ? parseInt(mangaTotalVolumes, 10) : null;
       const mangaData = {
         title: mangaTitle.trim(),
+        romajiTitle: mangaRomajiTitle || '',
+        year: mangaYear || '',
         folderPath: cleanPath,
         chapterCount: mangaScanResult.length,
         totalChapters: totalChs,
@@ -1861,6 +2245,11 @@ export default function Dashboard({ onSelectAnime }) {
         lastOpenedAt: new Date().toISOString(),
         userId: getUserId(),
         thumbnailBase64: mangaCoverUrl || '',
+        coverUrl: mangaCoverUrl || '',
+        posterUrl: mangaCoverUrl || '',
+        bannerUrl: mangaBannerUrl || '',
+        backdropUrl: mangaBannerUrl || '',
+        logoUrl: enableMangaLogo ? (mangaLogoUrl || '') : '',
         genres: mangaGenres,
         type: 'manga',
       };
@@ -1912,7 +2301,18 @@ export default function Dashboard({ onSelectAnime }) {
       setShowAddMangaModal(false);
       setMangaFolderPath('');
       setMangaTitle('');
+      setMangaRomajiTitle('');
+      setMangaYear('');
       setMangaCoverUrl('');
+      setMangaBannerUrl('');
+      setMangaLogoUrl('');
+      setEnableMangaLogo(false);
+      setMangaImages({ covers: [], banners: [], logos: [] });
+      setSelectedMangaOnline(null);
+      setMangaSearchQuery('');
+      setMangaSearchResults([]);
+      setMangaSearchError('');
+      setHasSearchedManga(false);
       setMangaGenres([]);
       setMangaScanResult([]);
       setMangaDescription('');
@@ -2650,11 +3050,88 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
+  const handleEditBannerUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setEditBannerUrl(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleEditLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setEditLogoUrl(ev.target.result);
+      setEnableEditAnimeLogo(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleEditBannerBrowse = async () => {
+    try {
+      const pickRes = await fetch('/api/select-image');
+      const pickData = await pickRes.json();
+      if (pickData.success && pickData.path) {
+        setEditBannerUrl(pickData.path);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleEditLogoBrowse = async () => {
+    try {
+      const pickRes = await fetch('/api/select-image');
+      const pickData = await pickRes.json();
+      if (pickData.success && pickData.path) {
+        setEditLogoUrl(pickData.path);
+        setEnableEditAnimeLogo(true);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchEditAnimeArtwork = async (term) => {
+    const q = (term || editArtworkSearchQuery || editTitle || '').trim();
+    if (!q) return;
+    setSearchingEditArtwork(true);
+    try {
+      const res = await fetch(`/api/anime/details?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (data.success && data.anime) {
+        const imgs = data.anime.images || { covers: [], banners: [], logos: [] };
+        const banners = [...(imgs.banners || [])];
+        if (data.anime.bannerUrl && !banners.some(b => b.url === data.anime.bannerUrl)) {
+          banners.unshift({ url: data.anime.bannerUrl, source: 'AniList' });
+        }
+        const logos = [...(imgs.logos || [])];
+        if (data.anime.logoUrl && !logos.some(l => l.url === data.anime.logoUrl)) {
+          logos.unshift({ url: data.anime.logoUrl, source: 'Fanart.tv' });
+        }
+        const covers = [...(imgs.covers || [])];
+        if (data.anime.coverUrl && !covers.some(c => c.url === data.anime.coverUrl)) {
+          covers.unshift({ url: data.anime.coverUrl, source: 'AniList' });
+        }
+        setEditAnimeImages({ covers, banners, logos });
+      }
+    } catch (err) {
+      console.error('Failed to fetch anime artwork for edit:', err);
+    } finally {
+      setSearchingEditArtwork(false);
+    }
+  };
+
   const handleOpenEditModal = (anime, e) => {
     e.stopPropagation();
     e.preventDefault();
     setEditingAnime(anime);
-    setEditTitle(anime.title || '');
+    const initialTitle = anime.title || '';
+    setEditTitle(initialTitle);
     setEditTotalSeasons(anime.totalSeasons ? String(anime.totalSeasons) : '1');
     setEditTotalEpisodes(anime.totalEpisodes ? String(anime.totalEpisodes) : String(anime.episodeCount || ''));
     setShowOnlineSearchEdit(false);
@@ -2669,6 +3146,15 @@ export default function Dashboard({ onSelectAnime }) {
     setEditGenres(validGenres);
 
     setEditCoverUrl(anime.thumbnailBase64 || anime.thumbnailPath || '');
+    setEditBannerUrl(anime.bannerUrl || anime.backdropUrl || '');
+    setEditLogoUrl(anime.logoUrl || '');
+    setEnableEditAnimeLogo(Boolean(anime.logoUrl));
+    setEditArtworkSearchQuery(initialTitle);
+    setEditAnimeImages({ covers: [], banners: [], logos: [] });
+
+    if (initialTitle) {
+      fetchEditAnimeArtwork(initialTitle);
+    }
   };
 
   const handleSaveEdit = async (e) => {
@@ -2685,6 +3171,9 @@ export default function Dashboard({ onSelectAnime }) {
       genres: editGenres,
       totalSeasons: totalSeasonsVal,
       totalEpisodes: totalEpisodesVal,
+      bannerUrl: editBannerUrl || '',
+      backdropUrl: editBannerUrl || '',
+      logoUrl: enableEditAnimeLogo ? (editLogoUrl || '') : '',
       updatedAt: new Date().toISOString(),
     };
 
@@ -2712,6 +3201,9 @@ export default function Dashboard({ onSelectAnime }) {
           totalEpisodes: totalEpisodesVal,
           thumbnailBase64: update.thumbnailBase64 || '',
           thumbnailPath: update.thumbnailPath || '',
+          bannerUrl: editBannerUrl || '',
+          backdropUrl: editBannerUrl || '',
+          logoUrl: enableEditAnimeLogo ? (editLogoUrl || '') : '',
           updatedAt: new Date().toISOString()
         }, { merge: true });
       } catch (err) {
@@ -2733,6 +3225,10 @@ export default function Dashboard({ onSelectAnime }) {
     setEditingAnime(null);
     setEditTotalSeasons('1');
     setEditTotalEpisodes('');
+    setEditBannerUrl('');
+    setEditLogoUrl('');
+    setEnableEditAnimeLogo(false);
+    setEditAnimeImages({ covers: [], banners: [], logos: [] });
   };
 
   // Save Settings
@@ -2851,6 +3347,39 @@ export default function Dashboard({ onSelectAnime }) {
       if (sortBy === 'progress') return getAnimeProgressPercent(b) - getAnimeProgressPercent(a);
       return new Date(b.lastOpenedAt || 0) - new Date(a.lastOpenedAt || 0);
     });
+
+  // Tracked anime prioritized by recently watched first, then latest added (Max 10 for horizontal slider)
+  const sortedTrackedAnimes = useMemo(() => {
+    return [...animes]
+      .filter((anime) => {
+        if (!anime) return false;
+        if (selectedGenre !== 'All') {
+          let genres = [];
+          if (Array.isArray(anime.genres)) {
+            genres = anime.genres;
+          } else if (typeof anime.genres === 'string' && anime.genres.trim()) {
+            genres = anime.genres.split(',').map((g) => g.trim());
+          }
+          if (!genres.includes(selectedGenre)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aWatch = new Date(a.lastOpenedAt || a.lastWatchedAt || 0).getTime();
+        const bWatch = new Date(b.lastOpenedAt || b.lastWatchedAt || 0).getTime();
+        if (aWatch > 0 && bWatch > 0) return bWatch - aWatch;
+        if (aWatch > 0 && bWatch <= 0) return -1;
+        if (bWatch > 0 && aWatch <= 0) return 1;
+
+        const timeA = new Date(a.createdAt || a.updatedAt || 0).getTime();
+        const timeB = new Date(b.createdAt || b.updatedAt || 0).getTime();
+        return timeB - timeA;
+      });
+  }, [animes, selectedGenre]);
+
+  const topTrackedAnimes = useMemo(() => {
+    return sortedTrackedAnimes.slice(0, 10);
+  }, [sortedTrackedAnimes]);
 
   // Continue Watching, Reading & Listening items (user's active tracked anime, manga & audio)
   const continueWatchingList = useMemo(() => {
@@ -3054,6 +3583,14 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
+  const scrollAnime = (direction) => {
+    if (animeScrollRef.current) {
+      const { scrollLeft, clientWidth } = animeScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.7 : scrollLeft + clientWidth * 0.7;
+      animeScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
   const scrollGenres = (direction) => {
     if (genresScrollRef.current) {
       const { scrollLeft, clientWidth } = genresScrollRef.current;
@@ -3108,8 +3645,8 @@ export default function Dashboard({ onSelectAnime }) {
       {/* 1. TOP NAVBAR (Transparent over hero banner, smooth glass effect on scroll) */}
       <header
         className={`fixed top-0 left-0 right-0 z-50 px-4 md:px-8 py-3.5 flex items-center justify-between transition-all duration-500 ease-out ${isScrolled
-            ? 'bg-[#07090f]/80 backdrop-blur-xl border-b border-white/10 shadow-lg shadow-black/30'
-            : 'bg-transparent backdrop-blur-none border-b border-transparent shadow-none'
+          ? 'bg-[#07090f]/80 backdrop-blur-xl border-b border-white/10 shadow-lg shadow-black/30'
+          : 'bg-transparent backdrop-blur-none border-b border-transparent shadow-none'
           }`}
       >
         {/* Left Brand */}
@@ -3289,8 +3826,8 @@ export default function Dashboard({ onSelectAnime }) {
           <button
             onClick={() => setManualOffline(!isManualOffline)}
             className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-bold uppercase tracking-wider transition cursor-pointer ${isOffline
-                ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
-                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
               }`}
             title={isOffline ? "Switch to Online Mode" : "Switch to Offline Mode"}
           >
@@ -3316,8 +3853,8 @@ export default function Dashboard({ onSelectAnime }) {
               type="button"
               onClick={() => setShowActionModal(prev => !prev)}
               className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all duration-300 cursor-pointer shadow-lg ${showActionModal
-                  ? 'bg-gradient-to-r from-[#7c5cff] via-purple-600 to-cyan-500 text-white shadow-purple-500/30 ring-2 ring-[#7c5cff]/40'
-                  : 'bg-white/10 hover:bg-white/15 text-white border border-white/15 hover:border-white/30'
+                ? 'bg-gradient-to-r from-[#7c5cff] via-purple-600 to-cyan-500 text-white shadow-purple-500/30 ring-2 ring-[#7c5cff]/40'
+                : 'bg-white/10 hover:bg-white/15 text-white border border-white/15 hover:border-white/30'
                 }`}
               title="Add Media & Stream"
             >
@@ -3358,8 +3895,8 @@ export default function Dashboard({ onSelectAnime }) {
                     }}
                     disabled={isOffline}
                     className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition text-left group ${isOffline
-                        ? 'opacity-40 cursor-not-allowed'
-                        : 'hover:bg-purple-950/40 border border-transparent hover:border-purple-500/30 cursor-pointer'
+                      ? 'opacity-40 cursor-not-allowed'
+                      : 'hover:bg-purple-950/40 border border-transparent hover:border-purple-500/30 cursor-pointer'
                       }`}
                   >
                     <div className="w-8 h-8 rounded-lg bg-[#7c5cff]/20 text-[#a855f7] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
@@ -3382,8 +3919,8 @@ export default function Dashboard({ onSelectAnime }) {
                     }}
                     disabled={isOffline}
                     className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition text-left group ${isOffline
-                        ? 'opacity-40 cursor-not-allowed'
-                        : 'hover:bg-pink-950/40 border border-transparent hover:border-pink-500/30 cursor-pointer'
+                      ? 'opacity-40 cursor-not-allowed'
+                      : 'hover:bg-pink-950/40 border border-transparent hover:border-pink-500/30 cursor-pointer'
                       }`}
                   >
                     <div className="w-8 h-8 rounded-lg bg-pink-500/20 text-pink-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
@@ -3406,8 +3943,8 @@ export default function Dashboard({ onSelectAnime }) {
                     }}
                     disabled={isOffline}
                     className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition text-left group ${isOffline
-                        ? 'opacity-40 cursor-not-allowed'
-                        : 'hover:bg-cyan-950/40 border border-transparent hover:border-cyan-500/30 cursor-pointer'
+                      ? 'opacity-40 cursor-not-allowed'
+                      : 'hover:bg-cyan-950/40 border border-transparent hover:border-cyan-500/30 cursor-pointer'
                       }`}
                   >
                     <div className="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
@@ -3430,8 +3967,8 @@ export default function Dashboard({ onSelectAnime }) {
                     }}
                     disabled={isOffline}
                     className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition text-left group ${isOffline
-                        ? 'opacity-40 cursor-not-allowed'
-                        : 'hover:bg-amber-950/40 border border-transparent hover:border-amber-500/30 cursor-pointer'
+                      ? 'opacity-40 cursor-not-allowed'
+                      : 'hover:bg-amber-950/40 border border-transparent hover:border-amber-500/30 cursor-pointer'
                       }`}
                   >
                     <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
@@ -3522,8 +4059,8 @@ export default function Dashboard({ onSelectAnime }) {
                   setQuickActionsOpen(false);
                 }}
                 className={`flex items-center justify-between w-full px-3 py-2 rounded-xl border text-[11px] font-bold uppercase tracking-wider transition ${isOffline
-                    ? 'bg-amber-500/10 border-amber-500/20 text-amber-400 hover:bg-amber-500/20'
-                    : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                  ? 'bg-amber-500/10 border-amber-500/20 text-amber-400 hover:bg-amber-500/20'
+                  : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
                   }`}
               >
                 <span className="flex items-center gap-1.5">
@@ -3541,8 +4078,8 @@ export default function Dashboard({ onSelectAnime }) {
                 }}
                 disabled={isOffline}
                 className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition ${isOffline
-                    ? 'opacity-40 cursor-not-allowed bg-white/5 text-gray-400'
-                    : 'bg-purple-600/20 text-purple-300 hover:text-white border border-purple-500/30 cursor-pointer'
+                  ? 'opacity-40 cursor-not-allowed bg-white/5 text-gray-400'
+                  : 'bg-purple-600/20 text-purple-300 hover:text-white border border-purple-500/30 cursor-pointer'
                   }`}
               >
                 <Plus size={14} />
@@ -3557,8 +4094,8 @@ export default function Dashboard({ onSelectAnime }) {
                 }}
                 disabled={isOffline}
                 className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition ${isOffline
-                    ? 'opacity-40 cursor-not-allowed bg-white/5 text-gray-400'
-                    : 'bg-pink-600/20 text-pink-300 hover:text-white border border-pink-500/30 cursor-pointer'
+                  ? 'opacity-40 cursor-not-allowed bg-white/5 text-gray-400'
+                  : 'bg-pink-600/20 text-pink-300 hover:text-white border border-pink-500/30 cursor-pointer'
                   }`}
               >
                 <BookOpen size={14} />
@@ -3573,8 +4110,8 @@ export default function Dashboard({ onSelectAnime }) {
                 }}
                 disabled={isOffline}
                 className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition ${isOffline
-                    ? 'opacity-40 cursor-not-allowed bg-white/5 text-gray-400'
-                    : 'bg-cyan-600/20 text-cyan-300 hover:text-white border border-cyan-500/30 cursor-pointer'
+                  ? 'opacity-40 cursor-not-allowed bg-white/5 text-gray-400'
+                  : 'bg-cyan-600/20 text-cyan-300 hover:text-white border border-cyan-500/30 cursor-pointer'
                   }`}
               >
                 <Headphones size={14} />
@@ -3589,8 +4126,8 @@ export default function Dashboard({ onSelectAnime }) {
                 }}
                 disabled={isOffline}
                 className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition ${isOffline
-                    ? 'opacity-40 cursor-not-allowed bg-white/5 text-gray-400'
-                    : 'bg-amber-600/20 text-amber-300 hover:text-white border border-amber-500/30 cursor-pointer'
+                  ? 'opacity-40 cursor-not-allowed bg-white/5 text-gray-400'
+                  : 'bg-amber-600/20 text-amber-300 hover:text-white border border-amber-500/30 cursor-pointer'
                   }`}
               >
                 <Film size={14} />
@@ -3826,6 +4363,10 @@ export default function Dashboard({ onSelectAnime }) {
                     <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('anime'); }} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition text-left cursor-pointer w-full">
                       <Tv size={15} className="text-cyan-400" /> Anime Catalog
                     </button>
+                    <Link href="/animes" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition">
+                      <span className="flex items-center gap-2"><Sparkles size={15} className="text-[#a855f7]" /> All Anime (Library)</span>
+                      <span className="text-[10px] bg-[#7c5cff]/20 text-purple-300 px-2 py-0.5 rounded-full font-bold">See All</span>
+                    </Link>
                     <Link href="/notes" onClick={() => setMobileMenuOpen(false)} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition">
                       <StickyNote size={15} className="text-emerald-400" /> Personal Notes
                     </Link>
@@ -3969,7 +4510,7 @@ export default function Dashboard({ onSelectAnime }) {
       {/* 2. HERO BANNER (98% SCREEN HEIGHT, 16:9 RATIO, AMAZON PRIME VIDEO STYLE TOP VIGNETTE) */}
       <section
         id="hero"
-        className="relative w-full overflow-hidden shadow-2xl bg-[#07090f] border-b border-white/10 h-[98vh] min-h-[580px] max-h-[98vh] flex items-end"
+        className="relative w-full overflow-hidden shadow-2xl bg-[#07090f] h-[98vh] min-h-[580px] max-h-[98vh] flex items-end"
         style={{ aspectRatio: '16 / 9' }}
       >
         {/* Animated Slide Content - Slides Horizontally without empty gap */}
@@ -4029,9 +4570,9 @@ export default function Dashboard({ onSelectAnime }) {
               }}
             />
 
-            {/* Bottom Fade Gradient - merges seamlessly into dashboard background */}
+            {/* Subtle bottom edge blend (does not obscure text or buttons) */}
             <div
-              className="absolute bottom-0 inset-x-0 h-36 md:h-52 z-20 pointer-events-none bg-gradient-to-t from-[#07090f] via-[#07090f]/75 to-transparent"
+              className="absolute bottom-0 inset-x-0 h-16 z-10 pointer-events-none bg-gradient-to-t from-[#07090f]/40 to-transparent"
             />
 
             {/* Right Side Tilted Movie Poster Box (Tilted box style matching reference image) */}
@@ -4055,7 +4596,7 @@ export default function Dashboard({ onSelectAnime }) {
               <div className="w-full md:max-w-2xl lg:max-w-3xl space-y-3 md:space-y-4">
                 {/* Title or Custom Movie Logo */}
                 <div>
-                  {currentHero.isMovie && currentHero.logoUrl ? (
+                  {currentHero.logoUrl ? (
                     <div className="mb-3 max-w-[280px] sm:max-w-[380px] md:max-w-[480px] max-h-16 sm:max-h-20 md:max-h-28 flex items-center">
                       <img
                         src={currentHero.logoUrl}
@@ -4193,48 +4734,45 @@ export default function Dashboard({ onSelectAnime }) {
           </motion.div>
         </AnimatePresence>
 
-        {/* Slider Pagination Controls */}
-        <div className="absolute right-4 bottom-6 md:right-8 md:bottom-8 lg:right-12 lg:bottom-10 z-30 flex items-center gap-3">
-          {/* Prev/Next buttons */}
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => {
-                setSlideDirection(-1);
-                setCurrentSlide((prev) => (prev === 0 ? heroSlides.length - 1 : prev - 1));
-              }}
-              className="p-2.5 rounded-full bg-black/60 hover:bg-[#7c5cff] border border-white/10 text-white transition cursor-pointer"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <button
-              onClick={() => {
-                setSlideDirection(1);
-                setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
-              }}
-              className="p-2.5 rounded-full bg-black/60 hover:bg-[#7c5cff] border border-white/10 text-white transition cursor-pointer"
-            >
-              <ChevronRight size={16} />
-            </button>
-          </div>
-
-          {/* Indicators */}
-          <div className="flex items-center gap-1.5 bg-black/40 px-3 py-2 rounded-full border border-white/10">
-            {heroSlides.map((_, idx) => (
-              <button
-                key={idx}
-                onClick={() => {
-                  setSlideDirection(idx > currentSlide ? 1 : -1);
-                  setCurrentSlide(idx);
-                }}
-                className={`h-2 rounded-full transition-all duration-300 ${idx === currentSlide ? 'w-6 bg-[#7c5cff]' : 'w-2 bg-white/30'}`}
-              />
-            ))}
-          </div>
+        {/* Slider Navigation Chevron Controls (Liquid Glass Effect, No Dots) */}
+        <div className="absolute right-4 bottom-6 md:right-8 md:bottom-8 lg:right-12 lg:bottom-10 z-30 flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => {
+              setSlideDirection(-1);
+              setCurrentSlide((prev) => (prev === 0 ? heroSlides.length - 1 : prev - 1));
+            }}
+            className="w-10 h-10 md:w-11 md:h-11 rounded-full liquid-glass-chevron text-white flex items-center justify-center cursor-pointer shadow-lg active:scale-95 transition-all"
+            title="Previous Slide"
+            aria-label="Previous Slide"
+          >
+            <ChevronLeft size={20} className="drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSlideDirection(1);
+              setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
+            }}
+            className="w-10 h-10 md:w-11 md:h-11 rounded-full liquid-glass-chevron text-white flex items-center justify-center cursor-pointer shadow-lg active:scale-95 transition-all"
+            title="Next Slide"
+            aria-label="Next Slide"
+          >
+            <ChevronRight size={20} className="drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]" />
+          </button>
         </div>
       </section>
 
+      {/* Outside Bottom Black Vignette / Fade Transition (Outside the banner) */}
+      <div
+        className="w-full h-16 sm:h-24 pointer-events-none -mb-16 sm:-mb-24 relative z-10"
+        style={{
+          background: 'linear-gradient(180deg, #07090f 0%, rgba(7, 9, 15, 0.75) 40%, rgba(7, 9, 15, 0.25) 75%, transparent 100%)'
+        }}
+      />
+
       {/* MAIN BODY LAYOUT */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-14">
+      <main className="relative flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-14">
 
         {/* 3. MEDIA FORMAT QUICK NAVIGATION (ANIME, MOVIES, MANGA, AUDIOS) */}
         <section id="media-categories" className="space-y-3">
@@ -4691,8 +5229,8 @@ export default function Dashboard({ onSelectAnime }) {
                   onClick={handleRefreshTrending}
                   disabled={refreshingTrending}
                   className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition cursor-pointer active:scale-95 disabled:opacity-50 ${refreshTrendingSuccess
-                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                      : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-300 hover:text-white'
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                    : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-300 hover:text-white'
                     }`}
                   title="Refetch Trending Today list from online and save"
                 >
@@ -4770,10 +5308,10 @@ export default function Dashboard({ onSelectAnime }) {
                     {/* Rating & Type Badges */}
                     <div className="absolute bottom-16 inset-x-3 flex items-center justify-between pointer-events-none">
                       <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider shadow-md backdrop-blur-md ${show.typeColor === 'amber'
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                          : show.typeColor === 'rose'
-                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                            : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        : show.typeColor === 'rose'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                          : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
                         }`}>
                         {show.typeBadge || show.type}
                       </span>
@@ -4847,9 +5385,6 @@ export default function Dashboard({ onSelectAnime }) {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-xl font-extrabold tracking-wide text-white">Manga or Webtoons</h2>
-                  <span className="px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-300 text-[10px] font-mono font-bold">
-                    {sortedMangas.length}
-                  </span>
                 </div>
               </div>
             </div>
@@ -4861,7 +5396,7 @@ export default function Dashboard({ onSelectAnime }) {
                 className="px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
               >
                 <Plus size={14} />
-                <span className="hidden sm:inline">Add Manga</span>
+                <span className="hidden sm:inline">Add</span>
               </button>
 
               {sortedMangas.length > 0 && (
@@ -4966,8 +5501,8 @@ export default function Dashboard({ onSelectAnime }) {
                             setMangaCompleteConfirm(m);
                           }}
                           className={`p-2 rounded-xl border transition cursor-pointer ${isWatched
-                              ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
-                              : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
+                            ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
+                            : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
                             }`}
                           title={isWatched ? 'Mark Manga Unread' : 'Mark Manga Complete (Watched)'}
                         >
@@ -4989,158 +5524,6 @@ export default function Dashboard({ onSelectAnime }) {
                             </>
                           ) : (
                             m.progressPercent ? `${m.progressPercent}%` : 'Ready'
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        {/* AUDIO STORIES SECTION */}
-        <section id="audios" className="space-y-4 scroll-mt-24">
-          <span id="audio-stories" className="sr-only" />
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
-                <Headphones size={20} />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-xl font-extrabold tracking-wide text-white">Audio Stories</h2>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {sortedAudioStories.length > 0 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => scrollAudioStory('left')}
-                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
-                    title="Scroll left"
-                  >
-                    <ChevronLeft size={18} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => scrollAudioStory('right')}
-                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
-                    title="Scroll right"
-                  >
-                    <ChevronRight size={18} />
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {sortedAudioStories.length === 0 ? (
-            <div className="p-8 rounded-2xl glass-card border border-white/10 text-center space-y-3 bg-white/[0.01]">
-              <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center mx-auto">
-                <Headphones size={24} />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-white">No Audio Stories Tracked Yet</h3>
-                <p className="text-xs text-gray-400 max-w-sm mx-auto mt-1">
-                  Connect any local folder with audio chapters (MP3, M4A, FLAC) or narrative video files (MP4, MKV) to start listening!
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAddAudioStoryModal(true)}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-black font-bold text-xs uppercase tracking-wider inline-flex items-center gap-2 shadow-lg cursor-pointer"
-              >
-                <Plus size={14} />
-                <span>Track Audio Stories Folder</span>
-              </button>
-            </div>
-          ) : (
-            /* Horizontal Slider (X-Axis Scrollable) */
-            <div
-              ref={audioStoryScrollRef}
-              className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
-            >
-              {sortedAudioStories.map((s) => {
-                const isWatched = Boolean(s.isWatched || s.progressPercent === 100 || s.status === 'completed');
-                const coverImg = s.thumbnailBase64 || (s.thumbnailPath ? `/api/image?path=${encodeURIComponent(s.thumbnailPath)}` : null);
-                return (
-                  <div
-                    key={`audio-${s.id}`}
-                    onClick={() => router.push(`/audio-story/${s.id}`)}
-                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-cyan-500/50 transition-all duration-300 shadow-md hover:shadow-xl"
-                  >
-                    <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
-                      {coverImg ? (
-                        <CachedImage
-                          src={coverImg}
-                          alt={s.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-cyan-400/80 bg-gradient-to-br from-cyan-950/30 to-purple-950/20 gap-1.5">
-                          <Headphones size={36} />
-                          <span className="text-[9px] font-mono uppercase tracking-wider">Audio Story</span>
-                        </div>
-                      )}
-
-                      {/* Status / Track Badge */}
-                      <div className="absolute top-2 left-2 flex items-center gap-1">
-                        {isWatched ? (
-                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/90 backdrop-blur-md text-[9px] uppercase font-bold text-white flex items-center gap-1 shadow">
-                            <CheckCircle2 size={10} /> Listened
-                          </span>
-                        ) : (
-                          <div className="px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-md text-cyan-300 font-bold text-[9px] border border-white/10">
-                            {s.trackCount || s.totalTracks || 0} Tracks
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-cyan-500 text-black font-extrabold text-[8px] shadow">
-                        AUDIO
-                      </div>
-
-                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center p-3 gap-2">
-                        <div className="px-3 py-1.5 rounded-xl bg-cyan-500 text-black text-xs font-bold flex items-center gap-1.5 shadow-lg">
-                          <Play size={14} fill="currentColor" />
-                          <span>Listen</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            setAudioStoryCompleteConfirm(s);
-                          }}
-                          className={`p-2 rounded-xl border transition cursor-pointer ${isWatched
-                              ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
-                              : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
-                            }`}
-                          title={isWatched ? 'Mark Unlistened' : 'Mark Listened (Complete)'}
-                        >
-                          <CheckCircle2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
-                      <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-cyan-300 transition-colors">
-                        {s.title}
-                      </h4>
-                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
-                        <span>Audio / Video</span>
-                        <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-1" : "text-cyan-400 font-semibold"}>
-                          {isWatched ? (
-                            <>
-                              <CheckCircle2 size={10} /> Completed
-                            </>
-                          ) : (
-                            s.progressPercent ? `${s.progressPercent}%` : 'Ready'
                           )}
                         </span>
                       </div>
@@ -5344,8 +5727,8 @@ export default function Dashboard({ onSelectAnime }) {
                               setMovieCompleteConfirm(movie);
                             }}
                             className={`p-1.5 rounded-lg border transition cursor-pointer ${isWatched
-                                ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
-                                : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
+                              ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
+                              : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
                               }`}
                             title={isWatched ? 'Mark Incomplete' : 'Mark Watched (Complete)'}
                           >
@@ -5396,7 +5779,7 @@ export default function Dashboard({ onSelectAnime }) {
               {sortedMovies.length > 10 && (
                 <div
                   onClick={() => router.push('/movies')}
-                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col border border-white/10 hover:border-amber-500/50 transition shadow-md hover:shadow-xl bg-amber-950/10 hover:bg-amber-950/20 self-start"
+                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-amber-950/10 hover:bg-amber-950/20 self-start"
                 >
                   <div className="aspect-[2/3] flex flex-col items-center justify-center p-6 text-center space-y-3">
                     <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-300 flex items-center justify-center group-hover:scale-110 transition-transform">
@@ -5412,6 +5795,159 @@ export default function Dashboard({ onSelectAnime }) {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+        </section>
+
+
+        {/* AUDIO STORIES SECTION */}
+        <section id="audios" className="space-y-4 scroll-mt-24">
+          <span id="audio-stories" className="sr-only" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
+                <Headphones size={20} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-extrabold tracking-wide text-white">Audio Stories</h2>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {sortedAudioStories.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => scrollAudioStory('left')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll left"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollAudioStory('right')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll right"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {sortedAudioStories.length === 0 ? (
+            <div className="p-8 rounded-2xl glass-card border border-white/10 text-center space-y-3 bg-white/[0.01]">
+              <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center mx-auto">
+                <Headphones size={24} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">No Audio Stories Tracked Yet</h3>
+                <p className="text-xs text-gray-400 max-w-sm mx-auto mt-1">
+                  Connect any local folder with audio chapters (MP3, M4A, FLAC) or narrative video files (MP4, MKV) to start listening!
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddAudioStoryModal(true)}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-black font-bold text-xs uppercase tracking-wider inline-flex items-center gap-2 shadow-lg cursor-pointer"
+              >
+                <Plus size={14} />
+                <span>Track Audio Stories Folder</span>
+              </button>
+            </div>
+          ) : (
+            /* Horizontal Slider (X-Axis Scrollable) */
+            <div
+              ref={audioStoryScrollRef}
+              className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+            >
+              {sortedAudioStories.map((s) => {
+                const isWatched = Boolean(s.isWatched || s.progressPercent === 100 || s.status === 'completed');
+                const coverImg = s.thumbnailBase64 || (s.thumbnailPath ? `/api/image?path=${encodeURIComponent(s.thumbnailPath)}` : null);
+                return (
+                  <div
+                    key={`audio-${s.id}`}
+                    onClick={() => router.push(`/audio-story/${s.id}`)}
+                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-cyan-500/50 transition-all duration-300 shadow-md hover:shadow-xl"
+                  >
+                    <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
+                      {coverImg ? (
+                        <CachedImage
+                          src={coverImg}
+                          alt={s.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-cyan-400/80 bg-gradient-to-br from-cyan-950/30 to-purple-950/20 gap-1.5">
+                          <Headphones size={36} />
+                          <span className="text-[9px] font-mono uppercase tracking-wider">Audio Story</span>
+                        </div>
+                      )}
+
+                      {/* Status / Track Badge */}
+                      <div className="absolute top-2 left-2 flex items-center gap-1">
+                        {isWatched ? (
+                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/90 backdrop-blur-md text-[9px] uppercase font-bold text-white flex items-center gap-1 shadow">
+                            <CheckCircle2 size={10} /> Listened
+                          </span>
+                        ) : (
+                          <div className="px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-md text-cyan-300 font-bold text-[9px] border border-white/10">
+                            {s.trackCount || s.totalTracks || 0} Tracks
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-cyan-500 text-black font-extrabold text-[8px] shadow">
+                        AUDIO
+                      </div>
+
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center p-3 gap-2">
+                        <div className="px-3 py-1.5 rounded-xl bg-cyan-500 text-black text-xs font-bold flex items-center gap-1.5 shadow-lg">
+                          <Play size={14} fill="currentColor" />
+                          <span>Listen</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setAudioStoryCompleteConfirm(s);
+                          }}
+                          className={`p-2 rounded-xl border transition cursor-pointer ${isWatched
+                            ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
+                            : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
+                            }`}
+                          title={isWatched ? 'Mark Unlistened' : 'Mark Listened (Complete)'}
+                        >
+                          <CheckCircle2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
+                      <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-cyan-300 transition-colors">
+                        {s.title}
+                      </h4>
+                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
+                        <span>Audio / Video</span>
+                        <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-1" : "text-cyan-400 font-semibold"}>
+                          {isWatched ? (
+                            <>
+                              <CheckCircle2 size={10} /> Completed
+                            </>
+                          ) : (
+                            s.progressPercent ? `${s.progressPercent}%` : 'Ready'
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
@@ -5525,8 +6061,8 @@ export default function Dashboard({ onSelectAnime }) {
                   onClick={handleRefreshPopular}
                   disabled={refreshingPopular}
                   className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition cursor-pointer active:scale-95 disabled:opacity-50 shadow-sm ${refreshPopularSuccess
-                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                      : 'bg-white/5 hover:bg-white/15 border-white/10 text-gray-300 hover:text-white'
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                    : 'bg-white/5 hover:bg-white/15 border-white/10 text-gray-300 hover:text-white'
                     }`}
                   title="Refetch Popular This Week list from online and save"
                 >
@@ -5812,8 +6348,8 @@ export default function Dashboard({ onSelectAnime }) {
                 key={genre}
                 onClick={() => setSelectedGenre(genre)}
                 className={`whitespace-nowrap px-4 py-2 rounded-full text-xs font-semibold glass-chip cursor-pointer transition select-none flex items-center justify-center shrink-0 ${selectedGenre === genre
-                    ? 'active text-white bg-[#7c5cff] shadow-md border-[#7c5cff]/50 font-bold'
-                    : 'text-gray-300 hover:text-white hover:bg-white/10 border-white/10'
+                  ? 'active text-white bg-[#7c5cff] shadow-md border-[#7c5cff]/50 font-bold'
+                  : 'text-gray-300 hover:text-white hover:bg-white/10 border-white/10'
                   }`}
               >
                 {genre}
@@ -5823,70 +6359,85 @@ export default function Dashboard({ onSelectAnime }) {
         </section>
 
 
-        {/* 9. LATEST RELEASES & LOCAL LIBRARY CATALOG */}
-        <section id="anime" className="space-y-6 pt-4 scroll-mt-24">
+        {/* 9. TRACKED LOCAL LIBRARY (HORIZONTAL SCROLL - TOP 10 RECENT & SEE ALL) */}
+        <section id="anime" className="space-y-4 pt-4 scroll-mt-24">
           <span id="catalog" className="sr-only" />
           {/* Header Controls Panel */}
-          <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center glass-panel p-4 md:p-6 rounded-3xl border border-white/10">
-            <div>
-              <h2 className="text-xl md:text-2xl font-extrabold tracking-wide text-white flex items-center gap-2">
-                <Film className="text-[#7c5cff]" size={24} />
-                Tracked Local Library
-              </h2>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {displayedAnimes.length < filteredAnimes.length
-                  ? `Showing ${displayedAnimes.length} of ${filteredAnimes.length} anime series (scroll to load more)`
-                  : `${filteredAnimes.length} anime series available in your local computer catalog`}
-              </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-between items-start sm:items-center glass-panel p-4 md:p-5 rounded-2xl border border-white/10">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-[#7c5cff]/10 border border-[#7c5cff]/20 text-[#a855f7]">
+                <Film size={20} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-extrabold tracking-wide text-white">Tracked Local Library</h2>
+                </div>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {animes.length > 0
+                    ? `${animes.length} anime series in library • Showing 10 most recent`
+                    : 'Connect your local PC anime folders to stream & track progress'}
+                </p>
+              </div>
             </div>
 
-            {/* Sorting & Filter controls */}
-            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300">
-                <SlidersHorizontal size={14} className="text-[#a855f7]" />
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="bg-transparent text-xs text-white focus:outline-none cursor-pointer"
-                >
-                  <option value="recent" className="bg-[#111827]">Recently Watched</option>
-                  <option value="alpha" className="bg-[#111827]">Alphabetical (A-Z)</option>
-                  <option value="progress" className="bg-[#111827]">Most Completed</option>
-                </select>
-              </div>
+            {/* Header Action Buttons */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => !isOffline && setShowAddModal(true)}
+                disabled={isOffline}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm ${
+                  isOffline
+                    ? 'bg-white/5 border border-white/10 text-gray-500 opacity-50 cursor-not-allowed'
+                    : 'bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 hover:text-white cursor-pointer active:scale-95'
+                }`}
+                title="Track Local Anime Folder"
+              >
+                <Plus size={14} />
+                <span className="hidden sm:inline">Add Folder</span>
+              </button>
 
-              {/* Status Filter Buttons */}
-              <div className="flex gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
-                <button
-                  onClick={() => setFilterBy('all')}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${filterBy === 'all' ? 'bg-[#7c5cff] text-white shadow-md' : 'text-gray-400 hover:text-white'}`}
-                >
-                  All
-                </button>
-                <button
-                  onClick={() => setFilterBy('active')}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${filterBy === 'active' ? 'bg-[#7c5cff] text-white shadow-md' : 'text-gray-400 hover:text-white'}`}
-                >
-                  Watching
-                </button>
-                <button
-                  onClick={() => setFilterBy('completed')}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${filterBy === 'completed' ? 'bg-[#7c5cff] text-white shadow-md' : 'text-gray-400 hover:text-white'}`}
-                >
-                  Completed
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => router.push('/animes')}
+                className="px-3 py-1.5 rounded-xl bg-[#7c5cff]/10 hover:bg-[#7c5cff]/20 border border-[#7c5cff]/30 text-[#a855f7] hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                title="View All Anime in Library"
+              >
+                <span>See All</span>
+                <ChevronRight size={14} />
+              </button>
+
+              {topTrackedAnimes.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => scrollAnime('left')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll left"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollAnime('right')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll right"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
-          {/* Catalog Grid */}
+          {/* Horizontal Slider (X-Axis Scrollable - Max 10 on Home) */}
           {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-              {[1, 2, 3, 4, 5].map((idx) => (
-                <div key={idx} className="h-72 rounded-2xl bg-white/5 shimmer border border-white/5" />
+            <div className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2">
+              {[1, 2, 3, 4, 5, 6].map((idx) => (
+                <div key={idx} className="flex-none w-52 sm:w-56 md:w-60 h-72 rounded-2xl bg-white/5 shimmer border border-white/5" />
               ))}
             </div>
-          ) : filteredAnimes.length === 0 ? (
+          ) : animes.length === 0 ? (
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -5909,26 +6460,16 @@ export default function Dashboard({ onSelectAnime }) {
               </button>
             </motion.div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-              {/* Add New Folder Card */}
-              <div
-                onClick={() => !isOffline && setShowAddModal(true)}
-                className={`h-72 rounded-2xl border-2 border-dashed flex flex-col justify-center items-center gap-3 transition cursor-pointer ${isOffline ? 'border-white/5 bg-white/[0.01] text-gray-600 opacity-40 cursor-not-allowed' : 'border-white/15 bg-white/[0.02] hover:bg-white/[0.05] hover:border-[#7c5cff]/60 text-gray-400 hover:text-white'}`}
-              >
-                <div className="p-3.5 rounded-full bg-[#7c5cff]/10 text-[#7c5cff]">
-                  <Plus size={24} />
-                </div>
-                <span className="text-xs font-bold uppercase tracking-wider">
-                  {isOffline ? 'Offline' : 'Add Local Folder'}
-                </span>
-              </div>
-
-              {/* Anime Cards - Rendered Lazily in Chunks */}
-              {displayedAnimes.map((anime) => (
+            <div
+              ref={animeScrollRef}
+              className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+            >
+              {/* Anime Cards - 10 Most Recent (Recently Watched 1st, then Latest Added) */}
+              {topTrackedAnimes.map((anime) => (
                 <div
                   key={anime.id}
                   onClick={() => onSelectAnime(anime.id)}
-                  className="group relative h-72 glass-card rounded-2xl flex flex-col justify-between overflow-hidden cursor-pointer"
+                  className="group relative flex-none w-52 sm:w-56 md:w-60 h-72 glass-card rounded-2xl flex flex-col justify-between overflow-hidden cursor-pointer"
                 >
                   {/* Poster Image */}
                   <div className="h-44 relative overflow-hidden bg-[#181c24] flex items-center justify-center">
@@ -6040,25 +6581,20 @@ export default function Dashboard({ onSelectAnime }) {
                 </div>
               ))}
 
-              {/* Lazy Loading Sentinel and Progressive Load Trigger */}
-              {visibleCount < filteredAnimes.length && (
-                <div
-                  ref={loadMoreRef}
-                  className="col-span-full py-8 flex flex-col items-center justify-center gap-3 border-t border-white/5 mt-4"
-                >
-                  <div className="flex items-center gap-2 text-xs font-semibold text-gray-400">
-                    <Loader2 size={16} className="animate-spin text-[#7c5cff]" />
-                    <span>Loading more anime ({displayedAnimes.length} of {filteredAnimes.length})...</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setVisibleCount((prev) => Math.min(prev + 24, filteredAnimes.length))}
-                    className="px-5 py-2 rounded-xl bg-white/5 hover:bg-[#7c5cff] text-xs font-bold text-gray-300 hover:text-white transition border border-white/10 shadow-sm active:scale-95"
-                  >
-                    Load Next 24 Shows
-                  </button>
+              {/* See All Card at the end */}
+              <div
+                onClick={() => router.push('/animes')}
+                className="flex-none w-52 sm:w-56 md:w-60 h-72 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-center items-center p-6 text-center border border-white/10 hover:border-[#7c5cff]/50 transition shadow-md hover:shadow-xl bg-[#7c5cff]/5 hover:bg-[#7c5cff]/10"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-[#7c5cff]/20 text-[#a855f7] flex items-center justify-center group-hover:scale-110 transition-transform mb-3">
+                  <Film size={24} />
                 </div>
-              )}
+                <span className="text-sm font-bold text-white block">See All Anime</span>
+                <span className="text-xs text-purple-300/80 font-mono mt-0.5 block">{animes.length} Total Series</span>
+                <span className="mt-4 px-3 py-1.5 rounded-xl bg-[#7c5cff] text-white text-xs font-extrabold flex items-center gap-1 group-hover:bg-[#6c4cf0] transition shadow-md shadow-[#7c5cff]/30">
+                  View All <ChevronRight size={14} />
+                </span>
+              </div>
             </div>
           )}
         </section>
@@ -6185,8 +6721,8 @@ export default function Dashboard({ onSelectAnime }) {
                           {show.type} {show.year ? `· ${show.year}` : ''}
                         </span>
                         <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold flex items-center gap-0.5 border shadow-[0_0_8px_rgba(245,158,11,0.3)] backdrop-blur-md ${show.userCustomRating
-                            ? 'bg-amber-500 text-black border-amber-400 font-black ring-1 ring-yellow-200'
-                            : 'bg-black/70 text-amber-400 border-amber-500/20'
+                          ? 'bg-amber-500 text-black border-amber-400 font-black ring-1 ring-yellow-200'
+                          : 'bg-black/70 text-amber-400 border-amber-500/20'
                           }`}>
                           <Star size={9} className={show.userCustomRating ? 'fill-black text-black' : 'fill-amber-400 text-amber-400'} />
                           {show.rating}
@@ -6328,7 +6864,7 @@ export default function Dashboard({ onSelectAnime }) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-xl glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl modal-scroll space-y-4"
+              className="w-full max-w-2xl glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl modal-scroll space-y-4 bg-[#0d1117]/95 text-white max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center border-b border-white/10 pb-3">
                 <h2 className="text-lg font-extrabold flex items-center gap-2 text-white">
@@ -6339,7 +6875,7 @@ export default function Dashboard({ onSelectAnime }) {
                   )}
                   {addModalTab === 'youtube' ? 'Add YouTube Playlist' : 'Track Local Anime Folder'}
                 </h2>
-                <button onClick={() => setShowAddModal(false)} className="p-1 rounded-lg text-gray-400 hover:text-white">
+                <button onClick={() => setShowAddModal(false)} className="p-1 rounded-lg text-gray-400 hover:text-white transition cursor-pointer">
                   <X size={18} />
                 </button>
               </div>
@@ -6350,8 +6886,8 @@ export default function Dashboard({ onSelectAnime }) {
                   type="button"
                   onClick={() => setAddModalTab('local')}
                   className={`flex-1 py-2 text-xs font-bold flex items-center justify-center gap-2 border-b-2 transition cursor-pointer ${addModalTab === 'local'
-                      ? 'border-[#7c5cff] text-white bg-white/5 rounded-t-xl'
-                      : 'border-transparent text-gray-400 hover:text-white'
+                    ? 'border-[#7c5cff] text-white bg-white/5 rounded-t-xl'
+                    : 'border-transparent text-gray-400 hover:text-white'
                     }`}
                 >
                   <FolderOpen size={15} /> Local Folder
@@ -6360,8 +6896,8 @@ export default function Dashboard({ onSelectAnime }) {
                   type="button"
                   onClick={() => setAddModalTab('youtube')}
                   className={`flex-1 py-2 text-xs font-bold flex items-center justify-center gap-2 border-b-2 transition cursor-pointer ${addModalTab === 'youtube'
-                      ? 'border-red-500 text-white bg-white/5 rounded-t-xl'
-                      : 'border-transparent text-gray-400 hover:text-white'
+                    ? 'border-red-500 text-white bg-white/5 rounded-t-xl'
+                    : 'border-transparent text-gray-400 hover:text-white'
                     }`}
                 >
                   <Youtube size={15} className="text-red-500" /> Add YouTube Playlist
@@ -6370,8 +6906,155 @@ export default function Dashboard({ onSelectAnime }) {
 
               {addModalTab === 'local' ? (
                 <form onSubmit={handleAddAnime} className="space-y-4">
+                  {/* ── 1. Search Anime Online & Auto-Fill (AniList & Fanart.tv) ── */}
+                  <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs uppercase tracking-wider text-purple-400 font-bold flex items-center gap-1.5">
+                        <Sparkles size={13} className="text-purple-400" />
+                        <span>1. Search Anime Online (AniList & Fanart.tv)</span>
+                      </label>
+                      <span className="text-[10px] text-purple-300 font-mono">
+                        Online Metadata
+                      </span>
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="relative flex-grow">
+                        <input
+                          type="text"
+                          placeholder="Search anime title (e.g. Bleach, Attack on Titan, Solo Leveling)..."
+                          className="w-full px-3 py-2 pl-8 rounded-xl glass-input text-xs text-white"
+                          value={animeSearchQuery}
+                          onChange={(e) => setAnimeSearchQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleSearchAnimeOnline();
+                            }
+                          }}
+                        />
+                        <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleSearchAnimeOnline}
+                        disabled={animeSearching || !(animeSearchQuery || animeTitle).trim()}
+                        className="px-3.5 py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-bold whitespace-nowrap transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {animeSearching ? (
+                          <>
+                            <Loader2 size={13} className="animate-spin" />
+                            <span>Searching...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={13} />
+                            <span>Search Online</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Searching & Fetching status */}
+                    {animeSearching && (
+                      <p className="text-[11px] text-purple-400 font-medium flex items-center gap-1.5">
+                        <Loader2 size={12} className="animate-spin" />
+                        <span>Searching AniList...</span>
+                      </p>
+                    )}
+                    {animeFetchingDetails && (
+                      <p className="text-[11px] text-purple-400 font-medium flex items-center gap-1.5">
+                        <Loader2 size={12} className="animate-spin" />
+                        <span>Fetching details, wide banners & Fanart.tv logos...</span>
+                      </p>
+                    )}
+                    {animeSearchError && (
+                      <p className="text-[11px] text-purple-300 font-medium">
+                        {animeSearchError}
+                      </p>
+                    )}
+
+                    {/* Active Selected Anime Pill */}
+                    {selectedAnimeOnline && (
+                      <div className="p-2.5 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <CheckCircle2 size={14} className="text-emerald-400 shrink-0" />
+                          <span className="text-xs font-bold text-white truncate">
+                            Auto-filling: {selectedAnimeOnline.title}
+                          </span>
+                          {selectedAnimeOnline.year && (
+                            <span className="text-[10px] text-purple-300 font-mono shrink-0">
+                              ({selectedAnimeOnline.year})
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedAnimeOnline(null)}
+                          className="text-gray-400 hover:text-white p-1"
+                          title="Clear online selection"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Selectable Results Dropdown List */}
+                    {animeSearchResults.length > 0 && (
+                      <div className="mt-2 p-2 rounded-2xl bg-black/40 border border-white/10 max-h-48 overflow-y-auto custom-scrollbar space-y-1">
+                        <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-0.5">
+                          Select match to auto-populate metadata & artwork:
+                        </div>
+                        {animeSearchResults.map((item) => {
+                          const isSelected = selectedAnimeOnline?.id === item.id;
+                          return (
+                            <div
+                              key={item.id}
+                              onClick={() => handleSelectAnimeOnline(item)}
+                              className={`flex items-center gap-3 p-2 rounded-xl cursor-pointer transition ${
+                                isSelected
+                                  ? 'bg-purple-600/30 border border-purple-500/50 text-white'
+                                  : 'bg-white/[0.02] hover:bg-white/[0.08] text-gray-300 hover:text-white border border-transparent'
+                              }`}
+                            >
+                              {item.posterUrl ? (
+                                <img
+                                  src={item.posterUrl}
+                                  alt={item.title}
+                                  className="w-9 h-12 rounded-lg object-cover shrink-0 border border-white/10"
+                                />
+                              ) : (
+                                <div className="w-9 h-12 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                                  <Film size={14} className="text-gray-500" />
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-bold truncate">{item.title}</div>
+                                {item.romajiTitle && item.romajiTitle !== item.title && (
+                                  <div className="text-[10px] text-gray-400 truncate">{item.romajiTitle}</div>
+                                )}
+                                <div className="flex items-center gap-2 text-[10px] text-purple-300 font-mono mt-0.5">
+                                  {item.year && <span>{item.year}</span>}
+                                  {item.episodes && <span>• {item.episodes} eps</span>}
+                                  {item.format && <span className="uppercase">• {item.format}</span>}
+                                </div>
+                              </div>
+                              {isSelected && (
+                                <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1 shrink-0">
+                                  <Check size={12} /> Selected
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── 2. Local Folder Directory Path ── */}
                   <div>
-                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Select Folder Directory *</label>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                      2. Select Folder Directory *
+                    </label>
                     <div className="flex gap-2">
                       <input
                         type="text"
@@ -6400,15 +7083,31 @@ export default function Dashboard({ onSelectAnime }) {
                     </div>
                   </div>
 
+                  {/* Scanned files alert */}
+                  {scanResult.length > 0 && (
+                    <div className="p-3 rounded-2xl bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-bold">
+                        <CheckCircle2 size={16} className="text-emerald-400" />
+                        <span>Found {parsedEpsCount || scanResult.length} video episode files</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-gray-400">Ready to track</span>
+                    </div>
+                  )}
+
+                  {/* ── 3. Naming Pattern ── */}
                   <div>
-                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Naming Pattern</label>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                      Naming Pattern
+                    </label>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1">
                       {NAMING_PATTERNS.map((pat) => (
                         <button
                           key={pat.id}
                           type="button"
                           onClick={() => setNamingPattern(pat.id)}
-                          className={`px-3 py-2 rounded-xl text-left text-[11px] border transition cursor-pointer ${namingPattern === pat.id ? 'bg-[#7c5cff]/20 border-[#7c5cff] text-white' : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'}`}
+                          className={`px-3 py-2 rounded-xl text-left text-[11px] border transition cursor-pointer ${
+                            namingPattern === pat.id ? 'bg-[#7c5cff]/20 border-[#7c5cff] text-white' : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'
+                          }`}
                         >
                           <span className="font-bold block">{pat.label}</span>
                           <span className="text-[9px] opacity-60 block truncate">{pat.example}</span>
@@ -6417,21 +7116,37 @@ export default function Dashboard({ onSelectAnime }) {
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Anime Display Title *</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Bleach TYBW"
-                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
-                      value={animeTitle}
-                      onChange={(e) => setAnimeTitle(e.target.value)}
-                      required
-                      disabled={!folderPath}
-                    />
+                  {/* ── 4. Title & Counts ── */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                        Anime Display Title *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Bleach TYBW"
+                        className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                        value={animeTitle}
+                        onChange={(e) => setAnimeTitle(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                        Romaji / Japanese Title (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Bleach: Sennen Kessen-hen"
+                        className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                        value={animeRomajiTitle}
+                        onChange={(e) => setAnimeRomajiTitle(e.target.value)}
+                      />
+                    </div>
                   </div>
 
                   {/* Season Count & Total Episodes Inputs */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
                         Total Seasons
@@ -6443,7 +7158,6 @@ export default function Dashboard({ onSelectAnime }) {
                         className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
                         value={addTotalSeasons}
                         onChange={(e) => setAddTotalSeasons(e.target.value)}
-                        disabled={!folderPath}
                       />
                     </div>
                     <div>
@@ -6457,55 +7171,94 @@ export default function Dashboard({ onSelectAnime }) {
                         className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
                         value={addTotalEpisodes}
                         onChange={(e) => setAddTotalEpisodes(e.target.value)}
-                        disabled={!folderPath}
+                      />
+                    </div>
+                    <div className="col-span-2 sm:col-span-1">
+                      <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                        Release Year
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 2024"
+                        className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                        value={animeYear}
+                        onChange={(e) => setAnimeYear(e.target.value)}
                       />
                     </div>
                   </div>
 
+                  {/* Synopsis / Overview */}
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">Cover Image (Optional)</label>
-                      <button
-                        type="button"
-                        onClick={() => setShowOnlineSearchAdd(prev => !prev)}
-                        className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${showOnlineSearchAdd
-                            ? 'bg-purple-600 text-white shadow-md'
-                            : 'bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/50 hover:to-indigo-600/50 text-purple-200 border border-purple-500/30'
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                      Overview / Synopsis
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder="Enter anime synopsis or auto-fetch from online above..."
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={animeOverview}
+                      onChange={(e) => setAnimeOverview(e.target.value)}
+                    />
+                  </div>
+
+                  {/* ── 5. Poster Artwork (2:3) ── */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                        Cover Picture Artwork (2:3)
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowOnlineSearchAdd(prev => !prev)}
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                            showOnlineSearchAdd
+                              ? 'bg-purple-600 text-white shadow-md'
+                              : 'bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30'
                           }`}
-                      >
-                        <Sparkles size={12} className="text-purple-300" />
-                        {showOnlineSearchAdd ? 'Hide Cover Search' : 'Search Covers Online'}
-                      </button>
+                        >
+                          <Sparkles size={12} className="text-purple-300" />
+                          {showOnlineSearchAdd ? 'Hide Cover Search' : 'Search Covers (AniList / Fanart.tv)'}
+                        </button>
+                        <label className="text-[11px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 cursor-pointer">
+                          <ImagePlus size={13} />
+                          <span>Upload File</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handleAnimeCoverUpload}
+                          />
+                        </label>
+                      </div>
                     </div>
 
-                    <div className="flex flex-col gap-3">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleNewCoverUpload}
-                        className="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-white/10 file:text-white hover:file:bg-white/20 file:cursor-pointer"
-                      />
+                    <input
+                      type="text"
+                      placeholder="Direct cover image URL (AniList / Fanart.tv)..."
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={coverUrl}
+                      onChange={(e) => setCoverUrl(e.target.value)}
+                    />
 
-                      {showOnlineSearchAdd && (
+                    {/* Dedicated Online Cover Search Tab */}
+                    {showOnlineSearchAdd && (
+                      <div className="mt-2">
                         <AnimeCoverSearch
-                          initialQuery={animeTitle}
+                          initialQuery={animeTitle || animeSearchQuery}
                           onSelectCover={(url) => {
                             setCoverUrl(url);
                             setShowOnlineSearchAdd(false);
                           }}
                           onClose={() => setShowOnlineSearchAdd(false)}
-                          uploadToImgBB={uploadToImgBB}
                         />
-                      )}
+                      </div>
+                    )}
 
-                      {uploadingCover && (
-                        <div className="flex items-center gap-2 text-xs text-[#7c5cff]">
-                          <Loader2 className="animate-spin" size={14} />
-                          Uploading to ImgBB...
-                        </div>
-                      )}
+                    {/* Cover Preview & Fetched Posters List */}
+                    <div className="flex flex-wrap items-start gap-3 mt-1">
                       {coverUrl && (
-                        <div className="relative w-28 h-40 rounded-xl overflow-hidden border border-white/15 bg-black/25 flex items-center justify-center">
+                        <div className="relative w-24 h-36 rounded-xl overflow-hidden border border-white/20 bg-black/40 shadow-lg shrink-0">
                           <img src={coverUrl} alt="Cover Preview" className="w-full h-full object-cover" />
                           <button
                             type="button"
@@ -6515,14 +7268,279 @@ export default function Dashboard({ onSelectAnime }) {
                           >
                             <X size={10} />
                           </button>
+                          <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/75 text-[9px] font-bold text-emerald-400">
+                            Active
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Quick Select from Fetched AniList & Fanart.tv Posters */}
+                      {Array.isArray(animeImages?.covers) && animeImages.covers.length > 1 && (
+                        <div className="flex-1 min-w-[200px]">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">
+                            Fetched Online Posters ({animeImages.covers.length}):
+                          </span>
+                          <div className="flex gap-2 overflow-x-auto pb-1 max-h-36 custom-scrollbar">
+                            {animeImages.covers.map((cov, idx) => {
+                              const isSelected = coverUrl === cov.url;
+                              return (
+                                <div
+                                  key={cov.url || idx}
+                                  onClick={() => setCoverUrl(cov.url)}
+                                  className={`relative w-16 h-24 rounded-lg overflow-hidden shrink-0 border cursor-pointer transition ${
+                                    isSelected ? 'border-purple-400 ring-2 ring-purple-500/50' : 'border-white/10 hover:border-white/30 opacity-75 hover:opacity-100'
+                                  }`}
+                                >
+                                  <img src={cov.url} alt="Cover option" className="w-full h-full object-cover" />
+                                  <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[8px] text-center text-gray-300 truncate px-0.5">
+                                    {cov.source || 'Poster'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                     </div>
                   </div>
 
+                  {/* ── 6. Backdrop Banner Artwork (16:9) ── */}
+                  <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs uppercase tracking-wider text-purple-400 font-bold flex items-center gap-1.5">
+                        <ImageIcon size={14} className="text-purple-400" />
+                        <span>Backdrop Banner Artwork (16:9)</span>
+                      </label>
+                      <label className="text-[11px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 cursor-pointer">
+                        <ImagePlus size={13} />
+                        <span>Upload File</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleAnimeBannerUpload}
+                        />
+                      </label>
+                    </div>
+                    <p className="text-[11px] text-gray-400">
+                      Wide 16:9 background image displayed on the top hero slider and anime detail backdrops.
+                    </p>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Paste wide banner URL or select below from AniList / Fanart.tv..."
+                        className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                        value={animeBannerUrl}
+                        onChange={(e) => setAnimeBannerUrl(e.target.value)}
+                      />
+                      {animeBannerUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setAnimeBannerUrl('')}
+                          className="p-2 rounded-xl bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer"
+                          title="Clear banner"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Active Banner Preview */}
+                    {animeBannerUrl && (
+                      <div className="relative w-full h-24 sm:h-28 rounded-xl overflow-hidden border border-white/20 shadow-lg group">
+                        <img
+                          src={animeBannerUrl}
+                          alt="Backdrop Preview"
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end justify-between p-2">
+                          <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1 bg-black/60 px-2 py-0.5 rounded">
+                            <Check size={11} /> Active 16:9 Banner
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setAnimeBannerUrl('')}
+                            className="p-1 rounded-full bg-red-600 text-white hover:bg-red-700 transition cursor-pointer"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Visual Banner Picker from AniList & Fanart.tv */}
+                    {Array.isArray(animeImages?.banners) && animeImages.banners.length > 0 && (
+                      <div className="space-y-1.5 pt-1">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                          Choose from Fetched Online Banners ({animeImages.banners.length} from AniList & Fanart.tv):
+                        </span>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto custom-scrollbar p-1 rounded-xl bg-black/40 border border-white/5">
+                          {animeImages.banners.map((ban, idx) => {
+                            const isSelected = animeBannerUrl === ban.url;
+                            return (
+                              <div
+                                key={ban.url || idx}
+                                onClick={() => setAnimeBannerUrl(ban.url)}
+                                className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
+                                  isSelected
+                                    ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
+                                    : 'border-white/10 hover:border-white/30 opacity-80 hover:opacity-100'
+                                }`}
+                              >
+                                <img
+                                  src={ban.url}
+                                  alt={`Banner ${idx + 1}`}
+                                  className="w-full h-full object-cover"
+                                />
+                                <div className="absolute inset-x-0 bottom-0 bg-black/80 p-1 flex items-center justify-between text-[9px] text-gray-300">
+                                  <span className="truncate">{ban.source || 'Banner'}</span>
+                                  {isSelected && (
+                                    <span className="text-emerald-400 font-bold shrink-0 flex items-center gap-0.5">
+                                      <Check size={10} />
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── 7. Custom Anime Logo / Title Art (Transparent PNG) ── */}
+                  <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={enableAnimeLogo}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setEnableAnimeLogo(checked);
+                            if (checked && !animeLogoUrl && animeImages?.logos?.length > 0) {
+                              setAnimeLogoUrl(animeImages.logos[0].url);
+                            }
+                          }}
+                          className="h-4 w-4 rounded border-white/20 bg-black/40 text-purple-500 focus:ring-purple-500 cursor-pointer"
+                        />
+                        <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <ImageIcon size={14} className="text-purple-400" />
+                          Custom Anime Logo / Title Art
+                        </span>
+                      </label>
+                      {enableAnimeLogo && (
+                        <label className="text-[11px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 cursor-pointer">
+                          <ImagePlus size={13} />
+                          <span>Upload Local Logo</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handleAnimeLogoUpload}
+                          />
+                        </label>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-400">
+                      Displays the anime's official transparent logo in the home page sliding banner in place of plain text title (just like movies).
+                    </p>
+
+                    {enableAnimeLogo && (
+                      <div className="space-y-3 pt-1">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="Select below, upload, or paste transparent logo URL..."
+                            value={animeLogoUrl}
+                            onChange={(e) => setAnimeLogoUrl(e.target.value)}
+                            className="flex-1 px-3 py-2 rounded-xl glass-input text-xs text-white"
+                          />
+                          {animeLogoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setAnimeLogoUrl('')}
+                              className="p-2 rounded-xl bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer text-xs"
+                              title="Clear logo"
+                            >
+                              <X size={14} />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Current Selected Logo Preview */}
+                        {animeLogoUrl && (
+                          <div className="p-3 rounded-xl bg-black/60 border border-white/15 flex items-center justify-between gap-3">
+                            <div className="max-h-14 max-w-[200px] flex items-center justify-center p-1 bg-white/5 rounded-lg border border-white/5">
+                              <img
+                                src={animeLogoUrl}
+                                alt="Selected Logo"
+                                className="max-h-12 w-auto max-w-full object-contain"
+                              />
+                            </div>
+                            <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
+                              <Check size={12} /> Active Logo
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Fetched Logos Picker from Fanart.tv */}
+                        {Array.isArray(animeImages?.logos) && animeImages.logos.length > 0 ? (
+                          <div className="space-y-1.5">
+                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                              Fetched Anime Logos ({animeImages.logos.length} available from Fanart.tv):
+                            </span>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-44 overflow-y-auto custom-scrollbar p-1 rounded-xl bg-black/40 border border-white/5">
+                              {animeImages.logos.map((logo, idx) => {
+                                const isSelected = animeLogoUrl === logo.url;
+                                return (
+                                  <div
+                                    key={logo.url || idx}
+                                    onClick={() => setAnimeLogoUrl(logo.url)}
+                                    className={`p-2 rounded-xl border flex flex-col items-center justify-center gap-1 cursor-pointer transition-all ${
+                                      isSelected
+                                        ? 'bg-purple-500/20 border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
+                                        : 'bg-white/[0.04] border-white/10 hover:border-white/30 hover:bg-white/[0.08]'
+                                    }`}
+                                  >
+                                    <div className="w-full h-12 flex items-center justify-center overflow-hidden">
+                                      <img
+                                        src={logo.url}
+                                        alt="Logo"
+                                        className="max-h-10 w-auto max-w-full object-contain"
+                                      />
+                                    </div>
+                                    <span className="text-[9px] font-mono text-gray-400 truncate">
+                                      {logo.type || `Logo ${idx + 1}`}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-gray-500 italic">
+                            No online logos found for this anime. You can upload a local PNG logo image above.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── 8. Select Categories / Genres ── */}
                   <div>
-                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">Select Categories / Genres (Max 5)</label>
-                    <div className="flex flex-wrap gap-2 mt-1 p-1 border border-white/5 rounded-xl bg-black/20">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                        Select Categories / Genres (Max 5)
+                      </label>
+                      {addGenres.length > 0 && (
+                        <span className="text-[10px] text-purple-300 font-mono">
+                          {addGenres.length}/5 selected
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2 p-1 border border-white/5 rounded-xl bg-black/20 max-h-28 overflow-y-auto custom-scrollbar">
                       {GENRES_LIST.map((genre) => {
                         if (genre === 'All') return null;
                         const isSelected = addGenres.includes(genre);
@@ -6531,9 +7549,9 @@ export default function Dashboard({ onSelectAnime }) {
                             key={genre}
                             type="button"
                             onClick={() => {
-                              setAddGenres(prev => {
+                              setAddGenres((prev) => {
                                 const alreadySelected = prev.includes(genre);
-                                if (alreadySelected) return prev.filter(g => g !== genre);
+                                if (alreadySelected) return prev.filter((g) => g !== genre);
                                 if (prev.length >= 5) {
                                   setAlertMessage("You can select a maximum of 5 genres.");
                                   return prev;
@@ -6541,10 +7559,11 @@ export default function Dashboard({ onSelectAnime }) {
                                 return [...prev, genre];
                               });
                             }}
-                            className={`px-3 py-1.5 rounded-full text-[10px] font-semibold transition cursor-pointer ${isSelected
-                                ? 'bg-[#7c5cff] text-white'
+                            className={`px-3 py-1.5 rounded-full text-[10px] font-semibold transition cursor-pointer ${
+                              isSelected
+                                ? 'bg-[#7c5cff] text-white shadow-md'
                                 : 'bg-white/5 border border-white/5 text-gray-400 hover:text-white'
-                              }`}
+                            }`}
                           >
                             {genre}
                           </button>
@@ -6553,35 +7572,19 @@ export default function Dashboard({ onSelectAnime }) {
                     </div>
                   </div>
 
-                  {folderPath && (
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 text-xs">
-                      <div className="flex justify-between items-center">
-                        <span className="text-gray-400">Scan Status:</span>
-                        {scanning ? (
-                          <span className="text-[#7c5cff] flex items-center gap-1">
-                            <Loader2 className="animate-spin" size={14} /> Scanning files...
-                          </span>
-                        ) : parsedEpsCount > 0 ? (
-                          <span className="text-emerald-400 font-bold">Detected {parsedEpsCount} episode files</span>
-                        ) : (
-                          <span className="text-amber-400 font-bold">No episodes parsed yet</span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
+                  {/* Footer buttons */}
                   <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
                     <button
                       type="button"
                       onClick={() => setShowAddModal(false)}
-                      className="px-4 py-2 text-xs text-gray-400 hover:text-white"
+                      className="px-4 py-2 text-xs text-gray-400 hover:text-white transition cursor-pointer"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      disabled={scanning || parsedEpsCount === 0}
-                      className="px-5 py-2.5 rounded-xl btn-accent text-xs font-bold uppercase tracking-wider disabled:opacity-50 cursor-pointer"
+                      disabled={scanning || (!folderPath && parsedEpsCount === 0)}
+                      className="px-5 py-2.5 rounded-xl btn-accent text-xs font-bold uppercase tracking-wider disabled:opacity-50 cursor-pointer shadow-lg"
                     >
                       {scanning ? 'Processing...' : 'Track Anime'}
                     </button>
@@ -6848,7 +7851,7 @@ export default function Dashboard({ onSelectAnime }) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-xl glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl modal-scroll space-y-4"
+              className="w-full max-w-xl glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl modal-scroll space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center border-b border-white/10 pb-3">
                 <h2 className="text-lg font-extrabold flex items-center gap-2 text-white">
@@ -6924,8 +7927,8 @@ export default function Dashboard({ onSelectAnime }) {
                             });
                           }}
                           className={`px-3 py-1.5 rounded-full text-[10px] font-semibold transition cursor-pointer ${isSelected
-                              ? 'bg-[#7c5cff] text-white'
-                              : 'bg-white/5 border border-white/5 text-gray-400 hover:text-white'
+                            ? 'bg-[#7c5cff] text-white'
+                            : 'bg-white/5 border border-white/5 text-gray-400 hover:text-white'
                             }`}
                         >
                           {genre}
@@ -6942,8 +7945,8 @@ export default function Dashboard({ onSelectAnime }) {
                       type="button"
                       onClick={() => setShowOnlineSearchEdit(prev => !prev)}
                       className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${showOnlineSearchEdit
-                          ? 'bg-purple-600 text-white shadow-md'
-                          : 'bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/50 hover:to-indigo-600/50 text-purple-200 border border-purple-500/30'
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/50 hover:to-indigo-600/50 text-purple-200 border border-purple-500/30'
                         }`}
                     >
                       <Sparkles size={12} className="text-purple-300" />
@@ -7005,6 +8008,291 @@ export default function Dashboard({ onSelectAnime }) {
                       </div>
                     )}
                   </div>
+                </div>
+
+                {/* ── Online Artwork Search (Fanart.tv & AniList) ── */}
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-900/20 via-indigo-900/20 to-black/30 border border-purple-500/20 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Sparkles size={14} className="text-purple-400" />
+                      Search Artwork Online (AniList & Fanart.tv)
+                    </span>
+                    {searchingEditArtwork && (
+                      <span className="text-[11px] text-purple-300 flex items-center gap-1 font-semibold">
+                        <Loader2 size={12} className="animate-spin" /> Searching...
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Enter title to search online banners and logos..."
+                      value={editArtworkSearchQuery}
+                      onChange={(e) => setEditArtworkSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          fetchEditAnimeArtwork(editArtworkSearchQuery);
+                        }
+                      }}
+                      className="flex-1 px-3 py-1.5 rounded-xl glass-input text-xs text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fetchEditAnimeArtwork(editArtworkSearchQuery)}
+                      disabled={searchingEditArtwork || !editArtworkSearchQuery.trim()}
+                      className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md transition"
+                    >
+                      {searchingEditArtwork ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                      Search
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── Backdrop Banner Artwork (16:9) ── */}
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                      Backdrop Banner Artwork (16:9)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <label className="text-[11px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 cursor-pointer">
+                        <ImagePlus size={13} />
+                        <span>Upload Local</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleEditBannerUpload}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleEditBannerBrowse}
+                        className="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <FolderOpen size={13} />
+                        <span>Browse PC</span>
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    Wide 16:9 background banner displayed on top hero carousel and anime detail backdrops.
+                  </p>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Paste wide banner URL or select below from AniList / Fanart.tv..."
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={editBannerUrl}
+                      onChange={(e) => setEditBannerUrl(e.target.value)}
+                    />
+                    {editBannerUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setEditBannerUrl('')}
+                        className="p-2 rounded-xl bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer"
+                        title="Clear banner"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Active Banner Preview */}
+                  {editBannerUrl && (
+                    <div className="relative w-full h-24 sm:h-28 rounded-xl overflow-hidden border border-white/20 shadow-lg group">
+                      <img
+                        src={editBannerUrl.startsWith('http') || editBannerUrl.startsWith('data:') ? editBannerUrl : `/api/image?path=${encodeURIComponent(editBannerUrl)}`}
+                        alt="Backdrop Preview"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end justify-between p-2">
+                        <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1 bg-black/60 px-2 py-0.5 rounded">
+                          <Check size={11} /> Active 16:9 Banner
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setEditBannerUrl('')}
+                          className="p-1 rounded-full bg-red-600 text-white hover:bg-red-700 transition cursor-pointer"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Visual Banner Picker from AniList & Fanart.tv */}
+                  {Array.isArray(editAnimeImages?.banners) && editAnimeImages.banners.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                        Choose from Fetched Online Banners ({editAnimeImages.banners.length} from AniList & Fanart.tv):
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto custom-scrollbar p-1 rounded-xl bg-black/40 border border-white/5">
+                        {editAnimeImages.banners.map((ban, idx) => {
+                          const isSelected = editBannerUrl === ban.url;
+                          return (
+                            <div
+                              key={ban.url || idx}
+                              onClick={() => setEditBannerUrl(ban.url)}
+                              className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
+                                isSelected
+                                  ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
+                                  : 'border-white/10 hover:border-white/30 opacity-80 hover:opacity-100'
+                              }`}
+                            >
+                              <img
+                                src={ban.url}
+                                alt={`Banner ${idx + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-x-0 bottom-0 bg-black/80 p-1 flex items-center justify-between text-[9px] text-gray-300">
+                                <span className="truncate">{ban.source || 'Banner'}</span>
+                                {isSelected && (
+                                  <span className="text-emerald-400 font-bold shrink-0 flex items-center gap-0.5">
+                                    <Check size={10} />
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Custom Anime Logo / Title Art (Transparent PNG) ── */}
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={enableEditAnimeLogo}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setEnableEditAnimeLogo(checked);
+                          if (checked && !editLogoUrl && editAnimeImages?.logos?.length > 0) {
+                            setEditLogoUrl(editAnimeImages.logos[0].url);
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-white/20 bg-black/40 text-purple-500 focus:ring-purple-500 cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <ImageIcon size={14} className="text-purple-400" />
+                        Custom Anime Logo / Title Art
+                      </span>
+                    </label>
+                    {enableEditAnimeLogo && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-[11px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 cursor-pointer">
+                          <ImagePlus size={13} />
+                          <span>Upload Local Logo</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handleEditLogoUpload}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleEditLogoBrowse}
+                          className="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <FolderOpen size={13} />
+                          <span>Browse PC</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    Displays the anime's official transparent logo in the home page sliding banner in place of plain text title (just like movies).
+                  </p>
+
+                  {enableEditAnimeLogo && (
+                    <div className="space-y-3 pt-1">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Select below, upload, or paste transparent logo URL..."
+                          value={editLogoUrl}
+                          onChange={(e) => setEditLogoUrl(e.target.value)}
+                          className="flex-1 px-3 py-2 rounded-xl glass-input text-xs text-white"
+                        />
+                        {editLogoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setEditLogoUrl('')}
+                            className="p-2 rounded-xl bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer text-xs"
+                            title="Clear logo"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Current Selected Logo Preview */}
+                      {editLogoUrl && (
+                        <div className="p-3 rounded-xl bg-black/60 border border-white/15 flex items-center justify-between gap-3">
+                          <div className="max-h-14 max-w-[200px] flex items-center justify-center p-1 bg-white/5 rounded-lg border border-white/5">
+                            <img
+                              src={editLogoUrl.startsWith('http') || editLogoUrl.startsWith('data:') ? editLogoUrl : `/api/image?path=${encodeURIComponent(editLogoUrl)}`}
+                              alt="Selected Logo"
+                              className="max-h-12 w-auto max-w-full object-contain"
+                            />
+                          </div>
+                          <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
+                            <Check size={12} /> Active Logo
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Visual Logo Picker from Fanart.tv */}
+                      {Array.isArray(editAnimeImages?.logos) && editAnimeImages.logos.length > 0 && (
+                        <div className="space-y-1.5 pt-1">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                            Choose from Fetched Transparent Logos ({editAnimeImages.logos.length} from Fanart.tv / TMDB):
+                          </span>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto custom-scrollbar p-1.5 rounded-xl bg-black/50 border border-white/5">
+                            {editAnimeImages.logos.map((logo, idx) => {
+                              const isSelected = editLogoUrl === logo.url;
+                              return (
+                                <div
+                                  key={logo.url || idx}
+                                  onClick={() => setEditLogoUrl(logo.url)}
+                                  className={`relative h-20 p-2 rounded-xl bg-white/[0.04] border flex items-center justify-center cursor-pointer transition ${
+                                    isSelected
+                                      ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)] bg-purple-500/10'
+                                      : 'border-white/10 hover:border-white/30 hover:bg-white/[0.08]'
+                                  }`}
+                                >
+                                  <img
+                                    src={logo.url}
+                                    alt={`Logo ${idx + 1}`}
+                                    className="max-h-14 w-auto max-w-full object-contain filter drop-shadow-md"
+                                  />
+                                  <div className="absolute bottom-1 right-1 flex items-center gap-1">
+                                    {logo.lang && (
+                                      <span className="text-[8px] uppercase font-bold px-1 rounded bg-black/70 text-gray-300">
+                                        {logo.lang}
+                                      </span>
+                                    )}
+                                    {isSelected && (
+                                      <span className="text-emerald-400 p-0.5 rounded bg-black/70">
+                                        <Check size={10} />
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
@@ -7114,7 +8402,7 @@ export default function Dashboard({ onSelectAnime }) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-xl glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl modal-scroll space-y-4 bg-[#0d1117]/95 text-white"
+              className="w-full max-w-2xl glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl modal-scroll space-y-4 bg-[#0d1117]/95 text-white max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center border-b border-white/10 pb-3">
                 <h2 className="text-lg font-extrabold flex items-center gap-2 text-white">
@@ -7131,10 +8419,155 @@ export default function Dashboard({ onSelectAnime }) {
               </div>
 
               <form onSubmit={handleAddManga} className="space-y-4">
-                {/* 1. Directory Path */}
+                {/* ── 1. Search Manga Online & Auto-Fill (AniList & Fanart.tv) ── */}
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs uppercase tracking-wider text-purple-400 font-bold flex items-center gap-1.5">
+                      <Sparkles size={13} className="text-purple-400" />
+                      <span>1. Search Manga Online (AniList & Fanart.tv)</span>
+                    </label>
+                    <span className="text-[10px] text-purple-300 font-mono">
+                      Online Metadata
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="relative flex-grow">
+                      <input
+                        type="text"
+                        placeholder="Search manga / webtoon title (e.g. Solo Leveling, Berserk, One Piece)..."
+                        className="w-full px-3 py-2 pl-8 rounded-xl glass-input text-xs text-white"
+                        value={mangaSearchQuery}
+                        onChange={(e) => setMangaSearchQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSearchMangaOnline();
+                          }
+                        }}
+                      />
+                      <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSearchMangaOnline}
+                      disabled={mangaSearching || !(mangaSearchQuery || mangaTitle).trim()}
+                      className="px-3.5 py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-bold whitespace-nowrap transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {mangaSearching ? (
+                        <>
+                          <Loader2 size={13} className="animate-spin" />
+                          <span>Searching...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={13} />
+                          <span>Search Online</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Searching & Fetching status */}
+                  {mangaSearching && (
+                    <p className="text-[11px] text-purple-400 font-medium flex items-center gap-1.5">
+                      <Loader2 size={12} className="animate-spin" />
+                      <span>Searching AniList...</span>
+                    </p>
+                  )}
+                  {mangaFetchingDetails && (
+                    <p className="text-[11px] text-purple-400 font-medium flex items-center gap-1.5">
+                      <Loader2 size={12} className="animate-spin" />
+                      <span>Fetching details, wide banners & Fanart.tv logos...</span>
+                    </p>
+                  )}
+                  {mangaSearchError && (
+                    <p className="text-[11px] text-purple-300 font-medium">
+                      {mangaSearchError}
+                    </p>
+                  )}
+
+                  {/* Active Selected Manga Pill */}
+                  {selectedMangaOnline && (
+                    <div className="p-2.5 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <CheckCircle2 size={14} className="text-emerald-400 shrink-0" />
+                        <span className="text-xs font-bold text-white truncate">
+                          Auto-filling: {selectedMangaOnline.title}
+                        </span>
+                        {selectedMangaOnline.year && (
+                          <span className="text-[10px] text-purple-300 font-mono shrink-0">
+                            ({selectedMangaOnline.year})
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMangaOnline(null)}
+                        className="text-gray-400 hover:text-white p-1"
+                        title="Clear online selection"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Selectable Results Dropdown List */}
+                  {mangaSearchResults.length > 0 && (
+                    <div className="mt-2 p-2 rounded-2xl bg-black/40 border border-white/10 max-h-48 overflow-y-auto custom-scrollbar space-y-1">
+                      <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-0.5">
+                        Select match to auto-populate metadata & artwork:
+                      </div>
+                      {mangaSearchResults.map((item) => {
+                        const isSelected = selectedMangaOnline?.id === item.id;
+                        return (
+                          <div
+                            key={item.id}
+                            onClick={() => handleSelectMangaOnline(item)}
+                            className={`flex items-center gap-3 p-2 rounded-xl cursor-pointer transition ${
+                              isSelected
+                                ? 'bg-purple-600/30 border border-purple-500/50 text-white'
+                                : 'bg-white/[0.02] hover:bg-white/[0.08] text-gray-300 hover:text-white border border-transparent'
+                            }`}
+                          >
+                            {item.posterUrl ? (
+                              <img
+                                src={item.posterUrl}
+                                alt={item.title}
+                                className="w-9 h-12 rounded-lg object-cover shrink-0 border border-white/10"
+                              />
+                            ) : (
+                              <div className="w-9 h-12 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                                <BookOpen size={14} className="text-gray-500" />
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-bold truncate">{item.title}</div>
+                              {item.romajiTitle && item.romajiTitle !== item.title && (
+                                <div className="text-[10px] text-gray-400 truncate">{item.romajiTitle}</div>
+                              )}
+                              <div className="flex items-center gap-2 text-[10px] text-purple-300 font-mono mt-0.5">
+                                {item.year && <span>{item.year}</span>}
+                                {item.chapters && <span>• {item.chapters} chs</span>}
+                                {item.volumes && <span>• {item.volumes} vols</span>}
+                                {item.format && <span className="uppercase">• {item.format}</span>}
+                              </div>
+                            </div>
+                            {isSelected && (
+                              <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1 shrink-0">
+                                <Check size={12} /> Selected
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── 2. Directory Path ── */}
                 <div>
                   <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
-                    Select Manga Folder Directory *
+                    2. Select Manga Folder Directory *
                   </label>
                   <div className="flex gap-2">
                     <input
@@ -7174,39 +8607,37 @@ export default function Dashboard({ onSelectAnime }) {
                   </div>
                 )}
 
-                {/* 2. Manga Title + Auto-Fetch Button */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                {/* ── 3. Title, Romaji & Counts ── */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
                       Manga / Webtoon Title *
                     </label>
-                    <button
-                      type="button"
-                      onClick={handleFetchMangaOnline}
-                      disabled={fetchingMangaOnline || !mangaTitle.trim()}
-                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-purple-600/30 to-pink-600/30 hover:from-purple-600/50 hover:to-pink-600/50 text-purple-200 border border-purple-500/30 hover:border-purple-400 text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                      title="Auto-fetch description, volumes, chapters count, and cover from online"
-                    >
-                      <Sparkles size={12} className={fetchingMangaOnline ? 'animate-spin text-purple-400' : 'text-purple-300'} />
-                      <span>{fetchingMangaOnline ? 'Fetching Online...' : 'Auto-Fetch from Online'}</span>
-                    </button>
+                    <input
+                      type="text"
+                      placeholder="e.g. Berserk, Solo Leveling, One Piece..."
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={mangaTitle}
+                      onChange={(e) => setMangaTitle(e.target.value)}
+                      required
+                    />
                   </div>
-                  <input
-                    type="text"
-                    placeholder="e.g. Berserk, Solo Leveling, One Piece..."
-                    className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
-                    value={mangaTitle}
-                    onChange={(e) => setMangaTitle(e.target.value)}
-                  />
-                  {mangaOnlineMessage && (
-                    <p className={`text-[11px] mt-1 font-medium ${mangaOnlineMessage.startsWith('✓') ? 'text-emerald-400' : 'text-purple-300'}`}>
-                      {mangaOnlineMessage}
-                    </p>
-                  )}
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                      Romaji / Alternate Title (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Na Honjaman Rebeleob"
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={mangaRomajiTitle}
+                      onChange={(e) => setMangaRomajiTitle(e.target.value)}
+                    />
+                  </div>
                 </div>
 
-                {/* 3. Volumes & Total Chapters */}
-                <div className="grid grid-cols-2 gap-3">
+                {/* Volumes, Total Chapters & Year */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
                       Volumes Count
@@ -7227,21 +8658,33 @@ export default function Dashboard({ onSelectAnime }) {
                     <input
                       type="number"
                       min="1"
-                      placeholder={mangaScanResult.length > 0 ? `Scanned: ${mangaScanResult.length} (or fetch/enter total)` : 'e.g. 100'}
+                      placeholder={mangaScanResult.length > 0 ? `Scanned: ${mangaScanResult.length}` : 'e.g. 100'}
                       className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
                       value={mangaTotalChapters}
                       onChange={(e) => setMangaTotalChapters(e.target.value)}
                     />
                   </div>
+                  <div className="col-span-2 sm:col-span-1">
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
+                      Release Year
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 2018"
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={mangaYear}
+                      onChange={(e) => setMangaYear(e.target.value)}
+                    />
+                  </div>
                 </div>
 
-                {/* 4. Description / Synopsis */}
+                {/* ── 4. Description / Synopsis ── */}
                 <div>
                   <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
                     Description / Synopsis
                   </label>
                   <textarea
-                    rows={3}
+                    rows={2}
                     placeholder="Enter manga description, synopsis, or auto-fetch from online..."
                     className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
                     value={mangaDescription}
@@ -7249,65 +8692,331 @@ export default function Dashboard({ onSelectAnime }) {
                   />
                 </div>
 
-                {/* 3. Cover Picture */}
+                {/* ── 5. Cover Picture Artwork (2:3) ── */}
                 <div className="space-y-2">
-                  <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
-                    Cover Picture Artwork
-                  </label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowMangaCoverSearch(true)}
-                      className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-md cursor-pointer"
-                    >
-                      <Sparkles size={14} />
-                      <span>Search Online Covers</span>
-                    </button>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                      Cover Picture Artwork (2:3)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowMangaCoverSearch(true)}
+                        className="px-3 py-1 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-md cursor-pointer"
+                      >
+                        <Sparkles size={12} />
+                        <span>Search Covers (AniList / Fanart.tv)</span>
+                      </button>
+                      <label className="text-[11px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 cursor-pointer">
+                        <ImagePlus size={13} />
+                        <span>Upload File</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleMangaCoverUpload}
+                        />
+                      </label>
+                    </div>
+                  </div>
 
-                    <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-gray-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border border-white/10">
-                      <ImagePlus size={14} />
-                      <span>Upload Image</span>
+                  <input
+                    type="text"
+                    placeholder="Direct cover image URL (AniList / Fanart.tv)..."
+                    className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                    value={mangaCoverUrl}
+                    onChange={(e) => setMangaCoverUrl(e.target.value)}
+                  />
+
+                  {/* Cover Preview & Fetched Posters List */}
+                  <div className="flex flex-wrap items-start gap-3 mt-1">
+                    {mangaCoverUrl && (
+                      <div className="relative w-24 h-36 rounded-xl overflow-hidden border border-white/20 bg-black/40 shadow-lg shrink-0">
+                        <img
+                          src={mangaCoverUrl}
+                          alt="Cover Preview"
+                          className="w-full h-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setMangaCoverUrl('')}
+                          className="absolute top-1 right-1 p-1 rounded-full bg-red-600 hover:bg-red-700 text-white transition cursor-pointer"
+                          title="Remove Cover Image"
+                        >
+                          <X size={10} />
+                        </button>
+                        <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/75 text-[9px] font-bold text-emerald-400">
+                          Active
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Quick Select from Fetched AniList & Fanart.tv Posters */}
+                    {Array.isArray(mangaImages?.covers) && mangaImages.covers.length > 1 && (
+                      <div className="flex-1 min-w-[200px]">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">
+                          Fetched Online Posters ({mangaImages.covers.length}):
+                        </span>
+                        <div className="flex gap-2 overflow-x-auto pb-1 max-h-36 custom-scrollbar">
+                          {mangaImages.covers.map((cov, idx) => {
+                            const isSelected = mangaCoverUrl === cov.url;
+                            return (
+                              <div
+                                key={cov.url || idx}
+                                onClick={() => setMangaCoverUrl(cov.url)}
+                                className={`relative w-16 h-24 rounded-lg overflow-hidden shrink-0 border cursor-pointer transition ${
+                                  isSelected ? 'border-purple-400 ring-2 ring-purple-500/50' : 'border-white/10 hover:border-white/30 opacity-75 hover:opacity-100'
+                                }`}
+                              >
+                                <img src={cov.url} alt="Cover option" className="w-full h-full object-cover" />
+                                <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[8px] text-center text-gray-300 truncate px-0.5">
+                                  {cov.source || 'Poster'}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── 6. Backdrop Banner Artwork (16:9) ── */}
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs uppercase tracking-wider text-purple-400 font-bold flex items-center gap-1.5">
+                      <ImageIcon size={14} className="text-purple-400" />
+                      <span>Backdrop Banner Artwork (16:9)</span>
+                    </label>
+                    <label className="text-[11px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 cursor-pointer">
+                      <ImagePlus size={13} />
+                      <span>Upload File</span>
                       <input
                         type="file"
                         accept="image/*"
                         className="hidden"
-                        onChange={handleNewMangaCoverUpload}
+                        onChange={handleMangaBannerUpload}
                       />
                     </label>
-
-                    <button
-                      type="button"
-                      onClick={handleMangaCoverBrowse}
-                      className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-gray-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border border-white/10"
-                    >
-                      <HardDrive size={14} />
-                      <span>Browse PC</span>
-                    </button>
                   </div>
+                  <p className="text-[11px] text-gray-400">
+                    Wide 16:9 background image displayed on the top hero slider and manga details.
+                  </p>
 
-                  {mangaCoverUrl && (
-                    <div className="relative w-24 h-32 rounded-xl overflow-hidden border border-white/20 shadow-lg mt-2">
-                      <img
-                        src={mangaCoverUrl}
-                        alt="Cover Preview"
-                        className="w-full h-full object-cover"
-                      />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Paste wide banner URL or select below from AniList / Fanart.tv..."
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={mangaBannerUrl}
+                      onChange={(e) => setMangaBannerUrl(e.target.value)}
+                    />
+                    {mangaBannerUrl && (
                       <button
                         type="button"
-                        onClick={() => setMangaCoverUrl('')}
-                        className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white hover:bg-red-500 transition cursor-pointer"
+                        onClick={() => setMangaBannerUrl('')}
+                        className="p-2 rounded-xl bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer"
+                        title="Clear banner"
                       >
-                        <X size={12} />
+                        <X size={14} />
                       </button>
+                    )}
+                  </div>
+
+                  {/* Active Banner Preview */}
+                  {mangaBannerUrl && (
+                    <div className="relative w-full h-24 sm:h-28 rounded-xl overflow-hidden border border-white/20 shadow-lg group">
+                      <img
+                        src={mangaBannerUrl}
+                        alt="Backdrop Preview"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end justify-between p-2">
+                        <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1 bg-black/60 px-2 py-0.5 rounded">
+                          <Check size={11} /> Active 16:9 Banner
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setMangaBannerUrl('')}
+                          className="p-1 rounded-full bg-red-600 text-white hover:bg-red-700 transition cursor-pointer"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Visual Banner Picker from AniList & Fanart.tv */}
+                  {Array.isArray(mangaImages?.banners) && mangaImages.banners.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                        Choose from Fetched Online Banners ({mangaImages.banners.length} from AniList & Fanart.tv):
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto custom-scrollbar p-1 rounded-xl bg-black/40 border border-white/5">
+                        {mangaImages.banners.map((ban, idx) => {
+                          const isSelected = mangaBannerUrl === ban.url;
+                          return (
+                            <div
+                              key={ban.url || idx}
+                              onClick={() => setMangaBannerUrl(ban.url)}
+                              className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
+                                isSelected
+                                  ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
+                                  : 'border-white/10 hover:border-white/30 opacity-80 hover:opacity-100'
+                              }`}
+                            >
+                              <img
+                                src={ban.url}
+                                alt={`Banner ${idx + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-x-0 bottom-0 bg-black/80 p-1 flex items-center justify-between text-[9px] text-gray-300">
+                                <span className="truncate">{ban.source || 'Banner'}</span>
+                                {isSelected && (
+                                  <span className="text-emerald-400 font-bold shrink-0 flex items-center gap-0.5">
+                                    <Check size={10} />
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
 
-                {/* 4. Genres */}
+                {/* ── 7. Custom Manga Logo / Title Art (Transparent PNG) ── */}
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={enableMangaLogo}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setEnableMangaLogo(checked);
+                          if (checked && !mangaLogoUrl && mangaImages?.logos?.length > 0) {
+                            setMangaLogoUrl(mangaImages.logos[0].url);
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-white/20 bg-black/40 text-purple-500 focus:ring-purple-500 cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <ImageIcon size={14} className="text-purple-400" />
+                        Custom Manga Logo / Title Art
+                      </span>
+                    </label>
+                    {enableMangaLogo && (
+                      <label className="text-[11px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 cursor-pointer">
+                        <ImagePlus size={13} />
+                        <span>Upload Local Logo</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleMangaLogoUpload}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    Displays the manga's official transparent logo in the home page sliding banner instead of simple text title.
+                  </p>
+
+                  {enableMangaLogo && (
+                    <div className="space-y-3 pt-1">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Select below, upload, or paste transparent logo URL..."
+                          value={mangaLogoUrl}
+                          onChange={(e) => setMangaLogoUrl(e.target.value)}
+                          className="flex-1 px-3 py-2 rounded-xl glass-input text-xs text-white"
+                        />
+                        {mangaLogoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setMangaLogoUrl('')}
+                            className="p-2 rounded-xl bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer text-xs"
+                            title="Clear logo"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Current Selected Logo Preview */}
+                      {mangaLogoUrl && (
+                        <div className="p-3 rounded-xl bg-black/60 border border-white/15 flex items-center justify-between gap-3">
+                          <div className="max-h-14 max-w-[200px] flex items-center justify-center p-1 bg-white/5 rounded-lg border border-white/5">
+                            <img
+                              src={mangaLogoUrl}
+                              alt="Selected Logo"
+                              className="max-h-12 w-auto max-w-full object-contain"
+                            />
+                          </div>
+                          <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
+                            <Check size={12} /> Active Logo
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Fetched Logos Picker from Fanart.tv */}
+                      {Array.isArray(mangaImages?.logos) && mangaImages.logos.length > 0 ? (
+                        <div className="space-y-1.5">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                            Fetched Manga Logos ({mangaImages.logos.length} available from Fanart.tv):
+                          </span>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-44 overflow-y-auto custom-scrollbar p-1 rounded-xl bg-black/40 border border-white/5">
+                            {mangaImages.logos.map((logo, idx) => {
+                              const isSelected = mangaLogoUrl === logo.url;
+                              return (
+                                <div
+                                  key={logo.url || idx}
+                                  onClick={() => setMangaLogoUrl(logo.url)}
+                                  className={`p-2 rounded-xl border flex flex-col items-center justify-center gap-1 cursor-pointer transition-all ${
+                                    isSelected
+                                      ? 'bg-purple-500/20 border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
+                                      : 'bg-white/[0.04] border-white/10 hover:border-white/30 hover:bg-white/[0.08]'
+                                  }`}
+                                >
+                                  <div className="w-full h-12 flex items-center justify-center overflow-hidden">
+                                    <img
+                                      src={logo.url}
+                                      alt="Logo"
+                                      className="max-h-10 w-auto max-w-full object-contain"
+                                    />
+                                  </div>
+                                  <span className="text-[9px] font-mono text-gray-400 truncate">
+                                    {logo.type || `Logo ${idx + 1}`}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-gray-500 italic">
+                          No online logos found for this manga. You can upload a local PNG logo image above.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── 8. Select Genres ── */}
                 <div>
-                  <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
-                    Select Genres
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                      Select Genres (Max 5)
+                    </label>
+                    {mangaGenres.length > 0 && (
+                      <span className="text-[10px] text-purple-300 font-mono">
+                        {mangaGenres.length}/5 selected
+                      </span>
+                    )}
+                  </div>
                   <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto custom-scrollbar p-1">
                     {GENRES_LIST.filter(g => g !== 'All').map((g) => {
                       const isSel = mangaGenres.includes(g);
@@ -7317,11 +9026,11 @@ export default function Dashboard({ onSelectAnime }) {
                           type="button"
                           onClick={() => {
                             if (isSel) setMangaGenres(mangaGenres.filter((item) => item !== g));
-                            else setMangaGenres([...mangaGenres, g]);
+                            else if (mangaGenres.length < 5) setMangaGenres([...mangaGenres, g]);
                           }}
                           className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer border ${isSel
-                              ? 'bg-purple-600 border-purple-500 text-white'
-                              : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
+                            ? 'bg-purple-600 border-purple-500 text-white shadow-md'
+                            : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
                             }`}
                         >
                           {g}
@@ -7342,7 +9051,7 @@ export default function Dashboard({ onSelectAnime }) {
                   </button>
                   <button
                     type="submit"
-                    disabled={mangaScanning || !mangaFolderPath || !mangaTitle || mangaScanResult.length === 0}
+                    disabled={mangaScanning || (!mangaFolderPath && mangaScanResult.length === 0)}
                     className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-40 text-white text-xs font-bold uppercase tracking-wider transition shadow-lg cursor-pointer disabled:cursor-not-allowed"
                   >
                     {mangaScanning ? 'Processing...' : 'Track Manga Folder'}
@@ -7614,8 +9323,8 @@ export default function Dashboard({ onSelectAnime }) {
                             else setAudioStoryGenres([...audioStoryGenres, g]);
                           }}
                           className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer border ${isSel
-                              ? 'bg-cyan-500 border-cyan-400 text-black'
-                              : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
+                            ? 'bg-cyan-500 border-cyan-400 text-black'
+                            : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
                             }`}
                         >
                           {g}

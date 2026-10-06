@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+const DEFAULT_TMDB_KEY = '4e44d9029b1270a757cddc766a1bcb63';
+const DEFAULT_FANART_KEY = 'd2d31f9ecabea050fc7d68aa3146015f';
+
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -11,19 +14,25 @@ export async function GET(request) {
       return NextResponse.json({ success: true, results: [] });
     }
 
+    const tmdbApiKey = process.env.TMDB_API_KEY || DEFAULT_TMDB_KEY;
+    const fanartApiKey = process.env.FANART_API_KEY || DEFAULT_FANART_KEY;
+
     const aniListPromise = fetchAniListManga(query);
+    const fanartPromise = fetchFanartMangaPosters(query, tmdbApiKey, fanartApiKey);
     const jikanPromise = fetchJikanManga(query);
 
-    const [aniSettled, jikanSettled] = await Promise.allSettled([
+    const [aniSettled, fanartSettled, jikanSettled] = await Promise.allSettled([
       aniListPromise,
+      fanartPromise,
       jikanPromise,
     ]);
 
     const aniResults = aniSettled.status === 'fulfilled' ? aniSettled.value : [];
+    const fanartResults = fanartSettled.status === 'fulfilled' ? fanartSettled.value : [];
     let jikanResults = jikanSettled.status === 'fulfilled' ? jikanSettled.value : [];
 
     // Fallback to Kitsu if Jikan failed or timed out
-    if (jikanResults.length === 0) {
+    if (jikanResults.length === 0 && fanartResults.length === 0) {
       try {
         jikanResults = await fetchKitsuManga(query);
       } catch (kitsuErr) {
@@ -31,11 +40,12 @@ export async function GET(request) {
       }
     }
 
-    // Interleave results
+    // Interleave results with AniList and Fanart prioritized
     const results = [];
-    const maxLen = Math.max(aniResults.length, jikanResults.length);
+    const maxLen = Math.max(aniResults.length, fanartResults.length, jikanResults.length);
     for (let i = 0; i < maxLen; i++) {
       if (aniResults[i]) results.push(aniResults[i]);
+      if (fanartResults[i]) results.push(fanartResults[i]);
       if (jikanResults[i]) results.push(jikanResults[i]);
     }
 
@@ -46,6 +56,7 @@ export async function GET(request) {
       results,
       providers: {
         aniList: aniResults.length,
+        fanart: fanartResults.length,
         jikan: jikanResults.length,
       },
     });
@@ -115,10 +126,55 @@ async function fetchAniListManga(query) {
       chapters: item.chapters || null,
       volumes: item.volumes || null,
       imageUrl,
+      thumbnailUrl: item.coverImage.medium || imageUrl,
       source: 'AniList',
       siteUrl: `https://anilist.co/manga/${item.id}`,
     };
   });
+}
+
+async function fetchFanartMangaPosters(query, tmdbApiKey, fanartApiKey) {
+  try {
+    const tvSearchRes = await fetch(
+      `https://api.themoviedb.org/3/search/tv?api_key=${tmdbApiKey}&query=${encodeURIComponent(query)}&page=1`,
+      { signal: AbortSignal.timeout(4000) }
+    );
+    const tvData = await tvSearchRes.json();
+    const tvShow = tvData.results?.[0];
+
+    let tvdbId = null;
+    if (tvShow) {
+      const extRes = await fetch(
+        `https://api.themoviedb.org/3/tv/${tvShow.id}/external_ids?api_key=${tmdbApiKey}`,
+        { signal: AbortSignal.timeout(4000) }
+      );
+      if (extRes.ok) {
+        const extData = await extRes.json();
+        tvdbId = extData.tvdb_id;
+      }
+    }
+
+    if (tvdbId) {
+      const fanartUrl = `https://webservice.fanart.tv/v3/tv/${tvdbId}?api_key=${fanartApiKey}`;
+      const fRes = await fetch(fanartUrl, { signal: AbortSignal.timeout(5000) });
+      if (fRes.ok) {
+        const d = await fRes.json();
+        const rawPosters = [...(d.tvposter || []), ...(d.seasonposter || [])];
+        return rawPosters.slice(0, 8).map((p, idx) => ({
+          id: `fanart-manga-tv-${p.id || idx}`,
+          source: 'Fanart.tv',
+          title: query,
+          imageUrl: p.url,
+          thumbnailUrl: p.url,
+          year: null,
+          format: 'Fanart Artwork',
+        }));
+      }
+    }
+  } catch (err) {
+    console.warn('[fetchFanartMangaPosters error]:', err.message);
+  }
+  return [];
 }
 
 async function fetchJikanManga(query) {
@@ -149,6 +205,7 @@ async function fetchJikanManga(query) {
       chapters: item.chapters || null,
       volumes: item.volumes || null,
       imageUrl,
+      thumbnailUrl: item.images?.jpg?.small_image_url || imageUrl,
       source: 'Jikan',
       siteUrl: item.url || `https://myanimelist.net/manga/${item.mal_id}`,
     };
@@ -181,6 +238,7 @@ async function fetchKitsuManga(query) {
       chapters: attr.chapterCount || null,
       volumes: attr.volumeCount || null,
       imageUrl,
+      thumbnailUrl: attr.posterImage?.small || imageUrl,
       source: 'Kitsu',
       siteUrl: `https://kitsu.io/manga/${item.id}`,
     };

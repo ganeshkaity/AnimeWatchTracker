@@ -4,9 +4,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   ArrowLeft, Play, CheckCircle2, Bookmark, StickyNote, Star, AlertTriangle,
   Sparkles, History, RotateCcw, X, Heart, EyeOff, Film, Clock, Search,
-  ChevronDown, ChevronUp, Folder, Tv, ExternalLink, RefreshCw, Loader2,
+  ChevronDown, ChevronUp, Folder, FolderOpen, Tv, ExternalLink, RefreshCw, Loader2,
   HardDrive, Headphones, FileVideo, Music, Edit3, Trash2, Check, CheckCheck,
-  ImagePlus, Disc, SlidersHorizontal, ListFilter
+  ImagePlus, Disc, SlidersHorizontal, ListFilter, Image as ImageIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { doc, getDocs, collection, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
@@ -46,6 +46,12 @@ export default function AudioStoryDetail({ storyId, onBack, onPlayTrack }) {
   const [editTitle, setEditTitle] = useState('');
   const [editSynopsis, setEditSynopsis] = useState('');
   const [editCoverUrl, setEditCoverUrl] = useState('');
+  const [editBannerUrl, setEditBannerUrl] = useState('');
+  const [editLogoUrl, setEditLogoUrl] = useState('');
+  const [enableEditLogo, setEnableEditLogo] = useState(false);
+  const [audioArtworkImages, setAudioArtworkImages] = useState({ covers: [], banners: [], logos: [] });
+  const [searchingAudioArtwork, setSearchingAudioArtwork] = useState(false);
+  const [audioArtworkQuery, setAudioArtworkQuery] = useState('');
   const [showCoverSearch, setShowCoverSearch] = useState(false);
 
   // Rescan Modal
@@ -311,6 +317,105 @@ export default function AudioStoryDetail({ storyId, onBack, onPlayTrack }) {
     }
   };
 
+  const handleBannerFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setEditBannerUrl(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleLogoFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setEditLogoUrl(ev.target.result);
+      setEnableEditLogo(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleBrowseBannerLocal = async () => {
+    try {
+      const pickRes = await fetch('/api/select-image');
+      const pickData = await pickRes.json();
+      if (pickData.success && pickData.path) {
+        setEditBannerUrl(pickData.path);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleBrowseLogoLocal = async () => {
+    try {
+      const pickRes = await fetch('/api/select-image');
+      const pickData = await pickRes.json();
+      if (pickData.success && pickData.path) {
+        setEditLogoUrl(pickData.path);
+        setEnableEditLogo(true);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchAudioArtwork = async (term) => {
+    const q = (term || audioArtworkQuery || editTitle).trim();
+    if (!q) return;
+    setSearchingAudioArtwork(true);
+    try {
+      const [animeRes, mangaRes] = await Promise.allSettled([
+        fetch(`/api/anime/details?q=${encodeURIComponent(q)}`),
+        fetch(`/api/manga/details?q=${encodeURIComponent(q)}`)
+      ]);
+
+      const banners = [];
+      const logos = [];
+      const covers = [];
+      const seen = new Set();
+
+      const addMedia = (item, type) => {
+        if (!item?.url || seen.has(item.url)) return;
+        seen.add(item.url);
+        if (type === 'banner') banners.push(item);
+        if (type === 'logo') logos.push(item);
+        if (type === 'cover') covers.push(item);
+      };
+
+      if (animeRes.status === 'fulfilled') {
+        const data = await animeRes.value.json().catch(() => null);
+        if (data?.success && data?.anime) {
+          if (data.anime.bannerUrl) addMedia({ url: data.anime.bannerUrl, source: 'AniList' }, 'banner');
+          if (data.anime.logoUrl) addMedia({ url: data.anime.logoUrl, source: 'Fanart.tv' }, 'logo');
+          data.anime.images?.banners?.forEach(b => addMedia(b, 'banner'));
+          data.anime.images?.logos?.forEach(l => addMedia(l, 'logo'));
+          data.anime.images?.covers?.forEach(c => addMedia(c, 'cover'));
+        }
+      }
+
+      if (mangaRes.status === 'fulfilled') {
+        const data = await mangaRes.value.json().catch(() => null);
+        if (data?.success && data?.manga) {
+          if (data.manga.bannerUrl) addMedia({ url: data.manga.bannerUrl, source: 'Manga' }, 'banner');
+          if (data.manga.logoUrl) addMedia({ url: data.manga.logoUrl, source: 'Fanart.tv' }, 'logo');
+          data.manga.images?.banners?.forEach(b => addMedia(b, 'banner'));
+          data.manga.images?.logos?.forEach(l => addMedia(l, 'logo'));
+          data.manga.images?.covers?.forEach(c => addMedia(c, 'cover'));
+        }
+      }
+
+      setAudioArtworkImages({ covers, banners, logos });
+    } catch (err) {
+      console.error('Failed to fetch audio story artwork:', err);
+    } finally {
+      setSearchingAudioArtwork(false);
+    }
+  };
+
   // Save Edit Metadata
   const handleSaveMetadata = async () => {
     if (!editTitle.trim()) return;
@@ -321,18 +426,39 @@ export default function AudioStoryDetail({ storyId, onBack, onPlayTrack }) {
       synopsis: editSynopsis.trim(),
       description: editSynopsis.trim(),
       thumbnailBase64: editCoverUrl || story.thumbnailBase64 || '',
+      bannerUrl: editBannerUrl || '',
+      backdropUrl: editBannerUrl || '',
+      logoUrl: enableEditLogo ? (editLogoUrl || '') : '',
       updatedAt: new Date().toISOString(),
     };
     setStory(updated);
     upsertLocalAudioStory(updated);
 
     if (!isOffline && db) {
-      await updateDoc(doc(db, 'users', targetUserId, 'audioStories', storyId), {
-        title: editTitle.trim(),
-        synopsis: editSynopsis.trim(),
-        description: editSynopsis.trim(),
-        thumbnailBase64: editCoverUrl || story.thumbnailBase64 || '',
-        updatedAt: new Date().toISOString(),
+      try {
+        await updateDoc(doc(db, 'users', targetUserId, 'audioStories', storyId), {
+          title: editTitle.trim(),
+          synopsis: editSynopsis.trim(),
+          description: editSynopsis.trim(),
+          thumbnailBase64: editCoverUrl || story.thumbnailBase64 || '',
+          bannerUrl: editBannerUrl || '',
+          backdropUrl: editBannerUrl || '',
+          logoUrl: enableEditLogo ? (editLogoUrl || '') : '',
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error(err);
+        addToDirtyQueue({
+          type: 'SET_AUDIO_STORY',
+          dedupeKey: `SET_AUDIO_STORY_${storyId}`,
+          payload: { id: storyId, ...updated }
+        });
+      }
+    } else {
+      addToDirtyQueue({
+        type: 'SET_AUDIO_STORY',
+        dedupeKey: `SET_AUDIO_STORY_${storyId}`,
+        payload: { id: storyId, ...updated }
       });
     }
     setShowEditModal(false);
@@ -431,9 +557,18 @@ export default function AudioStoryDetail({ storyId, onBack, onPlayTrack }) {
 
           <button
             onClick={() => {
-              setEditTitle(story.title || '');
+              const initialTitle = story.title || '';
+              setEditTitle(initialTitle);
               setEditSynopsis(story.synopsis || story.description || '');
-              setEditCoverUrl(story.thumbnailBase64 || '');
+              setEditCoverUrl(story.thumbnailBase64 || story.coverUrl || '');
+              setEditBannerUrl(story.bannerUrl || story.backdropUrl || '');
+              setEditLogoUrl(story.logoUrl || '');
+              setEnableEditLogo(Boolean(story.logoUrl));
+              setAudioArtworkQuery(initialTitle);
+              setAudioArtworkImages({ covers: [], banners: [], logos: [] });
+              if (initialTitle) {
+                fetchAudioArtwork(initialTitle);
+              }
               setShowEditModal(true);
             }}
             className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
@@ -464,6 +599,18 @@ export default function AudioStoryDetail({ storyId, onBack, onPlayTrack }) {
         {/* Background Ambient Blur */}
         <div className="absolute top-0 right-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-[100px] pointer-events-none" />
         <div className="absolute bottom-0 left-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-[100px] pointer-events-none" />
+
+        {/* Backdrop Banner Artwork (16:9) if available */}
+        {(story.bannerUrl || story.backdropUrl) && (
+          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            <img
+              src={story.bannerUrl || story.backdropUrl}
+              alt=""
+              className="w-full h-full object-cover opacity-25 filter blur-[1px] scale-105"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#07090f] via-[#0d111a]/70 to-[#0d111a]/85" />
+          </div>
+        )}
 
         <div className="max-w-6xl mx-auto px-4 sm:px-6 relative z-10 flex flex-col md:flex-row gap-6 sm:gap-8 items-center md:items-start">
           {/* Cover Poster */}
@@ -499,9 +646,19 @@ export default function AudioStoryDetail({ storyId, onBack, onPlayTrack }) {
                 )}
               </div>
 
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight">
-                {story.title}
-              </h1>
+              {story.logoUrl ? (
+                <div className="flex items-center justify-center md:justify-start py-1">
+                  <img
+                    src={story.logoUrl}
+                    alt={story.title}
+                    className="max-h-16 sm:max-h-20 w-auto object-contain drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)]"
+                  />
+                </div>
+              ) : (
+                <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight">
+                  {story.title}
+                </h1>
+              )}
 
               {story.folderPath && (
                 <div className="flex items-center justify-center md:justify-start gap-2 text-xs text-gray-400 font-mono">
@@ -757,19 +914,19 @@ export default function AudioStoryDetail({ storyId, onBack, onPlayTrack }) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-lg glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl space-y-4 bg-[#0d1117]/95"
+              className="w-full max-w-xl glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl space-y-4 bg-[#0d1117]/95 max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center border-b border-white/10 pb-3">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <Edit3 size={18} className="text-cyan-400" />
                   <span>Edit Audio Story Details</span>
                 </h3>
-                <button onClick={() => setShowEditModal(false)} className="text-gray-400 hover:text-white">
+                <button onClick={() => setShowEditModal(false)} className="text-gray-400 hover:text-white cursor-pointer">
                   <X size={18} />
                 </button>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-3.5">
                 <div>
                   <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold mb-1">
                     Story Title
@@ -787,36 +944,322 @@ export default function AudioStoryDetail({ storyId, onBack, onPlayTrack }) {
                     Synopsis / Description
                   </label>
                   <textarea
-                    rows={4}
+                    rows={3}
                     value={editSynopsis}
                     onChange={(e) => setEditSynopsis(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
                   />
                 </div>
 
+                {/* ── Online Artwork Search (Fanart.tv, AniList, Manga adaptations) ── */}
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-cyan-950/30 via-purple-950/30 to-black/40 border border-cyan-500/20 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Sparkles size={14} className="text-cyan-400" />
+                      Search Artwork Online (Fanart.tv & AniList)
+                    </span>
+                    {searchingAudioArtwork && (
+                      <span className="text-[11px] text-cyan-300 flex items-center gap-1 font-semibold">
+                        <Loader2 size={12} className="animate-spin" /> Searching...
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Enter title to search online banners and logos..."
+                      value={audioArtworkQuery}
+                      onChange={(e) => setAudioArtworkQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          fetchAudioArtwork(audioArtworkQuery);
+                        }
+                      }}
+                      className="flex-1 px-3 py-1.5 rounded-xl glass-input text-xs text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fetchAudioArtwork(audioArtworkQuery)}
+                      disabled={searchingAudioArtwork || !audioArtworkQuery.trim()}
+                      className="px-3 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-black font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md transition"
+                    >
+                      {searchingAudioArtwork ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                      Search
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── Cover Picture Artwork ── */}
                 <div>
-                  <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold mb-1">
-                    Cover Picture Artwork
-                  </label>
-                  <div className="flex gap-2">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                      Cover Picture Artwork
+                    </label>
                     <button
                       type="button"
                       onClick={() => setShowCoverSearch(true)}
-                      className="px-3 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-black text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-cyan-500 to-purple-600 text-black text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                     >
-                      <Sparkles size={14} /> Search Online Covers
+                      <Sparkles size={12} /> Search Online Covers
                     </button>
                   </div>
                   {editCoverUrl && (
-                    <div className="relative w-24 h-32 rounded-xl overflow-hidden border border-white/20 mt-2">
+                    <div className="relative w-24 h-32 rounded-xl overflow-hidden border border-white/20 mt-1">
                       <img src={editCoverUrl} alt="Cover Preview" className="w-full h-full object-cover" />
                       <button
                         type="button"
                         onClick={() => setEditCoverUrl('')}
-                        className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white"
+                        className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white cursor-pointer hover:bg-red-600 transition"
                       >
                         <X size={12} />
                       </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Backdrop Banner Artwork (16:9) ── */}
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 font-bold">
+                      Backdrop Banner Artwork (16:9)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <label className="text-[11px] text-cyan-400 hover:text-cyan-300 font-bold flex items-center gap-1 cursor-pointer">
+                        <ImagePlus size={13} />
+                        <span>Upload Local</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleBannerFileUpload}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleBrowseBannerLocal}
+                        className="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <FolderOpen size={13} />
+                        <span>Browse PC</span>
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    Wide 16:9 background banner displayed on audio story details and home carousel.
+                  </p>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Paste wide banner URL or select below from online search..."
+                      className="w-full px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={editBannerUrl}
+                      onChange={(e) => setEditBannerUrl(e.target.value)}
+                    />
+                    {editBannerUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setEditBannerUrl('')}
+                        className="p-2 rounded-xl bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer"
+                        title="Clear banner"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Active Banner Preview */}
+                  {editBannerUrl && (
+                    <div className="relative w-full h-24 sm:h-28 rounded-xl overflow-hidden border border-white/20 shadow-lg group">
+                      <img
+                        src={editBannerUrl}
+                        alt="Backdrop Preview"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end justify-between p-2">
+                        <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1 bg-black/60 px-2 py-0.5 rounded">
+                          <Check size={11} /> Active 16:9 Banner
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setEditBannerUrl('')}
+                          className="p-1 rounded-full bg-red-600 text-white hover:bg-red-700 transition cursor-pointer"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Visual Banner Picker from Fanart.tv / AniList */}
+                  {Array.isArray(audioArtworkImages?.banners) && audioArtworkImages.banners.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                        Choose from Fetched Online Banners ({audioArtworkImages.banners.length} found):
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto custom-scrollbar p-1 rounded-xl bg-black/40 border border-white/5">
+                        {audioArtworkImages.banners.map((ban, idx) => {
+                          const isSelected = editBannerUrl === ban.url;
+                          return (
+                            <div
+                              key={ban.url || idx}
+                              onClick={() => setEditBannerUrl(ban.url)}
+                              className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
+                                isSelected
+                                  ? 'border-cyan-400 ring-2 ring-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.4)]'
+                                  : 'border-white/10 hover:border-white/30 opacity-80 hover:opacity-100'
+                              }`}
+                            >
+                              <img
+                                src={ban.url}
+                                alt={`Banner ${idx + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-x-0 bottom-0 bg-black/80 p-1 flex items-center justify-between text-[9px] text-gray-300">
+                                <span className="truncate">{ban.source || 'Banner'}</span>
+                                {isSelected && (
+                                  <span className="text-emerald-400 font-bold shrink-0 flex items-center gap-0.5">
+                                    <Check size={10} />
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Custom Audio Story Logo / Title Art (Transparent PNG) ── */}
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={enableEditLogo}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setEnableEditLogo(checked);
+                          if (checked && !editLogoUrl && audioArtworkImages?.logos?.length > 0) {
+                            setEditLogoUrl(audioArtworkImages.logos[0].url);
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-white/20 bg-black/40 text-cyan-500 focus:ring-cyan-500 cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <ImageIcon size={14} className="text-cyan-400" />
+                        Custom Audio Story Logo / Title Art
+                      </span>
+                    </label>
+                    {enableEditLogo && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-[11px] text-cyan-400 hover:text-cyan-300 font-bold flex items-center gap-1 cursor-pointer">
+                          <ImagePlus size={13} />
+                          <span>Upload Local</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handleLogoFileUpload}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleBrowseLogoLocal}
+                          className="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <FolderOpen size={13} />
+                          <span>Browse PC</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    Displays official transparent title art/logo in the hero section and dashboard carousel in place of plain text title.
+                  </p>
+
+                  {enableEditLogo && (
+                    <div className="space-y-3 pt-1">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Select below, upload, or paste transparent logo URL..."
+                          value={editLogoUrl}
+                          onChange={(e) => setEditLogoUrl(e.target.value)}
+                          className="flex-1 px-3 py-2 rounded-xl glass-input text-xs text-white"
+                        />
+                        {editLogoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setEditLogoUrl('')}
+                            className="p-2 rounded-xl bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer text-xs"
+                            title="Clear logo"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Current Selected Logo Preview */}
+                      {editLogoUrl && (
+                        <div className="p-3 rounded-xl bg-black/60 border border-white/15 flex items-center justify-between gap-3">
+                          <div className="max-h-14 max-w-[200px] flex items-center justify-center p-1 bg-white/5 rounded-lg border border-white/5">
+                            <img
+                              src={editLogoUrl}
+                              alt="Selected Logo"
+                              className="max-h-12 w-auto max-w-full object-contain"
+                            />
+                          </div>
+                          <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
+                            <Check size={12} /> Active Logo
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Visual Logo Picker from Fanart.tv */}
+                      {Array.isArray(audioArtworkImages?.logos) && audioArtworkImages.logos.length > 0 && (
+                        <div className="space-y-1.5 pt-1">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                            Choose from Fetched Transparent Logos ({audioArtworkImages.logos.length} from Fanart.tv / TMDB):
+                          </span>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto custom-scrollbar p-1.5 rounded-xl bg-black/50 border border-white/5">
+                            {audioArtworkImages.logos.map((logo, idx) => {
+                              const isSelected = editLogoUrl === logo.url;
+                              return (
+                                <div
+                                  key={logo.url || idx}
+                                  onClick={() => setEditLogoUrl(logo.url)}
+                                  className={`relative h-20 p-2 rounded-xl bg-white/[0.04] border flex items-center justify-center cursor-pointer transition ${
+                                    isSelected
+                                      ? 'border-cyan-400 ring-2 ring-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.4)] bg-cyan-500/10'
+                                      : 'border-white/10 hover:border-white/30 hover:bg-white/[0.08]'
+                                  }`}
+                                >
+                                  <img
+                                    src={logo.url}
+                                    alt={`Logo ${idx + 1}`}
+                                    className="max-h-14 w-auto max-w-full object-contain filter drop-shadow-md"
+                                  />
+                                  <div className="absolute bottom-1 right-1 flex items-center gap-1">
+                                    {logo.lang && (
+                                      <span className="text-[8px] uppercase font-bold px-1 rounded bg-black/70 text-gray-300">
+                                        {logo.lang}
+                                      </span>
+                                    )}
+                                    {isSelected && (
+                                      <span className="text-emerald-400 p-0.5 rounded bg-black/70">
+                                        <Check size={10} />
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -826,14 +1269,14 @@ export default function AudioStoryDetail({ storyId, onBack, onPlayTrack }) {
                 <button
                   type="button"
                   onClick={() => setShowEditModal(false)}
-                  className="px-4 py-2 text-xs text-gray-400 hover:text-white"
+                  className="px-4 py-2 text-xs text-gray-400 hover:text-white cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveMetadata}
-                  className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs uppercase tracking-wider"
+                  className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs uppercase tracking-wider cursor-pointer transition shadow-md"
                 >
                   Save Changes
                 </button>
