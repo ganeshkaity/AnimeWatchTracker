@@ -16,6 +16,7 @@ import {
   getLocalChapters, setLocalChapters,
   getLocalAudioStories, setLocalAudioStories,
   getLocalAudioTracks, setLocalAudioTracks,
+  getLocalMovies, setLocalMovies,
   getLocalNotes, setLocalNotes,
   getLocalSettings, setLocalSettings,
   getDirtyQueue, clearDirtyQueue,
@@ -129,6 +130,16 @@ export async function pullFromFirestore(db) {
     });
     setLocalAudioStories(audioStories);
     await Promise.all(trackPromises);
+
+    // Pull movies list from user
+    const moviesSnap = await getDocs(collection(db, 'users', userId, 'movies'));
+    const movies = [];
+    moviesSnap.forEach(d => {
+      const mData = d.data();
+      const isWatched = Boolean(mData.watched || mData.isWatched || mData.watchStatus === 'Completed' || (mData.watchProgress && mData.watchProgress >= 95));
+      movies.push({ id: d.id, userId, ...mData, watched: isWatched, isWatched });
+    });
+    setLocalMovies(movies);
 
   } catch (err) {
     console.error('pullFromFirestore error:', err);
@@ -342,6 +353,15 @@ export async function pushToFirestore(db) {
       } else if (op.type === 'DELETE_AUDIO_TRACK') {
         const { storyId, id, storyUserId } = op.payload;
         const ref = doc(db, 'users', storyUserId || userId, 'audioStories', storyId, 'tracks', id);
+        batch.delete(ref);
+        batchCount++;
+      } else if (op.type === 'SET_MOVIE') {
+        const { id, userId: targetUserId, ...data } = op.payload;
+        const ref = doc(db, 'users', targetUserId || userId, 'movies', id);
+        batch.set(ref, data, { merge: true });
+        batchCount++;
+      } else if (op.type === 'DELETE_MOVIE') {
+        const ref = doc(db, 'users', op.payload.userId || userId, 'movies', op.payload.id);
         batch.delete(ref);
         batchCount++;
       }

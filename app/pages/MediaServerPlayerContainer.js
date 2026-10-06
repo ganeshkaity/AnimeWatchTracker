@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, Server, HardDrive } from 'lucide-react';
+import { ChevronLeft, Server, HardDrive, Film } from 'lucide-react';
 import MediaServerPlayer from '../components/player/MediaServerPlayer';
-import { getLocalAnime, getLocalEpisodes } from '../utils/localStore';
+import { getLocalAnime, getLocalEpisodes, getLocalMovie } from '../utils/localStore';
 
 export default function MediaServerPlayerContainer({
   animeId,
@@ -23,7 +23,12 @@ export default function MediaServerPlayerContainer({
   useEffect(() => {
     if (animeId) {
       const local = getLocalAnime(animeId);
-      if (local) setAnimeDetails(local);
+      if (local) {
+        setAnimeDetails(local);
+      } else {
+        const localMovie = getLocalMovie(animeId);
+        if (localMovie) setAnimeDetails(localMovie);
+      }
     }
   }, [animeId]);
 
@@ -65,9 +70,16 @@ export default function MediaServerPlayerContainer({
           </div>
         </div>
 
-        <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-transparent border border-white/15 text-[11px] font-mono text-gray-300 pointer-events-auto">
-          Episode <span className="text-pink-400 font-bold">{currentEpisode?.episodeNumber || 1}</span> of {episodes.length}
-        </div>
+        {currentEpisode?.isMovie ? (
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-transparent border border-amber-500/30 text-[11px] font-mono text-amber-300 pointer-events-auto">
+            <Film size={12} className="text-amber-400" />
+            <span className="font-bold">Movie</span>
+          </div>
+        ) : (
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-transparent border border-white/15 text-[11px] font-mono text-gray-300 pointer-events-auto">
+            Episode <span className="text-pink-400 font-bold">{currentEpisode?.episodeNumber || 1}</span> of {episodes.length}
+          </div>
+        )}
       </header>
 
       {/* ── Main Area (Padded so player cards sit cleanly below nav bar without overlap) ── */}

@@ -13,7 +13,7 @@ import {
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
-import { upsertLocalAnime, getLocalEpisodes, setLocalEpisodes, getLocalAnime } from '../../utils/localStore';
+import { upsertLocalAnime, getLocalEpisodes, setLocalEpisodes, getLocalAnime, getLocalMovie, upsertLocalMovie } from '../../utils/localStore';
 
 // ── HTMLMediaElement Prototype Patch for Piped Remux Duration ────────────────
 let _protoPatched = false;
@@ -852,6 +852,42 @@ export default function MediaServerPlayer({
     if (shouldMarkWatched) {
       setIsCurrentWatched(true);
       isWatchedMarkedRef.current = true;
+    }
+
+    // If this is a movie, sync to Movie LocalStore and Firestore
+    const isMovie = Boolean(currentEp?.isMovie || getLocalMovie(animeId));
+    if (isMovie) {
+      const durInt = Math.floor(currentDuration) > 0 ? Math.floor(currentDuration) : (currentEp?.durationSeconds || 0);
+      const movieUpdate = {
+        id: animeId,
+        currentTime: roundTime,
+        duration: durInt,
+        watchProgress: progressPct,
+        watched: shouldMarkWatched,
+        completed: shouldMarkWatched,
+        watchStatus: shouldMarkWatched ? 'Completed' : (roundTime > 15 ? 'Watching' : 'Not Started'),
+        lastWatchedAt: new Date().toISOString(),
+      };
+      upsertLocalMovie(movieUpdate);
+
+      if (currentUser && db) {
+        try {
+          const movieRef = doc(db, 'users', currentUser.uid, 'movies', animeId);
+          updateDoc(movieRef, {
+            currentTime: roundTime,
+            duration: durInt,
+            watchProgress: progressPct,
+            watched: shouldMarkWatched,
+            completed: shouldMarkWatched,
+            watchStatus: shouldMarkWatched ? 'Completed' : (roundTime > 15 ? 'Watching' : 'Not Started'),
+            lastWatchedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {});
+        } catch (err) {
+          console.warn('[MediaServerPlayer] Movie Firestore sync error:', err);
+        }
+      }
+      return;
     }
 
     // Update in-memory localEpisodes state immediately so UI/sidebar/tooltip reflects changes in real-time

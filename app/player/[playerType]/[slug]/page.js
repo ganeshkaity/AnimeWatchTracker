@@ -3,12 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../../../context/AuthContext';
-import { getLocalAnimes, getLocalEpisodes } from '../../../utils/localStore';
+import { getLocalAnimes, getLocalEpisodes, getLocalMovie } from '../../../utils/localStore';
 import YoutubePlayerContainer from '../../../pages/YoutubePlayerContainer';
 import MediaServerPlayerContainer from '../../../pages/MediaServerPlayerContainer';
 import YtDlpPlayerContainer from '../../../pages/YtDlpPlayerContainer';
 import { Loader2 } from 'lucide-react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../../firebase';
 
 export default function PlayerPage() {
@@ -23,6 +23,7 @@ export default function PlayerPage() {
   const speedParam = searchParams.get('speed');
   const volumeParam = searchParams.get('volume');
   const qualityParam = searchParams.get('quality');
+  const isMovieType = searchParams.get('type') === 'movie';
 
   const [episodes, setEpisodes] = useState([]);
   const [activeEpId, setActiveEpId] = useState(initialEpId);
@@ -41,6 +42,36 @@ export default function PlayerPage() {
     const loadEpisodes = async () => {
       setLoading(true);
       try {
+        // Check if movie
+        let localMovie = getLocalMovie(animeId);
+        if (isMovieType || localMovie) {
+          if (!localMovie && currentUser?.uid && db) {
+            const mSnap = await getDoc(doc(db, 'users', currentUser.uid, 'movies', animeId));
+            if (mSnap.exists()) {
+              localMovie = { id: mSnap.id, ...mSnap.data() };
+            }
+          }
+          if (localMovie) {
+            const movieEp = {
+              id: localMovie.id,
+              episodeNumber: 1,
+              title: localMovie.title,
+              name: localMovie.title,
+              fileName: localMovie.localFileName || localMovie.title,
+              filePath: localMovie.localFilePath,
+              lastPositionSeconds: localMovie.currentTime || 0,
+              watchedSeconds: localMovie.currentTime || 0,
+              durationSeconds: localMovie.duration || (localMovie.runtime ? localMovie.runtime * 60 : 0),
+              isWatched: Boolean(localMovie.watched || localMovie.completed),
+              isMovie: true,
+            };
+            setEpisodes([movieEp]);
+            setActiveEpId(movieEp.id);
+            setLoading(false);
+            return;
+          }
+        }
+
         let localEps = getLocalEpisodes(animeId) || [];
         if (localEps.length === 0 && currentUser?.uid && db) {
           const snap = await getDocs(collection(db, 'users', currentUser.uid, 'anime', animeId, 'episodes'));
@@ -66,10 +97,14 @@ export default function PlayerPage() {
     };
 
     loadEpisodes();
-  }, [animeId, currentUser]);
+  }, [animeId, currentUser, isMovieType]);
 
   const handleBack = () => {
-    router.push(`/${animeId}`);
+    if (isMovieType || getLocalMovie(animeId)) {
+      router.push(`/movies/${animeId}`);
+    } else {
+      router.push(`/${animeId}`);
+    }
   };
 
   if (authLoading || loading) {

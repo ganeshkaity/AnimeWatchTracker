@@ -107,6 +107,9 @@ export default function AudioStoryPlayer({
   const [errorDetails, setErrorDetails] = useState('');
   const [trackSearch, setTrackSearch] = useState('');
 
+  // Embedded Album Art from audio file metadata (via ffmpeg)
+  const [embeddedArtUrl, setEmbeddedArtUrl] = useState(null);
+
   // Story Details
   const [storyDetails, setStoryDetails] = useState(null);
 
@@ -116,6 +119,7 @@ export default function AudioStoryPlayer({
   const controlsTimeoutRef = useRef(null);
   const sleepTimerIntervalRef = useRef(null);
   const lastSavedTimeRef = useRef(0);
+  const positionRestoredRef = useRef(false);
 
   // Load story details
   useEffect(() => {
@@ -255,22 +259,49 @@ export default function AudioStoryPlayer({
     };
   }, [storyId, track]);
 
-  // Set media src
+  // Set media src + restore position + fetch embedded art
   useEffect(() => {
     if (!mediaId || !mediaElementRef.current) return;
     const media = mediaElementRef.current;
     const streamUrl = `/media/${encodeURIComponent(mediaId)}/stream`;
     if (media.src !== streamUrl) {
+      positionRestoredRef.current = false;
       media.src = streamUrl;
       media.playbackRate = playbackSpeed;
       media.volume = isMuted ? 0 : volume;
       media.load();
+
+      // Restore saved position once enough is buffered
+      const savedPos = Number(track?.lastPositionSeconds || track?.progress || 0);
+      if (savedPos > 5) {
+        const onCanPlay = () => {
+          if (!positionRestoredRef.current && savedPos > 5) {
+            positionRestoredRef.current = true;
+            media.currentTime = savedPos;
+            setCurrentTime(savedPos);
+          }
+          media.removeEventListener('canplay', onCanPlay);
+        };
+        media.addEventListener('canplay', onCanPlay);
+      } else {
+        positionRestoredRef.current = true;
+      }
+
       media.play().then(() => {
         setPlayerState('playing');
       }).catch(err => {
         console.warn('Autoplay prevented or paused:', err.message);
         setPlayerState('paused');
       });
+
+      // Fetch embedded album art for this track
+      setEmbeddedArtUrl(null);
+      const artUrl = `/api/audio-story/embedded-art?mediaId=${encodeURIComponent(mediaId)}`;
+      fetch(artUrl, { method: 'HEAD' })
+        .then(res => {
+          if (res.ok) setEmbeddedArtUrl(artUrl);
+        })
+        .catch(() => {});
     }
   }, [mediaId]);
 
@@ -279,6 +310,8 @@ export default function AudioStoryPlayer({
     if (!track || !storyId || !durSec || durSec <= 0) return;
     const pct = Math.min(100, Math.round((currentTimeSec / durSec) * 100));
     const isCompleted = pct >= 95;
+    const now = new Date().toISOString();
+    const trackName = track.title || track.name || '';
 
     const allTracks = getLocalAudioTracks(storyId) || [];
     const updated = allTracks.map(t => {
@@ -286,9 +319,12 @@ export default function AudioStoryPlayer({
         return {
           ...t,
           progress: currentTimeSec,
+          lastPositionSeconds: currentTimeSec,
+          durationSeconds: durSec,
           progressPercent: pct,
+          watchedSeconds: currentTimeSec,
           isWatched: isCompleted || t.isWatched,
-          updatedAt: new Date().toISOString(),
+          updatedAt: now,
         };
       }
       return t;
@@ -296,7 +332,7 @@ export default function AudioStoryPlayer({
 
     setLocalAudioTracks(storyId, updated);
 
-    // Update story doc progress
+    // Update story doc progress in localStore
     const localStory = getLocalAudioStory(storyId);
     if (localStory) {
       const completedCount = updated.filter(t => t.isWatched).length;
@@ -304,21 +340,52 @@ export default function AudioStoryPlayer({
       upsertLocalAudioStory({
         ...localStory,
         lastPlayedTrackId: track.id,
-        lastPlayedTrackName: track.name || track.title,
+        lastPlayedTrackName: trackName,
+        lastWatchedTrack: trackName,
+        lastPositionSeconds: currentTimeSec,
+        durationSeconds: durSec,
+        completedTracks: completedCount,
         progressPercent: totalPct,
+        status: isCompleted ? (totalPct === 100 ? 'completed' : 'listening') : 'listening',
         isWatched: totalPct === 100,
-        updatedAt: new Date().toISOString(),
+        lastOpenedAt: now,
+        updatedAt: now,
       });
     }
 
     if (currentUser?.uid && db) {
-      const trackRef = doc(db, 'users', currentUser.uid, 'audioStories', storyId, 'tracks', track.id);
+      const uid = currentUser.uid;
+      // Update track subcollection doc
+      const trackRef = doc(db, 'users', uid, 'audioStories', storyId, 'tracks', track.id);
       updateDoc(trackRef, {
         progress: currentTimeSec,
+        lastPositionSeconds: currentTimeSec,
+        durationSeconds: durSec,
         progressPercent: pct,
+        watchedSeconds: currentTimeSec,
         isWatched: isCompleted,
-        updatedAt: new Date().toISOString(),
+        updatedAt: now,
       }).catch(() => {});
+
+      // Also update the parent story doc in Firestore
+      const localStory2 = getLocalAudioStory(storyId);
+      if (localStory2) {
+        const completedCount2 = updated.filter(t => t.isWatched).length;
+        const totalPct2 = updated.length > 0 ? Math.round((completedCount2 / updated.length) * 100) : 0;
+        const storyRef = doc(db, 'users', uid, 'audioStories', storyId);
+        updateDoc(storyRef, {
+          lastPlayedTrackId: track.id,
+          lastPlayedTrackName: trackName,
+          lastWatchedTrack: trackName,
+          lastPositionSeconds: currentTimeSec,
+          durationSeconds: durSec,
+          completedTracks: completedCount2,
+          progressPercent: totalPct2,
+          status: 'listening',
+          lastOpenedAt: now,
+          updatedAt: now,
+        }).catch(() => {});
+      }
     }
   }, [track, storyId, currentUser]);
 
@@ -523,17 +590,34 @@ export default function AudioStoryPlayer({
   const progressPercent = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
   const bufferPercent = duration > 0 ? Math.min(100, (bufferedEnd / duration) * 100) : 0;
 
-  const coverImg = storyDetails?.thumbnailBase64 ||
+  // Prioritize embedded track art, then fall back to folder cover
+  const folderCoverImg = storyDetails?.thumbnailBase64 ||
     (storyDetails?.thumbnailPath ? `/api/image?path=${encodeURIComponent(storyDetails.thumbnailPath)}` : null);
+  const coverImg = embeddedArtUrl || folderCoverImg;
 
   const isAudioOnlyActive = isVideoFile && videoAudioOnlyMode;
 
   return (
     <div
-      className={`w-full min-h-screen text-white select-none transition-colors duration-500 ${
+      className={`w-full min-h-screen text-white select-none transition-colors duration-500 relative overflow-hidden ${
         lightsOff ? 'bg-[#030408]' : 'bg-[#07090f]'
       }`}
     >
+      {/* ── Embedded Art Ambient Background Lighting ───────────────────────── */}
+      {embeddedArtUrl && !lightsOff && (
+        <div
+          className="pointer-events-none absolute inset-0 z-0 transition-opacity duration-1000"
+          aria-hidden="true"
+        >
+          <img
+            src={embeddedArtUrl}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover opacity-20 blur-[100px] scale-110"
+          />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/50 to-black/90" />
+        </div>
+      )}
+
       {/* ── Lights Off Full Theater Dimmer Overlay ─────────────────────────── */}
       {lightsOff && (
         <div

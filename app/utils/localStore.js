@@ -18,6 +18,7 @@ const KEYS = {
   CHAPTERS: (mangaId) => `watchanime_chapters_${mangaId}`,
   AUDIO_STORIES: 'watchanime_audio_stories',
   AUDIO_TRACKS: (storyId) => `watchanime_audio_tracks_${storyId}`,
+  MOVIES: 'watchanime_movies',
   NOTES: 'watchanime_notes',
   DIRTY_QUEUE: 'watchanime_dirty_queue',
 };
@@ -270,6 +271,37 @@ export function upsertLocalAudioTrack(storyId, track) {
 export function deleteLocalAudioTrack(storyId, trackId) {
   const tracks = getLocalAudioTracks(storyId).filter(t => t.id !== trackId);
   setLocalAudioTracks(storyId, tracks);
+}
+
+// ─── Movies Library ──────────────────────────────────────────────────────────
+
+export function getLocalMovies() {
+  return read(KEYS.MOVIES) || [];
+}
+
+export function setLocalMovies(movies) {
+  write(KEYS.MOVIES, movies);
+}
+
+export function getLocalMovie(movieId) {
+  const movies = getLocalMovies();
+  return movies.find(m => m.id === movieId || String(m.tmdbId) === String(movieId)) || null;
+}
+
+export function upsertLocalMovie(movie) {
+  const movies = getLocalMovies();
+  const idx = movies.findIndex(m => m.id === movie.id || (movie.tmdbId && m.tmdbId === movie.tmdbId));
+  if (idx >= 0) {
+    movies[idx] = { ...movies[idx], ...movie };
+  } else {
+    movies.unshift(movie);
+  }
+  setLocalMovies(movies);
+}
+
+export function deleteLocalMovie(movieId) {
+  const movies = getLocalMovies().filter(m => m.id !== movieId && String(m.tmdbId) !== String(movieId));
+  setLocalMovies(movies);
 }
 
 // ─── Dirty Queue (pending Firestore writes) ────────────────────────────────────

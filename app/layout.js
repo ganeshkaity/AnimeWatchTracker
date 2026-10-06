@@ -6,8 +6,8 @@ import { OfflineProvider } from './context/OfflineContext';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata = {
-  title: 'WatchAnime - Local Anime Tracking Platform',
-  description: 'Track your local personal anime folders, episodes progress, notes, and flags with direct VLC integration.',
+  title: 'GaneshSpace - Track and Watch Ganesh\'s Anime, Movies, Manhwa, Webtoons, Audio Stories',
+  description: 'Track your local personal Anime, Movies, Manhwa, Webtoons, Audio Stories folders, episodes progress, notes, and flags with direct VLC integration.',
 };
 
 export default function RootLayout({ children }) {
