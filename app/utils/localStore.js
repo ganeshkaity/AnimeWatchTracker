@@ -19,6 +19,7 @@ const KEYS = {
   AUDIO_STORIES: 'watchanime_audio_stories',
   AUDIO_TRACKS: (storyId) => `watchanime_audio_tracks_${storyId}`,
   MOVIES: 'watchanime_movies',
+  WATCHLIST: 'watchanime_watchlist',
   NOTES: 'watchanime_notes',
   DIRTY_QUEUE: 'watchanime_dirty_queue',
 };
@@ -302,6 +303,37 @@ export function upsertLocalMovie(movie) {
 export function deleteLocalMovie(movieId) {
   const movies = getLocalMovies().filter(m => m.id !== movieId && String(m.tmdbId) !== String(movieId));
   setLocalMovies(movies);
+}
+
+// ─── Watchlist Library ────────────────────────────────────────────────────────
+
+export function getLocalWatchlist() {
+  return read(KEYS.WATCHLIST) || [];
+}
+
+export function setLocalWatchlist(items) {
+  write(KEYS.WATCHLIST, items);
+}
+
+export function getLocalWatchlistItem(id) {
+  const items = getLocalWatchlist();
+  return items.find(m => m.id === id || String(m.tmdbId) === String(id) || String(m.anilistId) === String(id)) || null;
+}
+
+export function upsertLocalWatchlist(item) {
+  const items = getLocalWatchlist();
+  const idx = items.findIndex(m => m.id === item.id || (item.tmdbId && m.tmdbId === item.tmdbId && m.contentType === item.contentType));
+  if (idx >= 0) {
+    items[idx] = { ...items[idx], ...item };
+  } else {
+    items.unshift(item);
+  }
+  setLocalWatchlist(items);
+}
+
+export function deleteLocalWatchlist(id) {
+  const items = getLocalWatchlist().filter(m => m.id !== id && String(m.tmdbId) !== String(id));
+  setLocalWatchlist(items);
 }
 
 // ─── Dirty Queue (pending Firestore writes) ────────────────────────────────────

@@ -84,7 +84,7 @@ export async function GET(request) {
       posters: Array.isArray(d.images?.posters)
         ? d.images.posters.slice(0, 30).map((img) => ({
           filePath: img.file_path,
-          url: `https://image.tmdb.org/t/p/w300${img.file_path}`,
+          url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
           width: img.width,
           height: img.height,
           voteAverage: img.vote_average || 0,
@@ -102,7 +102,7 @@ export async function GET(request) {
       logos: Array.isArray(d.images?.logos)
         ? d.images.logos.slice(0, 20).map((img) => ({
           filePath: img.file_path,
-          url: `https://image.tmdb.org/t/p/w300${img.file_path}`,
+          url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
           width: img.width,
           height: img.height,
           voteAverage: img.vote_average || 0,

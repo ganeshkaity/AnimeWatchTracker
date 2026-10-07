@@ -16,7 +16,7 @@ export async function GET(request) {
     const apiKey = process.env.TMDB_API_KEY || DEFAULT_TMDB_KEY;
     const cleanQuery = query.trim();
 
-    const tmdbUrl = `https://api.themoviedb.org/3/search/movie?api_key=${apiKey}&query=${encodeURIComponent(cleanQuery)}&include_adult=false&language=en-US&page=1`;
+    const tmdbUrl = `https://api.themoviedb.org/3/search/movie?api_key=${apiKey}&query=${encodeURIComponent(cleanQuery)}&include_adult=true&language=en-US&page=1`;
 
     const res = await fetch(tmdbUrl, {
       headers: {

@@ -14,6 +14,7 @@ import {
   getLocalAudioStories, setLocalAudioStories, upsertLocalAudioStory, deleteLocalAudioStory,
   getLocalAudioTracks, setLocalAudioTracks,
   getLocalMovies, setLocalMovies, upsertLocalMovie, deleteLocalMovie,
+  getLocalWatchlist, setLocalWatchlist, upsertLocalWatchlist, deleteLocalWatchlist,
   addToDirtyQueue, getUserId
 } from '../utils/localStore';
 import {
@@ -32,6 +33,8 @@ import AnimeCoverSearch from '../components/AnimeCoverSearch';
 import MangaCoverSearch from '../components/MangaCoverSearch';
 import AddMovieModal from '../components/AddMovieModal';
 import EditMovieModal from '../components/EditMovieModal';
+import AddWatchlistModal from '../components/AddWatchlistModal';
+import TransferWatchlistModal from '../components/TransferWatchlistModal';
 import CachedImage from '../utils/imageCache';
 import { toFanartPreview, toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 
@@ -347,6 +350,7 @@ export default function Dashboard({ onSelectAnime }) {
   const [mangas, setMangas] = useState([]);
   const [audioStories, setAudioStories] = useState([]);
   const [movies, setMovies] = useState([]);
+  const [watchlist, setWatchlist] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMovies, setLoadingMovies] = useState(true);
   const [search, setSearch] = useState('');
@@ -420,6 +424,19 @@ export default function Dashboard({ onSelectAnime }) {
   const [movieEditing, setMovieEditing] = useState(null);
   const [movieCompleteConfirm, setMovieCompleteConfirm] = useState(null);
   const movieScrollRef = useRef(null);
+
+  // Watchlist Modal & Action States
+  const [showAddWatchlistModal, setShowAddWatchlistModal] = useState(false);
+  const [transferringWatchlistItem, setTransferringWatchlistItem] = useState(null);
+  const watchlistScrollRef = useRef(null);
+
+  const scrollWatchlist = (direction) => {
+    if (watchlistScrollRef.current) {
+      const { scrollLeft, clientWidth } = watchlistScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
+      watchlistScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
 
   // Hero Carousel State
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -1052,6 +1069,11 @@ export default function Dashboard({ onSelectAnime }) {
       setLoadingMovies(false);
     }
 
+    const localWatchlist = getLocalWatchlist();
+    if (localWatchlist.length > 0) {
+      setWatchlist(localWatchlist);
+    }
+
     if (isOffline || !db) {
       setLoading(false);
       setLoadingMovies(false);
@@ -1063,6 +1085,7 @@ export default function Dashboard({ onSelectAnime }) {
     const mangaRef = collection(db, 'users', targetUserId, 'mangas');
     const audioStoriesRef = collection(db, 'users', targetUserId, 'audioStories');
     const moviesRef = collection(db, 'users', targetUserId, 'movies');
+    const watchlistRef = collection(db, 'users', targetUserId, 'watchlist');
 
     const unsubscribeAnime = onSnapshot(query(animeRef), (snapshot) => {
       const list = [];
@@ -1122,11 +1145,24 @@ export default function Dashboard({ onSelectAnime }) {
       setLoadingMovies(false);
     });
 
+    const unsubscribeWatchlist = onSnapshot(query(watchlistRef), (snapshot) => {
+      const list = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, userId: targetUserId, ...d.data() });
+      });
+      setWatchlist(list);
+      setLocalWatchlist(list);
+    }, (err) => {
+      console.warn('Firestore watchlist subscription error:', err);
+      setWatchlist(getLocalWatchlist());
+    });
+
     return () => {
       unsubscribeAnime();
       unsubscribeManga();
       unsubscribeAudioStories();
       unsubscribeMovies();
+      unsubscribeWatchlist();
     };
   }, [currentUser, isOffline]);
 
@@ -3240,6 +3276,17 @@ export default function Dashboard({ onSelectAnime }) {
       });
   }, [movies, search, selectedGenre, filterBy, sortBy]);
 
+  // ── Watchlist List (Filtered by search & sorted new to old) ──────────────────
+  const sortedWatchlist = useMemo(() => {
+    return (watchlist || [])
+      .filter((w) => {
+        if (!search || !search.trim()) return true;
+        const q = search.trim().toLowerCase();
+        return (w?.title || '').toLowerCase().includes(q) || (w?.originalTitle || '').toLowerCase().includes(q);
+      })
+      .sort((a, b) => new Date(b.addedAt || b.createdAt || b.updatedAt || 0) - new Date(a.addedAt || a.createdAt || a.updatedAt || 0));
+  }, [watchlist, search]);
+
   // ── Lazy-Load Chunking for Anime Catalog (Initial 24, +24 on scroll) ───────
   const [visibleCount, setVisibleCount] = useState(24);
   const loadMoreRef = useRef(null);
@@ -3322,6 +3369,7 @@ export default function Dashboard({ onSelectAnime }) {
     } catch (e) {}
 
     const targetElement = document.getElementById(sectionId) ||
+      (sectionId === 'watchlist' ? document.getElementById('watchlist') : null) ||
       (sectionId === 'manga' ? document.getElementById('manga-webtoons') : null) ||
       (sectionId === 'audios' ? document.getElementById('audio-stories') : null) ||
       (sectionId === 'anime' ? document.getElementById('catalog') : null);
@@ -3340,7 +3388,7 @@ export default function Dashboard({ onSelectAnime }) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const initialHash = window.location.hash.replace('#', '');
-    if (['anime', 'movies', 'manga', 'audios', 'manga-webtoons', 'audio-stories', 'catalog'].includes(initialHash)) {
+    if (['anime', 'movies', 'watchlist', 'manga', 'audios', 'manga-webtoons', 'audio-stories', 'catalog'].includes(initialHash)) {
       setTimeout(() => {
         handleSectionJump(initialHash);
       }, 400);
@@ -3699,7 +3747,27 @@ export default function Dashboard({ onSelectAnime }) {
                     </div>
                   </button>
 
-                  {/* 5. Stream Link */}
+                  {/* 5. Add to Watchlist */}
+                  <button
+                    onClick={() => {
+                      setShowActionModal(false);
+                      setShowAddWatchlistModal(true);
+                    }}
+                    className="w-full flex items-center gap-3 p-2.5 rounded-xl transition text-left group hover:bg-amber-950/40 border border-transparent hover:border-amber-500/30 cursor-pointer"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <Bookmark size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-white group-hover:text-amber-300 transition-colors">Add Watchlist</h4>
+                        <span className="text-[9px] font-bold text-amber-400">Save</span>
+                      </div>
+                      <p className="text-[10px] text-gray-400 truncate">Track movies, series & anime</p>
+                    </div>
+                  </button>
+
+                  {/* 6. Stream Link */}
                   <Link
                     href="/stream"
                     onClick={() => setShowActionModal(false)}
@@ -3848,6 +3916,18 @@ export default function Dashboard({ onSelectAnime }) {
               >
                 <Film size={14} />
                 <span>Add Movie</span>
+              </button>
+
+              {/* Add Watchlist for Mobile */}
+              <button
+                onClick={() => {
+                  setShowAddWatchlistModal(true);
+                  setQuickActionsOpen(false);
+                }}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition bg-amber-600/20 text-amber-300 hover:text-white border border-amber-500/30 cursor-pointer"
+              >
+                <Bookmark size={14} />
+                <span>Add Watchlist</span>
               </button>
 
               {/* 6. Stream Page Link */}
@@ -4066,6 +4146,13 @@ export default function Dashboard({ onSelectAnime }) {
                     <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('audios'); }} className="hover:text-cyan-400 p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition text-left cursor-pointer w-full">
                       <Headphones size={15} className="text-cyan-400" /> Audio Stories
                     </button>
+                    <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('watchlist'); }} className="hover:text-amber-400 p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition text-left cursor-pointer w-full">
+                      <span className="flex items-center gap-2"><Bookmark size={15} className="text-amber-400" /> Watchlist Section</span>
+                    </button>
+                    <Link href="/watchlist" onClick={() => setMobileMenuOpen(false)} className="hover:text-amber-400 p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition">
+                      <span className="flex items-center gap-2"><Sparkles size={15} className="text-amber-400" /> All Watchlist (Library)</span>
+                      <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">See All</span>
+                    </Link>
                     <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('movies'); }} className="hover:text-amber-400 p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition text-left cursor-pointer w-full">
                       <span className="flex items-center gap-2"><Film size={15} className="text-amber-400" /> Movies Section</span>
                     </button>
@@ -4930,168 +5017,6 @@ export default function Dashboard({ onSelectAnime }) {
         )}
 
 
-
-        {/* MANGA OR WEBTOONS SECTION */}
-        <section id="manga" className="space-y-4 scroll-mt-24">
-          <span id="manga-webtoons" className="sr-only" />
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
-                <BookOpen size={20} />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-xl font-extrabold tracking-wide text-white">Manga or Webtoons</h2>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowAddMangaModal(true)}
-                className="px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-              >
-                <Plus size={14} />
-                <span className="hidden sm:inline">Add</span>
-              </button>
-
-              {sortedMangas.length > 0 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => scrollManga('left')}
-                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
-                    title="Scroll left"
-                  >
-                    <ChevronLeft size={18} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => scrollManga('right')}
-                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
-                    title="Scroll right"
-                  >
-                    <ChevronRight size={18} />
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {sortedMangas.length === 0 ? (
-            <div className="p-8 rounded-2xl glass-card border border-white/10 text-center space-y-3 bg-white/[0.01]">
-              <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center mx-auto">
-                <BookOpen size={24} />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-white">No Manga or Webtoons Tracked Yet</h3>
-                <p className="text-xs text-gray-400 max-w-sm mx-auto mt-1">
-                  Connect any local folder with PDF manga chapters to start reading with the custom PDF viewer!
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAddMangaModal(true)}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold text-xs uppercase tracking-wider inline-flex items-center gap-2 shadow-lg cursor-pointer"
-              >
-                <Plus size={14} />
-                <span>Track Manga Folder</span>
-              </button>
-            </div>
-          ) : (
-            /* Horizontal Slider (X-Axis Scrollable) */
-            <div
-              ref={mangaScrollRef}
-              className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
-            >
-              {sortedMangas.map((m) => {
-                const isWatched = Boolean(m.isWatched || m.progressPercent === 100 || m.status === 'completed');
-                const coverImg = m.thumbnailBase64 || (m.thumbnailPath ? `/api/image?path=${encodeURIComponent(m.thumbnailPath)}` : null);
-                return (
-                  <div
-                    key={`manga-${m.id}`}
-                    onClick={() => router.push(`/manga/${m.id}`)}
-                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-purple-500/50 transition-all duration-300 shadow-md hover:shadow-xl"
-                  >
-                    <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
-                      {coverImg ? (
-                        <CachedImage
-                          src={coverImg}
-                          alt={m.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-purple-400/80 bg-purple-950/20 gap-1.5">
-                          <BookOpen size={32} />
-                          <span className="text-[9px] font-mono uppercase tracking-wider">PDF Manga</span>
-                        </div>
-                      )}
-
-                      {/* Status / Chapter Badge */}
-                      <div className="absolute top-2 left-2 flex items-center gap-1">
-                        {isWatched ? (
-                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/90 backdrop-blur-md text-[9px] uppercase font-bold text-white flex items-center gap-1 shadow">
-                            <CheckCircle2 size={10} /> Completed
-                          </span>
-                        ) : (
-                          <div className="px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-md text-purple-300 font-bold text-[9px] border border-white/10">
-                            {m.chapterCount || m.totalChapters || 0} Ch
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-purple-600 text-white font-extrabold text-[8px] shadow">
-                        PDF
-                      </div>
-
-                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center p-3 gap-2">
-                        <div className="px-3 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg">
-                          <BookOpen size={14} />
-                          <span>Read</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            setMangaCompleteConfirm(m);
-                          }}
-                          className={`p-2 rounded-xl border transition cursor-pointer ${isWatched
-                            ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
-                            : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
-                            }`}
-                          title={isWatched ? 'Mark Manga Unread' : 'Mark Manga Complete (Watched)'}
-                        >
-                          <CheckCircle2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
-                      <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-purple-300 transition-colors">
-                        {m.title}
-                      </h4>
-                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
-                        <span>Local PDF</span>
-                        <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-1" : "text-purple-400 font-semibold"}>
-                          {isWatched ? (
-                            <>
-                              <CheckCircle2 size={10} /> Completed
-                            </>
-                          ) : (
-                            m.progressPercent ? `${m.progressPercent}%` : 'Ready'
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
         {/* MOVIES SECTION */}
         <section id="movies" className="space-y-4 scroll-mt-24">
           <div className="flex items-center justify-between">
@@ -5357,6 +5282,387 @@ export default function Dashboard({ onSelectAnime }) {
         </section>
 
 
+        {/* 9. TRACKED LOCAL LIBRARY (HORIZONTAL SCROLL - TOP 10 RECENT & SEE ALL) */}
+        <section id="anime" className="space-y-4 pt-4 scroll-mt-24">
+          <span id="catalog" className="sr-only" />
+          {/* Header Controls Panel */}
+          <div className="flex items-center justify-between p-4 md:p-5">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-[#7c5cff]/10 border border-[#7c5cff]/20 text-[#a855f7]">
+                <Film size={20} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-extrabold tracking-wide text-white">Animes</h2>
+                </div>
+              </div>
+            </div>
+
+            {/* Header Action Buttons */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => router.push('/animes')}
+                className="px-3 py-1.5 rounded-xl bg-[#7c5cff]/10 hover:bg-[#7c5cff]/20 border border-[#7c5cff]/30 text-[#a855f7] hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                title="View All Anime in Library"
+              >
+                <span>All</span>
+                <ChevronRight size={14} />
+              </button>
+
+              {topTrackedAnimes.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => scrollAnime('left')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll left"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollAnime('right')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll right"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Horizontal Slider (X-Axis Scrollable - Max 10 on Home) */}
+          {loading ? (
+            <div className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2">
+              {[1, 2, 3, 4, 5, 6].map((idx) => (
+                <div key={idx} className="flex-none w-52 sm:w-56 md:w-60 h-72 rounded-2xl bg-white/5 shimmer border border-white/5" />
+              ))}
+            </div>
+          ) : animes.length === 0 ? (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="glass-panel p-10 md:p-16 rounded-3xl text-center border border-white/10 max-w-xl mx-auto my-8 space-y-4"
+            >
+              <div className="p-4 rounded-full bg-[#7c5cff]/10 text-[#7c5cff] w-16 h-16 mx-auto flex items-center justify-center">
+                <FolderOpen size={32} />
+              </div>
+              <h3 className="text-xl font-bold tracking-wide">No Tracked Folders Found</h3>
+              <p className="text-xs text-gray-400 max-w-sm mx-auto leading-relaxed">
+                Connect your local PC anime folders to automatically parse episodes, track watch progress, and stream natively!
+              </p>
+              <button
+                onClick={() => setShowAddModal(true)}
+                disabled={isOffline}
+                className={`px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-wider btn-accent flex items-center gap-2 mx-auto ${isOffline ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <Plus size={16} />
+                {isOffline ? 'Offline Mode' : 'Track Local Anime Folder'}
+              </button>
+            </motion.div>
+          ) : (
+            <div
+              ref={animeScrollRef}
+              className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+            >
+              {/* Anime Cards - 10 Most Recent (Recently Watched 1st, then Latest Added) */}
+              {topTrackedAnimes.map((anime) => (
+                <div
+                  key={anime.id}
+                  onClick={() => onSelectAnime(anime.id)}
+                  className="group relative flex-none w-52 sm:w-56 md:w-60 h-72 glass-card rounded-2xl flex flex-col justify-between overflow-hidden cursor-pointer"
+                >
+                  {/* Poster Image */}
+                  <div className="h-44 relative overflow-hidden bg-[#181c24] flex items-center justify-center">
+                    {anime.thumbnailBase64 ? (
+                      <CachedImage src={anime.thumbnailBase64} alt={anime.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                    ) : anime.thumbnailPath ? (
+                      <CachedImage src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} alt={anime.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                    ) : (
+                      <div className={`w-full h-full bg-gradient-to-tr ${anime.coverGradient || 'from-violet-600 to-indigo-700'} flex items-center justify-center`}>
+                        <span className="text-3xl font-black text-white/30 group-hover:scale-110 transition-transform">
+                          {getInitials(anime.title)}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Red YouTube Logo Badge if YouTube folder */}
+                    {!!(anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://')) && (
+                      <div className="absolute top-2.5 right-2.5 z-10 p-1 bg-black/60 rounded-xl flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md">
+                        <YoutubeLogo size={18} />
+                      </div>
+                    )}
+
+                    {/* Actions Hover Overlay */}
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2 transition-opacity duration-300">
+                      <button
+                        onClick={(e) => handleDeleteAnime(anime, e)}
+                        className="p-2 rounded-full bg-red-950/80 border border-red-500/30 text-red-400 hover:bg-red-600 hover:text-white transition cursor-pointer"
+                        title="Stop Tracking"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+
+                      <div className="p-3 rounded-full bg-[#7c5cff] text-white shadow-lg transform translate-y-2 group-hover:translate-y-0 transition-transform">
+                        <Play size={18} fill="white" />
+                      </div>
+
+                      <button
+                        onClick={(e) => handleOpenEditModal(anime, e)}
+                        className="p-2 rounded-full bg-purple-950/80 border border-purple-500/30 text-purple-400 hover:bg-purple-600 hover:text-white transition cursor-pointer"
+                        title="Edit Anime Info"
+                      >
+                        <SlidersHorizontal size={14} />
+                      </button>
+                    </div>
+
+                    {/* Status Badge */}
+                    <div className="absolute top-2.5 left-2.5">
+                      {(() => {
+                        const pct = getAnimeProgressPercent(anime);
+                        return pct === 100 ? (
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/90 text-[9px] uppercase font-bold text-white flex items-center gap-1">
+                            <CheckCircle2 size={10} /> Completed
+                          </span>
+                        ) : pct > 0 ? (
+                          <span className="px-2 py-0.5 rounded bg-[#7c5cff]/90 text-[9px] uppercase font-bold text-white">
+                            Watching
+                          </span>
+                        ) : null;
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Card Details */}
+                  <div className="p-3.5 flex flex-col justify-between flex-1 bg-[#111827]/40">
+                    <div>
+                      <h3 className="font-bold text-xs text-white line-clamp-1 group-hover:text-[#7c5cff] transition-colors" title={anime.title}>
+                        {anime.title}
+                      </h3>
+                      <p className="text-[9px] text-gray-500 line-clamp-1 mt-0.5">
+                        {anime.folderPath}
+                      </p>
+                    </div>
+
+                    <div className="mt-2">
+                      {(() => {
+                        const pct = getAnimeProgressPercent(anime);
+                        return (
+                          <>
+                            <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
+                              <div className="flex items-center gap-1.5 truncate max-w-[70%]">
+                                {Boolean(anime.totalSeasons) && (
+                                  <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-extrabold text-[9px] shrink-0">
+                                    S{anime.totalSeasons}
+                                  </span>
+                                )}
+                                <span className="truncate" title={anime.totalEpisodes ? `${anime.totalEpisodes} Total Episodes (${anime.episodeCount || 0} local)` : `${anime.episodeCount || 0} Episodes`}>
+                                  {anime.totalEpisodes ? (
+                                    anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
+                                      ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
+                                      : `${anime.totalEpisodes} Episodes`
+                                  ) : (
+                                    `${anime.episodeCount || 0} Episodes`
+                                  )}
+                                </span>
+                              </div>
+                              <span className="font-bold text-white shrink-0 ml-1">{pct}%</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ${pct === 100 ? 'bg-emerald-500' : 'bg-gradient-to-r from-[#7c5cff] to-[#a855f7]'}`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* See All Card at the end */}
+              <div
+                onClick={() => router.push('/animes')}
+                className="flex-none w-52 sm:w-56 md:w-60 h-72 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-center items-center p-6 text-center border border-white/10 hover:border-[#7c5cff]/50 transition shadow-md hover:shadow-xl bg-[#7c5cff]/5 hover:bg-[#7c5cff]/10"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-[#7c5cff]/20 text-[#a855f7] flex items-center justify-center group-hover:scale-110 transition-transform mb-3">
+                  <Film size={24} />
+                </div>
+                <span className="text-sm font-bold text-white block">See All Anime</span>
+                <span className="text-xs text-purple-300/80 font-mono mt-0.5 block">{animes.length} Total Series</span>
+                <span className="mt-4 px-3 py-1.5 rounded-xl bg-[#7c5cff] text-white text-xs font-extrabold flex items-center gap-1 group-hover:bg-[#6c4cf0] transition shadow-md shadow-[#7c5cff]/30">
+                  View All <ChevronRight size={14} />
+                </span>
+              </div>
+            </div>
+          )}
+        </section>
+
+
+        {/* MANGA OR WEBTOONS SECTION */}
+        <section id="manga" className="space-y-4 scroll-mt-24">
+          <span id="manga-webtoons" className="sr-only" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                <BookOpen size={20} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-extrabold tracking-wide text-white">Manga or Webtoons</h2>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddMangaModal(true)}
+                className="px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+              >
+                <Plus size={14} />
+                <span className="hidden sm:inline">Add</span>
+              </button>
+
+              {sortedMangas.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => scrollManga('left')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll left"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollManga('right')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll right"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {sortedMangas.length === 0 ? (
+            <div className="p-8 rounded-2xl glass-card border border-white/10 text-center space-y-3 bg-white/[0.01]">
+              <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center mx-auto">
+                <BookOpen size={24} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">No Manga or Webtoons Tracked Yet</h3>
+                <p className="text-xs text-gray-400 max-w-sm mx-auto mt-1">
+                  Connect any local folder with PDF manga chapters to start reading with the custom PDF viewer!
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddMangaModal(true)}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold text-xs uppercase tracking-wider inline-flex items-center gap-2 shadow-lg cursor-pointer"
+              >
+                <Plus size={14} />
+                <span>Track Manga Folder</span>
+              </button>
+            </div>
+          ) : (
+            /* Horizontal Slider (X-Axis Scrollable) */
+            <div
+              ref={mangaScrollRef}
+              className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+            >
+              {sortedMangas.map((m) => {
+                const isWatched = Boolean(m.isWatched || m.progressPercent === 100 || m.status === 'completed');
+                const coverImg = m.thumbnailBase64 || (m.thumbnailPath ? `/api/image?path=${encodeURIComponent(m.thumbnailPath)}` : null);
+                return (
+                  <div
+                    key={`manga-${m.id}`}
+                    onClick={() => router.push(`/manga/${m.id}`)}
+                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-purple-500/50 transition-all duration-300 shadow-md hover:shadow-xl"
+                  >
+                    <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
+                      {coverImg ? (
+                        <CachedImage
+                          src={coverImg}
+                          alt={m.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-purple-400/80 bg-purple-950/20 gap-1.5">
+                          <BookOpen size={32} />
+                          <span className="text-[9px] font-mono uppercase tracking-wider">PDF Manga</span>
+                        </div>
+                      )}
+
+                      {/* Status / Chapter Badge */}
+                      <div className="absolute top-2 left-2 flex items-center gap-1">
+                        {isWatched ? (
+                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/90 backdrop-blur-md text-[9px] uppercase font-bold text-white flex items-center gap-1 shadow">
+                            <CheckCircle2 size={10} /> Completed
+                          </span>
+                        ) : (
+                          <div className="px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-md text-purple-300 font-bold text-[9px] border border-white/10">
+                            {m.chapterCount || m.totalChapters || 0} Ch
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-purple-600 text-white font-extrabold text-[8px] shadow">
+                        PDF
+                      </div>
+
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center p-3 gap-2">
+                        <div className="px-3 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg">
+                          <BookOpen size={14} />
+                          <span>Read</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setMangaCompleteConfirm(m);
+                          }}
+                          className={`p-2 rounded-xl border transition cursor-pointer ${isWatched
+                            ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
+                            : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
+                            }`}
+                          title={isWatched ? 'Mark Manga Unread' : 'Mark Manga Complete (Watched)'}
+                        >
+                          <CheckCircle2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
+                      <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-purple-300 transition-colors">
+                        {m.title}
+                      </h4>
+                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
+                        <span>Local PDF</span>
+                        <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-1" : "text-purple-400 font-semibold"}>
+                          {isWatched ? (
+                            <>
+                              <CheckCircle2 size={10} /> Completed
+                            </>
+                          ) : (
+                            m.progressPercent ? `${m.progressPercent}%` : 'Ready'
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
         {/* AUDIO STORIES SECTION */}
         <section id="audios" className="space-y-4 scroll-mt-24">
           <span id="audio-stories" className="sr-only" />
@@ -5505,6 +5811,192 @@ export default function Dashboard({ onSelectAnime }) {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </section>
+
+        {/* WATCHLIST SECTION (LATEST 10 ITEMS + SEE ALL BUTTON) */}
+        <section id="watchlist" className="space-y-4 scroll-mt-24">
+          <span id="watchlist-anchor" className="sr-only" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                <Bookmark size={20} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-extrabold tracking-wide text-white">Watchlist</h2>
+                  {watchlist.length > 0 && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      {watchlist.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddWatchlistModal(true)}
+                className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                title="Add to Watchlist"
+              >
+                <Plus size={14} />
+                <span className="hidden sm:inline">Add</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => router.push('/watchlist')}
+                className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                title="View All Watchlist Items"
+              >
+                <span>See All</span>
+                <ChevronRight size={14} />
+              </button>
+
+              {sortedWatchlist.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => scrollWatchlist('left')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll left"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollWatchlist('right')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                    title="Scroll right"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {sortedWatchlist.length === 0 ? (
+            <div className="p-8 rounded-2xl glass-card border border-white/10 text-center space-y-3 bg-white/[0.01]">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto">
+                <Bookmark size={24} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">No Items in Watchlist Yet</h3>
+                <p className="text-xs text-gray-400 max-w-sm mx-auto mt-1">
+                  Save upcoming movies, series, anime, manga, and audio stories to watch or read later!
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddWatchlistModal(true)}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-black font-bold text-xs uppercase tracking-wider inline-flex items-center gap-2 shadow-lg cursor-pointer"
+              >
+                <Plus size={14} />
+                <span>Add to Watchlist</span>
+              </button>
+            </div>
+          ) : (
+            /* Horizontal Slider (X-Axis Scrollable) showing latest 10 items + See All button */
+            <div
+              ref={watchlistScrollRef}
+              className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+            >
+              {sortedWatchlist.slice(0, 10).map((item) => {
+                const coverImg = item.posterUrl || (item.images?.posters?.[0]?.url || null);
+                const isCompleted = item.status === 'Completed';
+
+                return (
+                  <div
+                    key={`wl-${item.id}`}
+                    onClick={() => router.push(`/watchlist/${item.id}`)}
+                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-xl"
+                  >
+                    <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
+                      {coverImg ? (
+                        <CachedImage
+                          src={coverImg}
+                          alt={item.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-amber-400/80 bg-gradient-to-br from-amber-950/30 to-purple-950/20 gap-1.5">
+                          <Bookmark size={36} />
+                          <span className="text-[9px] font-mono uppercase tracking-wider">Watchlist</span>
+                        </div>
+                      )}
+
+                      {/* Content Type Badge */}
+                      <div className="absolute top-2 left-2 flex items-center gap-1">
+                        <span className="px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md text-[9px] uppercase font-bold text-amber-300 border border-white/10">
+                          {item.contentType || 'Media'}
+                        </span>
+                      </div>
+
+                      {/* Rating */}
+                      {item.rating > 0 && (
+                        <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-black/80 backdrop-blur-md text-amber-400 font-extrabold text-[9px] shadow border border-white/10 flex items-center gap-0.5">
+                          <Star size={9} className="fill-amber-400" />
+                          {item.rating}
+                        </div>
+                      )}
+
+                      {/* Hover Overlay */}
+                      <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center justify-center p-3 gap-2">
+                        <div className="px-3.5 py-1.5 rounded-xl bg-amber-500 text-black text-xs font-black flex items-center gap-1.5 shadow-lg">
+                          <Eye size={13} />
+                          <span>View Details</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTransferringWatchlistItem(item);
+                          }}
+                          className="px-3 py-1 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center gap-1 transition"
+                          title="Transfer to active library"
+                        >
+                          <HardDrive size={12} />
+                          <span>Transfer</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
+                      <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-amber-300 transition-colors" title={item.title}>
+                        {item.title}
+                      </h4>
+                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
+                        <span>{item.year || item.contentType}</span>
+                        <span className={isCompleted ? "text-emerald-400 font-bold flex items-center gap-1" : "text-amber-400 font-semibold"}>
+                          {item.status || 'Plan to Watch'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* SEE ALL CARD AT THE END */}
+              <div
+                onClick={() => router.push('/watchlist')}
+                className="flex-none w-40 sm:w-44 md:w-48 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col items-center justify-center p-6 border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-xl bg-gradient-to-br from-amber-500/5 via-transparent to-purple-600/5 text-center gap-3"
+              >
+                <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-300 group-hover:bg-amber-500 group-hover:text-black flex items-center justify-center transition-all duration-300 group-hover:scale-110 shadow-lg">
+                  <ChevronRight size={24} />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-white group-hover:text-amber-300 transition-colors">
+                    See All
+                  </h4>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    {watchlist.length} {watchlist.length === 1 ? 'item' : 'items'} in watchlist
+                  </p>
+                </div>
+              </div>
             </div>
           )}
         </section>
@@ -5727,247 +6219,6 @@ export default function Dashboard({ onSelectAnime }) {
               </button>
             ))}
           </div>
-        </section>
-
-
-        {/* 9. TRACKED LOCAL LIBRARY (HORIZONTAL SCROLL - TOP 10 RECENT & SEE ALL) */}
-        <section id="anime" className="space-y-4 pt-4 scroll-mt-24">
-          <span id="catalog" className="sr-only" />
-          {/* Header Controls Panel */}
-          <div className="flex flex-col sm:flex-row gap-3 justify-between items-start sm:items-center glass-panel p-4 md:p-5 rounded-2xl border border-white/10">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-[#7c5cff]/10 border border-[#7c5cff]/20 text-[#a855f7]">
-                <Film size={20} />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-xl font-extrabold tracking-wide text-white">Tracked Local Library</h2>
-                </div>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {animes.length > 0
-                    ? `${animes.length} anime series in library • Showing 10 most recent`
-                    : 'Connect your local PC anime folders to stream & track progress'}
-                </p>
-              </div>
-            </div>
-
-            {/* Header Action Buttons */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => !isOffline && setShowAddModal(true)}
-                disabled={isOffline}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm ${
-                  isOffline
-                    ? 'bg-white/5 border border-white/10 text-gray-500 opacity-50 cursor-not-allowed'
-                    : 'bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 hover:text-white cursor-pointer active:scale-95'
-                }`}
-                title="Track Local Anime Folder"
-              >
-                <Plus size={14} />
-                <span className="hidden sm:inline">Add Folder</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => router.push('/animes')}
-                className="px-3 py-1.5 rounded-xl bg-[#7c5cff]/10 hover:bg-[#7c5cff]/20 border border-[#7c5cff]/30 text-[#a855f7] hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-                title="View All Anime in Library"
-              >
-                <span>See All</span>
-                <ChevronRight size={14} />
-              </button>
-
-              {topTrackedAnimes.length > 0 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => scrollAnime('left')}
-                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
-                    title="Scroll left"
-                  >
-                    <ChevronLeft size={18} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => scrollAnime('right')}
-                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
-                    title="Scroll right"
-                  >
-                    <ChevronRight size={18} />
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Horizontal Slider (X-Axis Scrollable - Max 10 on Home) */}
-          {loading ? (
-            <div className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2">
-              {[1, 2, 3, 4, 5, 6].map((idx) => (
-                <div key={idx} className="flex-none w-52 sm:w-56 md:w-60 h-72 rounded-2xl bg-white/5 shimmer border border-white/5" />
-              ))}
-            </div>
-          ) : animes.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="glass-panel p-10 md:p-16 rounded-3xl text-center border border-white/10 max-w-xl mx-auto my-8 space-y-4"
-            >
-              <div className="p-4 rounded-full bg-[#7c5cff]/10 text-[#7c5cff] w-16 h-16 mx-auto flex items-center justify-center">
-                <FolderOpen size={32} />
-              </div>
-              <h3 className="text-xl font-bold tracking-wide">No Tracked Folders Found</h3>
-              <p className="text-xs text-gray-400 max-w-sm mx-auto leading-relaxed">
-                Connect your local PC anime folders to automatically parse episodes, track watch progress, and stream natively!
-              </p>
-              <button
-                onClick={() => setShowAddModal(true)}
-                disabled={isOffline}
-                className={`px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-wider btn-accent flex items-center gap-2 mx-auto ${isOffline ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                <Plus size={16} />
-                {isOffline ? 'Offline Mode' : 'Track Local Anime Folder'}
-              </button>
-            </motion.div>
-          ) : (
-            <div
-              ref={animeScrollRef}
-              className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
-            >
-              {/* Anime Cards - 10 Most Recent (Recently Watched 1st, then Latest Added) */}
-              {topTrackedAnimes.map((anime) => (
-                <div
-                  key={anime.id}
-                  onClick={() => onSelectAnime(anime.id)}
-                  className="group relative flex-none w-52 sm:w-56 md:w-60 h-72 glass-card rounded-2xl flex flex-col justify-between overflow-hidden cursor-pointer"
-                >
-                  {/* Poster Image */}
-                  <div className="h-44 relative overflow-hidden bg-[#181c24] flex items-center justify-center">
-                    {anime.thumbnailBase64 ? (
-                      <CachedImage src={anime.thumbnailBase64} alt={anime.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                    ) : anime.thumbnailPath ? (
-                      <CachedImage src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} alt={anime.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                    ) : (
-                      <div className={`w-full h-full bg-gradient-to-tr ${anime.coverGradient || 'from-violet-600 to-indigo-700'} flex items-center justify-center`}>
-                        <span className="text-3xl font-black text-white/30 group-hover:scale-110 transition-transform">
-                          {getInitials(anime.title)}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Red YouTube Logo Badge if YouTube folder */}
-                    {!!(anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://')) && (
-                      <div className="absolute top-2.5 right-2.5 z-10 p-1 bg-black/60 rounded-xl flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md">
-                        <YoutubeLogo size={18} />
-                      </div>
-                    )}
-
-                    {/* Actions Hover Overlay */}
-                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2 transition-opacity duration-300">
-                      <button
-                        onClick={(e) => handleDeleteAnime(anime, e)}
-                        className="p-2 rounded-full bg-red-950/80 border border-red-500/30 text-red-400 hover:bg-red-600 hover:text-white transition cursor-pointer"
-                        title="Stop Tracking"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-
-                      <div className="p-3 rounded-full bg-[#7c5cff] text-white shadow-lg transform translate-y-2 group-hover:translate-y-0 transition-transform">
-                        <Play size={18} fill="white" />
-                      </div>
-
-                      <button
-                        onClick={(e) => handleOpenEditModal(anime, e)}
-                        className="p-2 rounded-full bg-purple-950/80 border border-purple-500/30 text-purple-400 hover:bg-purple-600 hover:text-white transition cursor-pointer"
-                        title="Edit Anime Info"
-                      >
-                        <SlidersHorizontal size={14} />
-                      </button>
-                    </div>
-
-                    {/* Status Badge */}
-                    <div className="absolute top-2.5 left-2.5">
-                      {(() => {
-                        const pct = getAnimeProgressPercent(anime);
-                        return pct === 100 ? (
-                          <span className="px-2 py-0.5 rounded bg-emerald-500/90 text-[9px] uppercase font-bold text-white flex items-center gap-1">
-                            <CheckCircle2 size={10} /> Completed
-                          </span>
-                        ) : pct > 0 ? (
-                          <span className="px-2 py-0.5 rounded bg-[#7c5cff]/90 text-[9px] uppercase font-bold text-white">
-                            Watching
-                          </span>
-                        ) : null;
-                      })()}
-                    </div>
-                  </div>
-
-                  {/* Card Details */}
-                  <div className="p-3.5 flex flex-col justify-between flex-1 bg-[#111827]/40">
-                    <div>
-                      <h3 className="font-bold text-xs text-white line-clamp-1 group-hover:text-[#7c5cff] transition-colors" title={anime.title}>
-                        {anime.title}
-                      </h3>
-                      <p className="text-[9px] text-gray-500 line-clamp-1 mt-0.5">
-                        {anime.folderPath}
-                      </p>
-                    </div>
-
-                    <div className="mt-2">
-                      {(() => {
-                        const pct = getAnimeProgressPercent(anime);
-                        return (
-                          <>
-                            <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
-                              <div className="flex items-center gap-1.5 truncate max-w-[70%]">
-                                {Boolean(anime.totalSeasons) && (
-                                  <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-extrabold text-[9px] shrink-0">
-                                    S{anime.totalSeasons}
-                                  </span>
-                                )}
-                                <span className="truncate" title={anime.totalEpisodes ? `${anime.totalEpisodes} Total Episodes (${anime.episodeCount || 0} local)` : `${anime.episodeCount || 0} Episodes`}>
-                                  {anime.totalEpisodes ? (
-                                    anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
-                                      ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
-                                      : `${anime.totalEpisodes} Episodes`
-                                  ) : (
-                                    `${anime.episodeCount || 0} Episodes`
-                                  )}
-                                </span>
-                              </div>
-                              <span className="font-bold text-white shrink-0 ml-1">{pct}%</span>
-                            </div>
-                            <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all duration-500 ${pct === 100 ? 'bg-emerald-500' : 'bg-gradient-to-r from-[#7c5cff] to-[#a855f7]'}`}
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {/* See All Card at the end */}
-              <div
-                onClick={() => router.push('/animes')}
-                className="flex-none w-52 sm:w-56 md:w-60 h-72 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-center items-center p-6 text-center border border-white/10 hover:border-[#7c5cff]/50 transition shadow-md hover:shadow-xl bg-[#7c5cff]/5 hover:bg-[#7c5cff]/10"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-[#7c5cff]/20 text-[#a855f7] flex items-center justify-center group-hover:scale-110 transition-transform mb-3">
-                  <Film size={24} />
-                </div>
-                <span className="text-sm font-bold text-white block">See All Anime</span>
-                <span className="text-xs text-purple-300/80 font-mono mt-0.5 block">{animes.length} Total Series</span>
-                <span className="mt-4 px-3 py-1.5 rounded-xl bg-[#7c5cff] text-white text-xs font-extrabold flex items-center gap-1 group-hover:bg-[#6c4cf0] transition shadow-md shadow-[#7c5cff]/30">
-                  View All <ChevronRight size={14} />
-                </span>
-              </div>
-            </div>
-          )}
         </section>
 
         {/* 10. TOP 20 TOP-RATED EPISODES (LAZY-LOADED, DAILY SYNC) */}
@@ -6380,11 +6631,10 @@ export default function Dashboard({ onSelectAnime }) {
                             <div
                               key={item.id}
                               onClick={() => handleSelectAnimeOnline(item)}
-                              className={`flex items-center gap-3 p-2 rounded-xl cursor-pointer transition ${
-                                isSelected
+                              className={`flex items-center gap-3 p-2 rounded-xl cursor-pointer transition ${isSelected
                                   ? 'bg-purple-600/30 border border-purple-500/50 text-white'
                                   : 'bg-white/[0.02] hover:bg-white/[0.08] text-gray-300 hover:text-white border border-transparent'
-                              }`}
+                                }`}
                             >
                               {item.posterUrl ? (
                                 <img
@@ -6475,9 +6725,8 @@ export default function Dashboard({ onSelectAnime }) {
                           key={pat.id}
                           type="button"
                           onClick={() => setNamingPattern(pat.id)}
-                          className={`px-3 py-2 rounded-xl text-left text-[11px] border transition cursor-pointer ${
-                            namingPattern === pat.id ? 'bg-[#7c5cff]/20 border-[#7c5cff] text-white' : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'
-                          }`}
+                          className={`px-3 py-2 rounded-xl text-left text-[11px] border transition cursor-pointer ${namingPattern === pat.id ? 'bg-[#7c5cff]/20 border-[#7c5cff] text-white' : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'
+                            }`}
                         >
                           <span className="font-bold block">{pat.label}</span>
                           <span className="text-[9px] opacity-60 block truncate">{pat.example}</span>
@@ -6581,11 +6830,10 @@ export default function Dashboard({ onSelectAnime }) {
                         <button
                           type="button"
                           onClick={() => setShowOnlineSearchAdd(prev => !prev)}
-                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                            showOnlineSearchAdd
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${showOnlineSearchAdd
                               ? 'bg-purple-600 text-white shadow-md'
                               : 'bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30'
-                          }`}
+                            }`}
                         >
                           <Sparkles size={12} className="text-purple-300" />
                           {showOnlineSearchAdd ? 'Hide Cover Search' : 'Search Covers (AniList / Fanart.tv)'}
@@ -6657,9 +6905,8 @@ export default function Dashboard({ onSelectAnime }) {
                                 <div
                                   key={cov.url || idx}
                                   onClick={() => setCoverUrl(toFanartFull(cov.url))}
-                                  className={`relative w-16 h-24 rounded-lg overflow-hidden shrink-0 border cursor-pointer transition ${
-                                    isSelected ? 'border-purple-400 ring-2 ring-purple-500/50' : 'border-white/10 hover:border-white/30 opacity-75 hover:opacity-100'
-                                  }`}
+                                  className={`relative w-16 h-24 rounded-lg overflow-hidden shrink-0 border cursor-pointer transition ${isSelected ? 'border-purple-400 ring-2 ring-purple-500/50' : 'border-white/10 hover:border-white/30 opacity-75 hover:opacity-100'
+                                    }`}
                                 >
                                   <img src={toFanartPreview(cov.url)} alt="Cover option" className="w-full h-full object-cover" />
                                   <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[8px] text-center text-gray-300 truncate px-0.5">
@@ -6752,11 +6999,10 @@ export default function Dashboard({ onSelectAnime }) {
                               <div
                                 key={ban.url || idx}
                                 onClick={() => setAnimeBannerUrl(toFanartFull(ban.url))}
-                                className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
-                                  isSelected
+                                className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${isSelected
                                     ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
                                     : 'border-white/10 hover:border-white/30 opacity-80 hover:opacity-100'
-                                }`}
+                                  }`}
                               >
                                 <img
                                   src={toFanartPreview(ban.url)}
@@ -6868,11 +7114,10 @@ export default function Dashboard({ onSelectAnime }) {
                                   <div
                                     key={logo.url || idx}
                                     onClick={() => setAnimeLogoUrl(toFanartFull(logo.url))}
-                                    className={`p-2 rounded-xl border flex flex-col items-center justify-center gap-1 cursor-pointer transition-all ${
-                                      isSelected
+                                    className={`p-2 rounded-xl border flex flex-col items-center justify-center gap-1 cursor-pointer transition-all ${isSelected
                                         ? 'bg-purple-500/20 border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
                                         : 'bg-white/[0.04] border-white/10 hover:border-white/30 hover:bg-white/[0.08]'
-                                    }`}
+                                      }`}
                                   >
                                     <div className="w-full h-12 flex items-center justify-center overflow-hidden">
                                       <img
@@ -6929,11 +7174,10 @@ export default function Dashboard({ onSelectAnime }) {
                                 return [...prev, genre];
                               });
                             }}
-                            className={`px-3 py-1.5 rounded-full text-[10px] font-semibold transition cursor-pointer ${
-                              isSelected
+                            className={`px-3 py-1.5 rounded-full text-[10px] font-semibold transition cursor-pointer ${isSelected
                                 ? 'bg-[#7c5cff] text-white shadow-md'
                                 : 'bg-white/5 border border-white/5 text-gray-400 hover:text-white'
-                            }`}
+                              }`}
                           >
                             {genre}
                           </button>
@@ -7506,11 +7750,10 @@ export default function Dashboard({ onSelectAnime }) {
                             <div
                               key={ban.url || idx}
                               onClick={() => setEditBannerUrl(toFanartFull(ban.url))}
-                              className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
-                                isSelected
+                              className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${isSelected
                                   ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
                                   : 'border-white/10 hover:border-white/30 opacity-80 hover:opacity-100'
-                              }`}
+                                }`}
                             >
                               <img
                                 src={toFanartPreview(ban.url)}
@@ -7632,11 +7875,10 @@ export default function Dashboard({ onSelectAnime }) {
                                 <div
                                   key={logo.url || idx}
                                   onClick={() => setEditLogoUrl(toFanartFull(logo.url))}
-                                  className={`relative h-20 p-2 rounded-xl bg-white/[0.04] border flex items-center justify-center cursor-pointer transition ${
-                                    isSelected
+                                  className={`relative h-20 p-2 rounded-xl bg-white/[0.04] border flex items-center justify-center cursor-pointer transition ${isSelected
                                       ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)] bg-purple-500/10'
                                       : 'border-white/10 hover:border-white/30 hover:bg-white/[0.08]'
-                                  }`}
+                                    }`}
                                 >
                                   <img
                                     src={toFanartPreview(logo.url)}
@@ -7893,11 +8135,10 @@ export default function Dashboard({ onSelectAnime }) {
                           <div
                             key={item.id}
                             onClick={() => handleSelectMangaOnline(item)}
-                            className={`flex items-center gap-3 p-2 rounded-xl cursor-pointer transition ${
-                              isSelected
+                            className={`flex items-center gap-3 p-2 rounded-xl cursor-pointer transition ${isSelected
                                 ? 'bg-purple-600/30 border border-purple-500/50 text-white'
                                 : 'bg-white/[0.02] hover:bg-white/[0.08] text-gray-300 hover:text-white border border-transparent'
-                            }`}
+                              }`}
                           >
                             {item.posterUrl ? (
                               <img
@@ -8134,9 +8375,8 @@ export default function Dashboard({ onSelectAnime }) {
                               <div
                                 key={cov.url || idx}
                                 onClick={() => setMangaCoverUrl(toFanartFull(cov.url))}
-                                className={`relative w-16 h-24 rounded-lg overflow-hidden shrink-0 border cursor-pointer transition ${
-                                  isSelected ? 'border-purple-400 ring-2 ring-purple-500/50' : 'border-white/10 hover:border-white/30 opacity-75 hover:opacity-100'
-                                }`}
+                                className={`relative w-16 h-24 rounded-lg overflow-hidden shrink-0 border cursor-pointer transition ${isSelected ? 'border-purple-400 ring-2 ring-purple-500/50' : 'border-white/10 hover:border-white/30 opacity-75 hover:opacity-100'
+                                  }`}
                               >
                                 <img src={toFanartPreview(cov.url)} alt="Cover option" className="w-full h-full object-cover" />
                                 <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[8px] text-center text-gray-300 truncate px-0.5">
@@ -8229,11 +8469,10 @@ export default function Dashboard({ onSelectAnime }) {
                             <div
                               key={ban.url || idx}
                               onClick={() => setMangaBannerUrl(toFanartFull(ban.url))}
-                              className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${
-                                isSelected
+                              className={`relative h-20 rounded-xl overflow-hidden border cursor-pointer transition ${isSelected
                                   ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
                                   : 'border-white/10 hover:border-white/30 opacity-80 hover:opacity-100'
-                              }`}
+                                }`}
                             >
                               <img
                                 src={toFanartPreview(ban.url)}
@@ -8345,11 +8584,10 @@ export default function Dashboard({ onSelectAnime }) {
                                 <div
                                   key={logo.url || idx}
                                   onClick={() => setMangaLogoUrl(toFanartFull(logo.url))}
-                                  className={`p-2 rounded-xl border flex flex-col items-center justify-center gap-1 cursor-pointer transition-all ${
-                                    isSelected
+                                  className={`p-2 rounded-xl border flex flex-col items-center justify-center gap-1 cursor-pointer transition-all ${isSelected
                                       ? 'bg-purple-500/20 border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
                                       : 'bg-white/[0.04] border-white/10 hover:border-white/30 hover:bg-white/[0.08]'
-                                  }`}
+                                    }`}
                                 >
                                   <div className="w-full h-12 flex items-center justify-center overflow-hidden">
                                     <img
@@ -8805,6 +9043,24 @@ export default function Dashboard({ onSelectAnime }) {
           </div>
         )}
       </AnimatePresence>
+
+      <AddWatchlistModal
+        isOpen={showAddWatchlistModal}
+        onClose={() => setShowAddWatchlistModal(false)}
+        onAddWatchlist={(item) => {
+          setWatchlist(prev => [item, ...prev.filter(i => i.id !== item.id)]);
+        }}
+      />
+
+      <TransferWatchlistModal
+        isOpen={Boolean(transferringWatchlistItem)}
+        onClose={() => setTransferringWatchlistItem(null)}
+        item={transferringWatchlistItem}
+        onTransferred={(deletedId) => {
+          setWatchlist(prev => prev.filter(i => i.id !== deletedId));
+          setTransferringWatchlistItem(null);
+        }}
+      />
 
     </div>
   );

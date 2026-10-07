@@ -17,6 +17,7 @@ import {
   getLocalAudioStories, setLocalAudioStories,
   getLocalAudioTracks, setLocalAudioTracks,
   getLocalMovies, setLocalMovies,
+  setLocalWatchlist,
   getLocalNotes, setLocalNotes,
   getLocalSettings, setLocalSettings,
   getDirtyQueue, clearDirtyQueue,
@@ -140,6 +141,18 @@ export async function pullFromFirestore(db) {
       movies.push({ id: d.id, userId, ...mData, watched: isWatched, isWatched });
     });
     setLocalMovies(movies);
+
+    // Pull watchlist from user
+    try {
+      const watchlistSnap = await getDocs(collection(db, 'users', userId, 'watchlist'));
+      const watchlist = [];
+      watchlistSnap.forEach(d => {
+        watchlist.push({ id: d.id, userId, ...d.data() });
+      });
+      setLocalWatchlist(watchlist);
+    } catch (wErr) {
+      console.warn('Watchlist pull error:', wErr);
+    }
 
   } catch (err) {
     console.error('pullFromFirestore error:', err);
