@@ -45,9 +45,8 @@ function GalleryImageCard({
   return (
     <div
       onClick={onClick}
-      className={`relative overflow-hidden rounded-2xl bg-[#0e131f] border border-white/10 group cursor-pointer transition-all duration-300 hover:border-amber-500/50 hover:shadow-xl hover:shadow-black/70 ${
-        isPoster ? 'aspect-[2/3]' : isLogo ? 'aspect-[16/9] p-3 flex items-center justify-center bg-black/40' : 'aspect-[16/9]'
-      }`}
+      className={`relative overflow-hidden rounded-2xl bg-[#0e131f] border border-white/10 group cursor-pointer transition-all duration-300 hover:border-amber-500/50 hover:shadow-xl hover:shadow-black/70 ${isPoster ? 'aspect-[2/3]' : isLogo ? 'aspect-[16/9] p-3 flex items-center justify-center bg-black/40' : 'aspect-[16/9]'
+        }`}
     >
       {!loaded && (
         <div className="absolute inset-0 bg-white/[0.04] animate-pulse flex items-center justify-center">
@@ -59,9 +58,8 @@ function GalleryImageCard({
         alt={title}
         loading="lazy"
         onLoad={() => setLoaded(true)}
-        className={`w-full h-full ${isLogo ? 'object-contain' : 'object-cover'} group-hover:scale-105 transition-all duration-500 ${
-          loaded ? 'opacity-100' : 'opacity-0'
-        }`}
+        className={`w-full h-full ${isLogo ? 'object-contain' : 'object-cover'} group-hover:scale-105 transition-all duration-500 ${loaded ? 'opacity-100' : 'opacity-0'
+          }`}
       />
 
       {/* Active Badges */}
@@ -150,6 +148,123 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
       const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
       videosScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
     }
+  };
+
+  // Overview 400 chars expansion state
+  const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
+
+  // Seasons & Episodes states
+  const [activeSeasonNumber, setActiveSeasonNumber] = useState(null);
+  const [expandedSeasons, setExpandedSeasons] = useState({});
+  const [selectedEpisodeModal, setSelectedEpisodeModal] = useState(null);
+  const [fetchingSeasons, setFetchingSeasons] = useState(false);
+  const [fetchSeasonsSuccess, setFetchSeasonsSuccess] = useState(false);
+
+  const seasons = useMemo(() => {
+    return Array.isArray(item?.seasons) ? item.seasons : [];
+  }, [item?.seasons]);
+
+  const activeSeason = useMemo(() => {
+    if (seasons.length === 0) return null;
+    if (activeSeasonNumber !== null) {
+      const match = seasons.find((s) => s.seasonNumber === activeSeasonNumber);
+      if (match) return match;
+    }
+    return seasons[0];
+  }, [seasons, activeSeasonNumber]);
+
+  // Sync active season if item seasons change
+  useEffect(() => {
+    if (seasons.length > 0 && activeSeasonNumber === null) {
+      setActiveSeasonNumber(seasons[0].seasonNumber);
+    }
+  }, [seasons, activeSeasonNumber]);
+
+  // Fetch or refresh seasons & episode details from TMDB
+  const handleFetchSeasonsAndEpisodes = async () => {
+    if (!item) return;
+    setFetchingSeasons(true);
+    setFetchSeasonsSuccess(false);
+
+    try {
+      const params = new URLSearchParams();
+      if (item.tmdbId) params.set('tmdbId', String(item.tmdbId));
+      if (item.id) params.set('id', String(item.id));
+      if (item.title) params.set('q', item.title);
+
+      const res = await fetch(`/api/watchlist/seasons?${params.toString()}`);
+      const data = await res.json();
+
+      if (data.success && Array.isArray(data.seasons)) {
+        const totalEps = data.episodesCount || data.seasons.reduce((acc, s) => acc + (s.episodes?.length || s.episodeCount || 0), 0);
+        const updatedItem = {
+          ...item,
+          tmdbId: item.tmdbId || data.tmdbId,
+          seasonsCount: data.seasonsCount || data.seasons.length,
+          episodesCount: totalEps,
+          seasons: data.seasons,
+          updatedAt: new Date().toISOString(),
+        };
+
+        setItem(updatedItem);
+        upsertLocalWatchlist(updatedItem);
+
+        if (db && userId) {
+          try {
+            await setDoc(doc(db, 'users', userId, 'watchlist', item.id), updatedItem, { merge: true });
+          } catch (dbErr) {
+            console.warn('Failed to update seasons in Firestore:', dbErr);
+          }
+        }
+
+        if (data.seasons.length > 0) {
+          setActiveSeasonNumber(data.seasons[0].seasonNumber);
+        }
+
+        setFetchSeasonsSuccess(true);
+        setTimeout(() => setFetchSeasonsSuccess(false), 3000);
+      } else {
+        alert(data.error || 'Failed to fetch seasons and episodes.');
+      }
+    } catch (err) {
+      console.error('Fetch seasons error:', err);
+      alert('Network error while fetching seasons & episodes: ' + err.message);
+    } finally {
+      setFetchingSeasons(false);
+    }
+  };
+
+  // Format Helpers
+  const formatAirDate = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const formatDuration = (runtime) => {
+    if (!runtime || isNaN(runtime) || Number(runtime) <= 0) return '';
+    const num = Number(runtime);
+    const h = Math.floor(num / 60);
+    const m = num % 60;
+    if (h === 0) {
+      return `${m}m`;
+    }
+    if (m === 0) {
+      return `${h}h`;
+    }
+    return `${h}h ${m}m`;
+  };
+
+  const formatRating = (rating) => {
+    if (rating === null || rating === undefined || rating === '') return '';
+    const n = Number(rating);
+    if (isNaN(n) || n <= 0) return '';
+    return Number(n.toFixed(1)).toString();
   };
 
   // Load / Sync Item
@@ -275,15 +390,34 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
     router.push('/watchlist');
   };
 
-  // Images list
+  // Images list: "All Images" tab only shows 10 images randomly from posters, background, logos
   const allImages = useMemo(() => {
-    const list = [];
-    (item.images?.backdrops || []).forEach(b => list.push({ ...b, mediaType: 'backdrop' }));
-    (item.images?.posters || []).forEach(p => list.push({ ...p, mediaType: 'poster' }));
-    (item.images?.logos || []).forEach(l => list.push({ ...l, mediaType: 'logo' }));
-    (item.images?.artworks || []).forEach(a => list.push({ ...a, mediaType: 'artwork' }));
-    return list;
-  }, [item.images]);
+    const pool = [];
+    (item.images?.posters || []).forEach(p => pool.push({ ...p, mediaType: 'poster' }));
+    (item.images?.backdrops || []).forEach(b => pool.push({ ...b, mediaType: 'backdrop' }));
+    (item.images?.logos || []).forEach(l => pool.push({ ...l, mediaType: 'logo' }));
+    (item.images?.artworks || []).forEach(a => pool.push({ ...a, mediaType: 'artwork' }));
+
+    if (pool.length <= 10) return pool;
+
+    // Shuffle randomly to pick 10 images
+    const shuffled = [...pool];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled.slice(0, 10);
+  }, [item?.id, item?.images]);
+
+  const hasAnyImages = useMemo(() => {
+    return Boolean(
+      allImages.length > 0 ||
+      (item.images?.backdrops && item.images.backdrops.length > 0) ||
+      (item.images?.posters && item.images.posters.length > 0) ||
+      (item.images?.logos && item.images.logos.length > 0) ||
+      (item.images?.artworks && item.images.artworks.length > 0)
+    );
+  }, [allImages, item?.images]);
 
   const displayedImages = useMemo(() => {
     if (imageTab === 'backdrops') return item.images?.backdrops || [];
@@ -320,16 +454,6 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
         </button>
 
         <div className="flex items-center gap-2">
-          {/* Transfer to Main Library Button */}
-          <button
-            type="button"
-            onClick={() => setShowTransferModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-black text-xs font-extrabold shadow-lg cursor-pointer transition active:scale-95"
-            title="Link PC media and transfer to main library"
-          >
-            <HardDrive size={14} />
-            <span>Transfer to Library</span>
-          </button>
 
           <button
             type="button"
@@ -339,20 +463,6 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
             <Edit3 size={14} />
             <span className="hidden sm:inline">Edit</span>
           </button>
-
-          <button
-            type="button"
-            onClick={handleToggleCompleted}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border backdrop-blur-md transition cursor-pointer shadow-lg ${
-              isCompleted
-                ? 'bg-emerald-500/25 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/35'
-                : 'bg-black/40 border-white/15 text-gray-300 hover:text-white'
-            }`}
-          >
-            <CheckCircle2 size={14} className={isCompleted ? 'text-emerald-400' : ''} />
-            <span>{isCompleted ? 'Completed' : 'Mark Completed'}</span>
-          </button>
-
           <button
             type="button"
             onClick={() => setShowDeleteModal(true)}
@@ -391,10 +501,6 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
                 </span>
               )}
             </div>
-
-            <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-amber-500 text-black font-extrabold text-[9px] shadow uppercase tracking-wider">
-              {item.contentType}
-            </div>
           </div>
 
           {/* Details & Actions Area */}
@@ -422,31 +528,37 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
                     {item.releaseDate}
                   </span>
                 )}
-                <span className="px-2.5 py-0.5 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-300 text-[10px] font-bold uppercase">
-                  {item.status || 'Plan to Watch'}
-                </span>
               </div>
 
-              {/* Title Art / Logo OR Text Title */}
-              {item.logoUrl ? (
-                <div className="py-1 max-w-md">
+              {/* Title Art / Logo + Text Title */}
+              {(item.logoUrl || item.images?.logos?.[0]?.url) && (
+                <div className="py-1 max-w-[180px] sm:max-w-[220px] md:max-w-[260px]">
                   <img
-                    src={toFanartBigPreview(item.logoUrl)}
+                    src={toFanartBigPreview(item.logoUrl || item.images?.logos?.[0]?.url)}
                     alt={item.title}
-                    className="max-h-20 w-auto object-contain filter drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]"
+                    className="max-h-12 sm:max-h-14 md:max-h-16 w-auto object-contain filter drop-shadow-[0_3px_12px_rgba(0,0,0,0.9)]"
                   />
-                  <h2 className="text-xs text-gray-400 mt-1 font-semibold">{item.title}</h2>
                 </div>
-              ) : (
-                <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight drop-shadow-md">
-                  {item.title}
-                </h1>
               )}
+
+              <h1 className={`${(item.logoUrl || item.images?.logos?.[0]?.url) ? 'text-lg sm:text-xl md:text-2xl' : 'text-xl sm:text-2xl md:text-3xl'} font-bold text-white tracking-tight drop-shadow-md`}>
+                {item.title}
+              </h1>
 
               {item.originalTitle && item.originalTitle !== item.title && (
                 <p className="text-xs sm:text-sm text-gray-400 mt-1 italic">
                   {item.originalTitle}
                 </p>
+              )}
+              {seasons.length > 0 && (
+                <span className="px-2.5 py-0.5 mr-2 rounded-lg bg-white/10 border border-white/10 text-gray-300 text-[10px] font-mono font-bold">
+                  {seasons.length} {seasons.length === 1 ? 'Season' : 'Seasons'}
+                </span>
+              )}
+              {seasons.length > 0 && (
+                <span className="px-2.5 py-0.5 rounded-lg bg-white/10 border border-white/10 text-gray-300 text-[10px] font-mono font-bold">
+                  {item.episodesCount || seasons.reduce((acc, s) => acc + (s.episodes?.length || s.episodeCount || 0), 0)} Episodes
+                </span>
               )}
             </div>
 
@@ -460,7 +572,7 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
                   className="px-5 py-2.5 sm:px-6 sm:py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-black font-black text-sm flex items-center gap-2 cursor-pointer shadow-lg active:scale-95 transition"
                 >
                   <HardDrive size={18} />
-                  <span>Transfer to Local Library</span>
+                  <span>Transfer to Library</span>
                 </button>
 
                 {/* Trailer Button */}
@@ -474,16 +586,6 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
                     <span>Watch Trailer</span>
                   </button>
                 )}
-
-                {/* Edit Button */}
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(true)}
-                  className="px-4 py-2.5 sm:py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer border border-white/10"
-                >
-                  <Edit3 size={14} />
-                  <span>Edit Details</span>
-                </button>
               </div>
 
               {/* Streaming Availability Quick Indicator */}
@@ -536,7 +638,7 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
 
       {/* ── Main Detail Sections ── */}
       <div className="relative z-20 max-w-6xl w-full mx-auto px-4 md:px-6 pt-6 sm:pt-8 pb-16 space-y-10">
-        
+
         {/* 1. Overview & Storyline */}
         <section className="space-y-3">
           <div className="flex items-center justify-between">
@@ -552,10 +654,258 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
               <span>Edit Details</span>
             </button>
           </div>
-          <p className="text-sm sm:text-base md:text-lg text-gray-200/90 leading-relaxed font-normal max-w-4xl selection:bg-amber-500/30">
-            {item.overview || item.description || "No overview available for this watchlist item yet."}
-          </p>
+
+          {(() => {
+            const overviewText = item.overview || item.description || "No overview available for this watchlist item yet.";
+            const isLongOverview = overviewText.length > 400;
+
+            if (!isLongOverview) {
+              return (
+                <p className="text-sm sm:text-base md:text-lg text-gray-200/90 leading-relaxed font-normal max-w-4xl selection:bg-amber-500/30">
+                  {overviewText}
+                </p>
+              );
+            }
+
+            return (
+              <div className="relative max-w-4xl">
+                {!isOverviewExpanded ? (
+                  <div className="relative">
+                    <p className="text-sm sm:text-base md:text-lg text-gray-200/90 leading-relaxed font-normal selection:bg-amber-500/30">
+                      {overviewText.slice(0, 200).trim()}...
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setIsOverviewExpanded(true)}
+                        className="text-amber-400 hover:text-amber-300 font-bold cursor-pointer transition-colors duration-200 hover:underline select-none ml-2 text-sm sm:text-base inline-flex items-center z-10"
+                      >
+                        Show more
+                      </span>
+                    </p>
+                    {/* Sleek black vignette gradient mask overlay on bottom */}
+                    <div
+                      className="pointer-events-none absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-[#07090f] via-[#07090f]/75 to-transparent"
+                      aria-hidden="true"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-sm sm:text-base md:text-lg text-gray-200/90 leading-relaxed font-normal selection:bg-amber-500/30">
+                      {overviewText}
+                    </p>
+                    <div>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setIsOverviewExpanded(false)}
+                        className="text-amber-400 hover:text-amber-300 font-bold cursor-pointer transition-colors duration-200 hover:underline select-none text-sm sm:text-base inline-flex items-center"
+                      >
+                        Show less
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </section>
+
+        {/* 1.5. SEASONS & EPISODES SECTION */}
+        {(item.contentType === 'web-series' || item.contentType === 'tv' || seasons.length > 0) && (
+          <section className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+              </div>
+              <div className="flex items-center gap-2">
+                {fetchSeasonsSuccess && (
+                  <span className="text-xs text-emerald-400 font-bold flex items-center gap-1">
+                    <CheckCircle2 size={13} /> Synced!
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleFetchSeasonsAndEpisodes}
+                  disabled={fetchingSeasons}
+                  className="px-3.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition active:scale-95 cursor-pointer disabled:opacity-50 shadow-sm"
+                  title="Fetch latest season and episode data from TMDB"
+                >
+                  <RefreshCw size={13} className={fetchingSeasons ? "animate-spin" : ""} />
+                  <span>
+                    {fetchingSeasons
+                      ? "Fetching Details..."
+                      : "Fetch Details"}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {seasons.length === 0 ? (
+              <div className="p-8 rounded-2xl bg-white/[0.02] border border-white/10 text-center space-y-3">
+                <Tv size={28} className="mx-auto text-amber-400/70" />
+                <h3 className="text-sm font-bold text-white">No Season & Episode Details Loaded</h3>
+                <p className="text-xs text-gray-400 max-w-md mx-auto">
+                  Fetch full season breakdown, episode release dates, duration, ratings, and stills directly from TMDB.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleFetchSeasonsAndEpisodes}
+                  disabled={fetchingSeasons}
+                  className="px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 hover:text-white text-xs font-bold inline-flex items-center gap-2 transition cursor-pointer"
+                >
+                  <RefreshCw size={13} className={fetchingSeasons ? "animate-spin" : ""} />
+                  <span>{fetchingSeasons ? "Fetching..." : "Fetch Seasons & Episode Details"}</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Seasons Tab Bar (Like image1: Season 1  Season 2) */}
+                <div className="flex items-center gap-6 border-b border-white/10 pb-2 overflow-x-auto custom-scrollbar select-none">
+                  {seasons.map((s) => {
+                    const isActive = (activeSeason?.seasonNumber === s.seasonNumber);
+                    return (
+                      <button
+                        key={s.id || s.seasonNumber}
+                        type="button"
+                        onClick={() => setActiveSeasonNumber(s.seasonNumber)}
+                        className={`relative pb-2 font-bold transition-all duration-200 cursor-pointer text-base sm:text-lg whitespace-nowrap ${isActive
+                          ? "text-white font-extrabold"
+                          : "text-gray-400 hover:text-gray-200 font-semibold"
+                          }`}
+                      >
+                        <span>{s.name || `Season ${s.seasonNumber}`}</span>
+                        {isActive && (
+                          <motion.div
+                            layoutId="activeSeasonTabIndicator"
+                            className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-400 rounded-full"
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Episodes List for Active Season */}
+                {(() => {
+                  const currentEpisodes = activeSeason?.episodes || [];
+                  const isExpanded = Boolean(expandedSeasons[activeSeason?.seasonNumber]);
+                  const visibleEpisodes = isExpanded ? currentEpisodes : currentEpisodes.slice(0, 5);
+
+                  if (currentEpisodes.length === 0) {
+                    return (
+                      <div className="py-8 text-center text-xs text-gray-500 italic bg-white/[0.01] rounded-2xl border border-white/5">
+                        No episodes available for this season yet.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="relative space-y-2">
+                      <div className="space-y-2">
+                        {visibleEpisodes.map((ep) => {
+                          const ratingStr = formatRating(ep.voteAverage);
+                          const durationStr = formatDuration(ep.runtime);
+                          const dateStr = formatAirDate(ep.airDate);
+                          const stillImage = ep.stillUrl || item.backdropUrl || item.posterUrl;
+
+                          return (
+                            <div
+                              key={ep.id || ep.episodeNumber}
+                              onClick={() => setSelectedEpisodeModal(ep)}
+                              className="group flex items-start gap-4 p-3 rounded-2xl hover:bg-white/[0.05] border border-transparent hover:border-white/10 transition-all duration-200 cursor-pointer"
+                            >
+                              {/* Episode Thumbnail */}
+                              <div className="relative w-32 sm:w-40 md:w-44 aspect-video rounded-xl overflow-hidden bg-black/60 flex-shrink-0 border border-white/10 group-hover:border-amber-500/40 transition-colors shadow-md">
+                                {stillImage ? (
+                                  <img
+                                    src={stillImage}
+                                    alt={ep.name}
+                                    loading="lazy"
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                    onError={(e) => {
+                                      if (item.backdropUrl) e.target.src = item.backdropUrl;
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center bg-zinc-900 text-gray-600">
+                                    <Tv size={20} />
+                                  </div>
+                                )}
+                                {/* Play icon overlay in bottom-left */}
+                                <div className="absolute bottom-2 left-2 w-6 h-6 rounded-full bg-black/75 backdrop-blur-sm flex items-center justify-center text-white shadow">
+                                  <Play size={10} className="fill-white translate-x-0.5" />
+                                </div>
+                              </div>
+
+                              {/* Episode Info */}
+                              <div className="flex-1 min-w-0 pt-0.5 space-y-1">
+                                <h3 className="text-sm sm:text-base md:text-lg font-bold text-white group-hover:text-amber-300 transition-colors truncate">
+                                  {ep.name || `Episode ${ep.episodeNumber}`}
+                                </h3>
+                                <div className="text-xs sm:text-sm text-gray-400 font-medium flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                  <span>S{ep.seasonNumber || activeSeason?.seasonNumber} E{ep.episodeNumber}</span>
+                                  {dateStr && (
+                                    <>
+                                      <span>·</span>
+                                      <span>{dateStr}</span>
+                                    </>
+                                  )}
+                                  {durationStr && (
+                                    <>
+                                      <span>·</span>
+                                      <span>{durationStr}</span>
+                                    </>
+                                  )}
+                                  {ratingStr && (
+                                    <>
+                                      <span>·</span>
+                                      <span className="text-amber-400 flex items-center gap-0.5 font-semibold">
+                                        ★ {ratingStr}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Vignette-type Show More / Show Less for each tab */}
+                      {currentEpisodes.length > 5 && (
+                        <div className="relative pt-3 pb-2 text-center">
+                          {!isExpanded && (
+                            <div
+                              className="pointer-events-none absolute -top-16 left-0 right-0 h-24 bg-gradient-to-t from-[#07090f] via-[#07090f]/90 to-transparent"
+                              aria-hidden="true"
+                            />
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const sNum = activeSeason?.seasonNumber;
+                              setExpandedSeasons(prev => ({ ...prev, [sNum]: !prev[sNum] }));
+                            }}
+                            className="relative z-10 px-5 py-2 rounded-full hover:bg-white/[0.12] text-xs font-bold text-gray-200 hover:text-white transition-all duration-200 inline-flex items-center gap-2 backdrop-blur-md shadow-lg active:scale-95 cursor-pointer"
+                          >
+                            <span>
+                              {isExpanded
+                                ? "Show Less"
+                                : `Show All`}
+                            </span>
+                            <ChevronDown
+                              size={14}
+                              className={`transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
+                            />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </section>
+        )}
 
         {/* 2. WHERE TO WATCH & STREAM (Detailed Categorized Panel as requested) */}
         <section className="space-y-4">
@@ -841,7 +1191,7 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
         )}
 
         {/* 5. More Images & Artwork (Posters, Backdrops, Logos, Artworks) */}
-        {allImages.length > 0 && (
+        {hasAnyImages && (
           <section className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
               <h2 className="text-sm sm:text-base font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
@@ -861,11 +1211,10 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
                     key={tab.id}
                     type="button"
                     onClick={() => setImageTab(tab.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${
-                      imageTab === tab.id
-                        ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20'
-                        : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10'
-                    }`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${imageTab === tab.id
+                      ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20'
+                      : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10'
+                      }`}
                   >
                     <span>{tab.label}</span>
                     <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${imageTab === tab.id ? 'bg-black/20 text-black' : 'bg-white/10 text-gray-300'}`}>
@@ -1074,6 +1423,109 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
           </div>
         </div>
       )}
+      {/* ── EPISODE DETAIL MODAL ── */}
+      <AnimatePresence>
+        {selectedEpisodeModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto"
+            onClick={() => setSelectedEpisodeModal(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-2xl bg-[#0c101b] border border-white/15 rounded-3xl shadow-2xl overflow-hidden flex flex-col my-auto"
+            >
+              {/* Episode Cover Image */}
+              <div className="relative aspect-video w-full bg-black/80 overflow-hidden">
+                {(() => {
+                  const rawCover = selectedEpisodeModal.stillUrl || item.backdropUrl || item.posterUrl;
+                  const coverUrl = rawCover ? rawCover.replace('/w500/', '/original/').replace('/w300/', '/original/') : '';
+                  return (
+                    <img
+                      src={coverUrl}
+                      alt={selectedEpisodeModal.name}
+                      className="w-full h-full object-cover"
+                    />
+                  );
+                })()}
+                <div className="absolute inset-0 bg-gradient-to-t from-[#0c101b] via-[#0c101b]/40 to-transparent" />
+
+                {/* Web Series Logo in top left corner */}
+                {(() => {
+                  const seriesLogo = item.logoUrl || item.images?.logos?.[0]?.url;
+                  if (!seriesLogo) return null;
+                  const logoSrc = seriesLogo.includes('fanart.tv') ? toFanartBigPreview(seriesLogo) : seriesLogo;
+                  return (
+                    <div className="absolute top-3.5 left-4 z-10 max-w-[45%] flex items-center pointer-events-none">
+                      <img
+                        src={logoSrc}
+                        alt={item.title}
+                        className="max-h-9 sm:max-h-12 w-auto object-contain filter drop-shadow-[0_2px_10px_rgba(0,0,0,0.95)]"
+                      />
+                    </div>
+                  );
+                })()}
+
+                {/* Close button */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedEpisodeModal(null)}
+                  className="absolute top-3 right-3 z-20 p-2 rounded-full bg-black/60 hover:bg-black/90 text-white transition cursor-pointer backdrop-blur-md border border-white/15"
+                >
+                  <X size={18} />
+                </button>
+
+                {/* Badge & Title on cover */}
+                <div className="absolute bottom-3 left-4 right-4">
+                  <span className="px-2.5 py-1 rounded-lg bg-amber-500/90 text-black font-extrabold text-xs tracking-wider uppercase shadow">
+                    S{selectedEpisodeModal.seasonNumber || activeSeason?.seasonNumber}E{selectedEpisodeModal.episodeNumber}
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-black text-white mt-1 drop-shadow-md">
+                    {selectedEpisodeModal.name}
+                  </h2>
+                </div>
+              </div>
+
+              {/* Episode Details Content */}
+              <div className="p-5 sm:p-6 space-y-4">
+                {/* Metadata chips */}
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  {selectedEpisodeModal.airDate && (
+                    <div className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 flex items-center gap-1.5 font-medium">
+                      <Calendar size={13} className="text-amber-400" />
+                      <span>Air Date: {formatAirDate(selectedEpisodeModal.airDate)}</span>
+                    </div>
+                  )}
+                  {formatDuration(selectedEpisodeModal.runtime) && (
+                    <div className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 flex items-center gap-1.5 font-medium">
+                      <Clock size={13} className="text-cyan-400" />
+                      <span>Duration: {formatDuration(selectedEpisodeModal.runtime)}</span>
+                    </div>
+                  )}
+                  {formatRating(selectedEpisodeModal.voteAverage) && (
+                    <div className="px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 flex items-center gap-1.5 font-bold">
+                      <Star size={13} className="text-amber-400 fill-amber-400" />
+                      <span>Rating: {formatRating(selectedEpisodeModal.voteAverage)} / 10</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Overview / Storyline */}
+                <div className="space-y-1.5">
+                  <h4 className="text-xs uppercase font-extrabold tracking-wider text-gray-400">
+                    Episode Storyline & Overview
+                  </h4>
+                  <p className="text-sm sm:text-base text-gray-200/90 leading-relaxed font-normal selection:bg-amber-500/30">
+                    {selectedEpisodeModal.overview || "No detailed synopsis available for this episode."}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -5,12 +5,29 @@ import {
   ChevronLeft, Play, Pause, Volume2, VolumeX, Maximize,
   SkipForward, SkipBack, RotateCw, Lightbulb, CheckCircle2,
   FolderTree, Search, Menu, Youtube, Info, AlertTriangle,
-  Bookmark, Clock, FileVideo, Percent, StickyNote
+  Bookmark, Clock, FileVideo, Percent, StickyNote, Film, Star
 } from 'lucide-react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
-import { getLocalAnime, getLocalEpisodes, setLocalEpisodes, upsertLocalAnime } from '../utils/localStore';
+import {
+  getLocalAnime, getLocalEpisodes, setLocalEpisodes, upsertLocalAnime,
+  getLocalMovie, upsertLocalMovie
+} from '../utils/localStore';
+
+const extractYoutubeId = (urlOrId) => {
+  if (!urlOrId) return '';
+  const str = String(urlOrId).trim();
+  if (str.startsWith('youtube://')) return str.replace('youtube://', '');
+  const match = str.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|live\/))([\w-]{11})/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  if (/^[\w-]{11}$/.test(str)) {
+    return str;
+  }
+  return '';
+};
 
 export default function YoutubePlayerContainer({
   animeId,
@@ -110,10 +127,10 @@ export default function YoutubePlayerContainer({
     setCurrentEpisodeId(episodeId);
   }, [episodeId]);
 
-  // Load anime details for header
+  // Load anime or movie details for header
   useEffect(() => {
     if (animeId) {
-      const local = getLocalAnime(animeId);
+      const local = getLocalAnime(animeId) || getLocalMovie(animeId);
       if (local) setAnimeDetails(local);
     }
   }, [animeId]);
@@ -131,7 +148,11 @@ export default function YoutubePlayerContainer({
   // Extract YouTube ID
   const youtubeId = useMemo(() => {
     if (!currentEpisode) return '';
-    return currentEpisode.youtubeId || currentEpisode.filePath?.replace('youtube://', '') || '';
+    if (currentEpisode.youtubeId) {
+      const parsed = extractYoutubeId(currentEpisode.youtubeId);
+      if (parsed) return parsed;
+    }
+    return extractYoutubeId(currentEpisode.filePath || '');
   }, [currentEpisode]);
 
   // ── Filtered Episodes for 5-Column Grid (From strictly sorted list) ────────
@@ -284,6 +305,44 @@ export default function YoutubePlayerContainer({
     if (!currentEpisode) return;
     const nextWatched = typeof overrideState === 'boolean' ? overrideState : !isCurrentWatched;
 
+    if (currentEpisode.isMovie) {
+      try {
+        const local = getLocalMovie(animeId);
+        if (local) {
+          const updatedMovie = {
+            ...local,
+            watched: nextWatched,
+            completed: nextWatched,
+            watchStatus: nextWatched ? 'Completed' : 'Not Started',
+            watchProgress: nextWatched ? 100 : 0,
+            updatedAt: new Date().toISOString(),
+            lastWatchedAt: new Date().toISOString(),
+          };
+          upsertLocalMovie(updatedMovie);
+          setAnimeDetails(updatedMovie);
+        }
+      } catch (e) {
+        console.warn('LocalStore error:', e);
+      }
+
+      if (currentUser?.uid && db) {
+        try {
+          const mRef = doc(db, 'users', currentUser.uid, 'movies', animeId);
+          updateDoc(mRef, {
+            watched: nextWatched,
+            completed: nextWatched,
+            watchStatus: nextWatched ? 'Completed' : 'Not Started',
+            watchProgress: nextWatched ? 100 : 0,
+            updatedAt: new Date().toISOString(),
+            lastWatchedAt: new Date().toISOString(),
+          }).catch(() => {});
+        } catch (err) {}
+      }
+
+      currentEpisode.isWatched = nextWatched;
+      return;
+    }
+
     // Update LocalStore
     try {
       const stored = getLocalEpisodes(animeId) || [];
@@ -351,26 +410,98 @@ export default function YoutubePlayerContainer({
         </div>
 
         <div className="text-xs font-semibold text-gray-400 hidden sm:block font-mono">
-          Episode {currentEpisode?.episodeNumber || (currentIndex + 1)} of {sortedEpisodes.length}
+          {currentEpisode?.isMovie
+            ? 'Feature Film'
+            : `Episode ${currentEpisode?.episodeNumber || (currentIndex + 1)} of ${sortedEpisodes.length}`}
         </div>
       </header>
 
       {/* ── Main Grid: Left Episode Selector + Right Player & Controls ───────── */}
       <main className="flex-1 w-full max-w-[1700px] mx-auto p-2 sm:p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-5 relative z-10">
 
-        {/* ── LEFT COLUMN: Ordered 5-Column Episode Grid ─────────────────────── */}
+        {/* ── LEFT COLUMN: Ordered 5-Column Episode Grid or Movie Info ─────────────────────── */}
         <div className="lg:col-span-4 xl:col-span-3 bg-[#0d111d] rounded-2xl border border-white/10 p-3.5 sm:p-4 flex flex-col h-[650px] lg:h-[760px] shadow-2xl">
-          
-          {/* Header Title */}
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-bold tracking-wide text-gray-200 flex items-center gap-1.5">
-              <FolderTree size={15} className="text-purple-400" />
-              List of episodes:
-            </h2>
-            <span className="text-[10px] text-gray-400 font-mono">
-              {visibleEpisodes.length} eps
-            </span>
-          </div>
+          {currentEpisode?.isMovie ? (
+            <div className="flex flex-col h-full overflow-y-auto space-y-4 custom-scrollbar">
+              <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+                <h2 className="text-sm font-bold tracking-wide text-gray-200 flex items-center gap-1.5">
+                  <Film size={15} className="text-amber-400" />
+                  <span>Movie Information</span>
+                </h2>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30">
+                  YouTube
+                </span>
+              </div>
+
+              {/* Poster & Backdrop */}
+              {(animeDetails?.posterUrl || animeDetails?.posterPath || animeDetails?.backdropUrl) && (
+                <div className="relative aspect-[16/10] w-full rounded-xl overflow-hidden border border-white/10 shadow-lg bg-black/40">
+                  <img
+                    src={animeDetails?.backdropUrl || animeDetails?.posterUrl || (animeDetails?.posterPath ? `https://image.tmdb.org/t/p/w500${animeDetails.posterPath}` : '')}
+                    alt={animeDetails?.title || 'Movie'}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                  <div className="absolute bottom-2 left-2 right-2">
+                    <h3 className="text-xs font-black text-white truncate drop-shadow">
+                      {animeDetails?.title || currentEpisode?.title}
+                    </h3>
+                  </div>
+                </div>
+              )}
+
+              {/* Movie Meta */}
+              <div className="space-y-2 text-xs">
+                {animeDetails?.overview && (
+                  <p className="text-gray-400 text-xs line-clamp-6 leading-relaxed">
+                    {animeDetails.overview}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-2 gap-2 pt-2">
+                  {animeDetails?.year && (
+                    <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
+                      <span className="text-[10px] text-gray-500 block">Release Year</span>
+                      <span className="font-bold text-white">{animeDetails.year}</span>
+                    </div>
+                  )}
+                  {animeDetails?.runtime ? (
+                    <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5">
+                      <span className="text-[10px] text-gray-500 block">Duration</span>
+                      <span className="font-bold text-white">{animeDetails.runtime} min</span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* Watched Status button */}
+              <div className="mt-auto pt-3 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => handleToggleWatched()}
+                  className={`w-full py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer border ${
+                    isCurrentWatched
+                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                      : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-300 hover:text-white'
+                  }`}
+                >
+                  <CheckCircle2 size={14} className={isCurrentWatched ? 'text-emerald-400' : 'text-gray-500'} />
+                  <span>{isCurrentWatched ? 'Marked as Watched' : 'Mark as Watched'}</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Header Title */}
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-bold tracking-wide text-gray-200 flex items-center gap-1.5">
+                  <FolderTree size={15} className="text-purple-400" />
+                  List of episodes:
+                </h2>
+                <span className="text-[10px] text-gray-400 font-mono">
+                  {visibleEpisodes.length} eps
+                </span>
+              </div>
 
           {/* Filter Row: Playlist Dropdown & Number of Ep Search */}
           <div className="flex items-center gap-2 mb-3.5">
@@ -482,7 +613,9 @@ export default function YoutubePlayerContainer({
               </span>
             </div>
           </div>
-        </div>
+        </>
+      )}
+    </div>
 
         {/* ── RIGHT COLUMN: YouTube Video Player + MediaServer Style Controls ── */}
         <div className="lg:col-span-8 xl:col-span-9 flex flex-col space-y-4">

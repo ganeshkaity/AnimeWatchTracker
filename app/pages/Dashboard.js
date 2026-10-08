@@ -429,6 +429,9 @@ export default function Dashboard({ onSelectAnime }) {
   const [showAddWatchlistModal, setShowAddWatchlistModal] = useState(false);
   const [transferringWatchlistItem, setTransferringWatchlistItem] = useState(null);
   const watchlistScrollRef = useRef(null);
+  const isWatchlistDraggingRef = useRef(false);
+  const watchlistStartXRef = useRef(0);
+  const watchlistScrollLeftRef = useRef(0);
 
   const scrollWatchlist = (direction) => {
     if (watchlistScrollRef.current) {
@@ -436,6 +439,24 @@ export default function Dashboard({ onSelectAnime }) {
       const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
       watchlistScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
     }
+  };
+
+  const handleWatchlistMouseDown = (e) => {
+    isWatchlistDraggingRef.current = true;
+    watchlistStartXRef.current = e.pageX - (watchlistScrollRef.current?.offsetLeft || 0);
+    watchlistScrollLeftRef.current = watchlistScrollRef.current?.scrollLeft || 0;
+  };
+
+  const handleWatchlistMouseMove = (e) => {
+    if (!isWatchlistDraggingRef.current || !watchlistScrollRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - (watchlistScrollRef.current?.offsetLeft || 0);
+    const walk = (x - watchlistStartXRef.current) * 1.5;
+    watchlistScrollRef.current.scrollLeft = watchlistScrollLeftRef.current - walk;
+  };
+
+  const handleWatchlistMouseUpOrLeave = () => {
+    isWatchlistDraggingRef.current = false;
   };
 
   // Hero Carousel State
@@ -1080,7 +1101,7 @@ export default function Dashboard({ onSelectAnime }) {
       return;
     }
 
-    const targetUserId = getUserId();
+    const targetUserId = currentUser?.uid || getUserId();
     const animeRef = collection(db, 'users', targetUserId, 'anime');
     const mangaRef = collection(db, 'users', targetUserId, 'mangas');
     const audioStoriesRef = collection(db, 'users', targetUserId, 'audioStories');
@@ -1150,11 +1171,22 @@ export default function Dashboard({ onSelectAnime }) {
       snapshot.forEach((d) => {
         list.push({ id: d.id, userId: targetUserId, ...d.data() });
       });
-      setWatchlist(list);
-      setLocalWatchlist(list);
+      const local = getLocalWatchlist() || [];
+      if (list.length > 0) {
+        setWatchlist(list);
+        setLocalWatchlist(list);
+      } else if (local.length > 0) {
+        setWatchlist(local);
+        local.forEach((item) => {
+          setDoc(doc(db, 'users', targetUserId, 'watchlist', item.id), item, { merge: true }).catch(console.warn);
+        });
+      } else {
+        setWatchlist([]);
+        setLocalWatchlist([]);
+      }
     }, (err) => {
       console.warn('Firestore watchlist subscription error:', err);
-      setWatchlist(getLocalWatchlist());
+      setWatchlist(getLocalWatchlist() || []);
     });
 
     return () => {
@@ -4597,7 +4629,7 @@ export default function Dashboard({ onSelectAnime }) {
             </span>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 md:gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-5">
             {/* 1. ANIME */}
             <button
               type="button"
@@ -4696,6 +4728,31 @@ export default function Dashboard({ onSelectAnime }) {
                 <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />
               </div>
               <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+
+            {/* 5. WATCHLIST */}
+            <button
+              type="button"
+              onClick={() => handleSectionJump('watchlist')}
+              className="group relative flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] hover:from-amber-500/20 hover:to-yellow-950/40 border border-white/10 hover:border-amber-500/50 backdrop-blur-md shadow-lg hover:shadow-[0_8px_30px_rgba(245,158,11,0.25)] transition-all duration-300 hover:-translate-y-1 active:scale-[0.98] text-left cursor-pointer overflow-hidden"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-500 flex items-center justify-center text-black font-extrabold shadow-md shadow-amber-500/30 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300 flex-shrink-0">
+                  <Bookmark size={20} />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-sm sm:text-base font-extrabold text-white tracking-wide block group-hover:text-amber-300 transition-colors">
+                    Watchlist
+                  </span>
+                  <span className="text-[11px] text-gray-400 group-hover:text-amber-200/80 font-medium block truncate">
+                    {watchlist.length} Saved
+                  </span>
+                </div>
+              </div>
+              <div className="w-7 h-7 rounded-full bg-white/5 group-hover:bg-amber-500/30 flex items-center justify-center text-gray-400 group-hover:text-white transition-all flex-shrink-0">
+                <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
             </button>
           </div>
         </section>
@@ -5155,9 +5212,15 @@ export default function Dashboard({ onSelectAnime }) {
                         ) : null}
                       </div>
 
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-amber-500 text-black font-extrabold text-[8px] shadow">
-                        MOVIE
-                      </div>
+                      {Boolean(movie.isYouTube || movie.youtubeUrl || movie.youtubeId || movie.localFilePath?.includes('youtube')) ? (
+                        <div className="absolute top-2 right-2 p-1 bg-black/60 rounded-lg shadow-lg border border-red-500/40 backdrop-blur-md flex items-center justify-center">
+                          <YoutubeLogo size={15} />
+                        </div>
+                      ) : (
+                        <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-amber-500 text-black font-extrabold text-[8px] shadow">
+                          MOVIE
+                        </div>
+                      )}
 
                       {/* Hover Overlay with Action Buttons */}
                       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center justify-center p-3 gap-2">
@@ -5519,16 +5582,7 @@ export default function Dashboard({ onSelectAnime }) {
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowAddMangaModal(true)}
-                className="px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-              >
-                <Plus size={14} />
-                <span className="hidden sm:inline">Add</span>
-              </button>
-
-              {sortedMangas.length > 0 && (
+              {sortedMangas.length > 2 && (
                 <>
                   <button
                     type="button"
@@ -5826,11 +5880,6 @@ export default function Dashboard({ onSelectAnime }) {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-xl font-extrabold tracking-wide text-white">Watchlist</h2>
-                  {watchlist.length > 0 && (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      {watchlist.length}
-                    </span>
-                  )}
                 </div>
               </div>
             </div>
@@ -5838,25 +5887,15 @@ export default function Dashboard({ onSelectAnime }) {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setShowAddWatchlistModal(true)}
-                className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
-                title="Add to Watchlist"
-              >
-                <Plus size={14} />
-                <span className="hidden sm:inline">Add</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={() => router.push('/watchlist')}
                 className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
                 title="View All Watchlist Items"
               >
-                <span>See All</span>
+                <span>All</span>
                 <ChevronRight size={14} />
               </button>
 
-              {sortedWatchlist.length > 0 && (
+              {sortedWatchlist.length > 2 && (
                 <>
                   <button
                     type="button"
@@ -5903,7 +5942,16 @@ export default function Dashboard({ onSelectAnime }) {
             /* Horizontal Slider (X-Axis Scrollable) showing latest 10 items + See All button */
             <div
               ref={watchlistScrollRef}
-              className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+              onWheel={(e) => {
+                if (e.deltaY !== 0 && watchlistScrollRef.current) {
+                  watchlistScrollRef.current.scrollLeft += e.deltaY;
+                }
+              }}
+              onMouseDown={handleWatchlistMouseDown}
+              onMouseMove={handleWatchlistMouseMove}
+              onMouseUp={handleWatchlistMouseUpOrLeave}
+              onMouseLeave={handleWatchlistMouseUpOrLeave}
+              className="flex gap-4 overflow-x-auto py-2 scroll-smooth select-none cursor-grab active:cursor-grabbing custom-scrollbar"
             >
               {sortedWatchlist.slice(0, 10).map((item) => {
                 const coverImg = item.posterUrl || (item.images?.posters?.[0]?.url || null);
@@ -9047,8 +9095,19 @@ export default function Dashboard({ onSelectAnime }) {
       <AddWatchlistModal
         isOpen={showAddWatchlistModal}
         onClose={() => setShowAddWatchlistModal(false)}
-        onAddWatchlist={(item) => {
+        onAddWatchlist={async (item) => {
           setWatchlist(prev => [item, ...prev.filter(i => i.id !== item.id)]);
+          upsertLocalWatchlist(item);
+          if (db) {
+            const uid = currentUser?.uid || getUserId();
+            if (uid) {
+              try {
+                await setDoc(doc(db, 'users', uid, 'watchlist', item.id), item, { merge: true });
+              } catch (err) {
+                console.warn('Dashboard save to watchlist error:', err);
+              }
+            }
+          }
         }}
       />
 

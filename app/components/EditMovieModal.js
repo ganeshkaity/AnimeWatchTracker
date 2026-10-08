@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Film, X, HardDrive, ImagePlus, CheckCircle2,
   AlertTriangle, Loader2, Image as ImageIcon, Sparkles,
-  Trash2, Search, Check
+  Trash2, Search, Check, Youtube
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -14,6 +14,20 @@ const GENRES_LIST = [
   "Romance", "Science Fiction", "Thriller", "TV Movie", "War", "Western"
 ];
 
+const extractYoutubeId = (urlOrId) => {
+  if (!urlOrId) return '';
+  const str = String(urlOrId).trim();
+  if (str.startsWith('youtube://')) return str.replace('youtube://', '');
+  const match = str.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|live\/))([\w-]{11})/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  if (/^[\w-]{11}$/.test(str)) {
+    return str;
+  }
+  return '';
+};
+
 export default function EditMovieModal({
   isOpen,
   movie,
@@ -22,6 +36,7 @@ export default function EditMovieModal({
 }) {
   const [title, setTitle] = useState('');
   const [originalTitle, setOriginalTitle] = useState('');
+  const [isYouTube, setIsYouTube] = useState(false);
   const [filePath, setFilePath] = useState('');
   const [fileName, setFileName] = useState('');
   const [year, setYear] = useState('');
@@ -43,7 +58,8 @@ export default function EditMovieModal({
     if (movie) {
       setTitle(movie.title || '');
       setOriginalTitle(movie.originalTitle || '');
-      setFilePath(movie.localFilePath || '');
+      setIsYouTube(Boolean(movie.isYouTube || movie.youtubeUrl || movie.youtubeId || movie.localFilePath?.includes('youtube.com') || movie.localFilePath?.includes('youtu.be')));
+      setFilePath(movie.youtubeUrl || movie.localFilePath || '');
       setFileName(movie.localFileName || '');
       setYear(movie.year || '');
       setRuntime(movie.runtime ? String(movie.runtime) : '');
@@ -148,12 +164,18 @@ export default function EditMovieModal({
       const runtimeMinutes = runtime ? parseInt(runtime, 10) : (movie.runtime || 0);
       const isCompleted = watchStatus === 'Completed';
 
+      const cleanPath = filePath.trim();
+      const ytId = isYouTube ? extractYoutubeId(cleanPath) : '';
+
       const updated = {
         ...movie,
         title: title.trim(),
         originalTitle: originalTitle.trim(),
-        localFilePath: filePath.trim(),
-        localFileName: fileName || filePath.split(/[\\/]/).pop() || movie.localFileName,
+        isYouTube: Boolean(isYouTube),
+        youtubeUrl: isYouTube ? cleanPath : '',
+        youtubeId: isYouTube ? (ytId || cleanPath) : '',
+        localFilePath: cleanPath,
+        localFileName: isYouTube ? `YouTube: ${title.trim()}` : (fileName || cleanPath.split(/[\\/]/).pop() || movie.localFileName),
         year: year.trim(),
         runtime: runtimeMinutes,
         duration: runtimeMinutes * 60,
@@ -236,26 +258,49 @@ export default function EditMovieModal({
               </div>
             </div>
 
-            {/* Local Video File Path */}
+            {/* Movie Video Source (Local File or YouTube Link) */}
             <div>
-              <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
-                Local Movie Video File Path
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs uppercase tracking-wider text-gray-400 font-bold flex items-center gap-1.5">
+                  {isYouTube ? (
+                    <>
+                      <Youtube size={14} className="text-red-500" />
+                      <span className="text-red-300">Enter Video Link</span>
+                    </>
+                  ) : (
+                    <span>Local Movie Video File Path</span>
+                  )}
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-gray-300 hover:text-white transition select-none bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded-lg border border-white/10">
+                  <input
+                    type="checkbox"
+                    checked={isYouTube}
+                    onChange={(e) => setIsYouTube(e.target.checked)}
+                    className="rounded bg-black/40 border-white/20 text-red-500 focus:ring-red-500 w-3.5 h-3.5 cursor-pointer accent-red-500"
+                  />
+                  <Youtube size={13} className="text-red-500" />
+                  <span>YouTube Link</span>
+                </label>
+              </div>
+
               <div className="flex gap-2">
                 <input
                   type="text"
+                  placeholder={isYouTube ? "Enter YouTube video link (e.g. https://www.youtube.com/watch?v=... or ID)" : "Local video file path..."}
                   className="flex-grow px-3 py-2 rounded-xl glass-input text-xs text-white"
                   value={filePath}
                   onChange={(e) => setFilePath(e.target.value)}
                 />
-                <button
-                  type="button"
-                  onClick={handleBrowseFile}
-                  disabled={verifyingFile}
-                  className="px-3 py-2 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 hover:text-white text-xs font-bold whitespace-nowrap transition cursor-pointer disabled:opacity-50"
-                >
-                  {verifyingFile ? 'Locating...' : 'Browse PC'}
-                </button>
+                {!isYouTube && (
+                  <button
+                    type="button"
+                    onClick={handleBrowseFile}
+                    disabled={verifyingFile}
+                    className="px-3 py-2 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 hover:text-white text-xs font-bold whitespace-nowrap transition cursor-pointer disabled:opacity-50"
+                  >
+                    {verifyingFile ? 'Locating...' : 'Browse PC'}
+                  </button>
+                )}
               </div>
             </div>
 

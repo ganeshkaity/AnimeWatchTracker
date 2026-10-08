@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { toFanartBigPreview } from '../../../lib/fanartUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -320,8 +321,8 @@ async function fetchFanartSearch(query, tmdbApiKey, fanartApiKey, isManga) {
         originalTitle: show.original_name || '',
         year: show.first_air_date ? show.first_air_date.split('-')[0] : '',
         overview: show.overview || '',
-        posterUrl: posters[0]?.url || null,
-        logoUrl: logos[0]?.url || null,
+        posterUrl: posters[0]?.url ? toFanartBigPreview(posters[0].url) : null,
+        logoUrl: logos[0]?.url ? toFanartBigPreview(logos[0].url) : null,
         source: 'Fanart.tv',
       });
     }

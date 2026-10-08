@@ -78,6 +78,7 @@ export async function GET(request) {
         posters: Array.isArray(d.images?.posters)
           ? d.images.posters.slice(0, 30).map((img) => ({
             url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
+            previewUrl: `https://image.tmdb.org/t/p/w300${img.file_path}`,
             fullUrl: `https://image.tmdb.org/t/p/original${img.file_path}`,
             width: img.width,
             height: img.height,
@@ -88,6 +89,7 @@ export async function GET(request) {
         backdrops: Array.isArray(d.images?.backdrops)
           ? d.images.backdrops.slice(0, 30).map((img) => ({
             url: `https://image.tmdb.org/t/p/original${img.file_path}`,
+            previewUrl: `https://image.tmdb.org/t/p/w300${img.file_path}`,
             width: img.width,
             height: img.height,
             source: 'TMDB',
@@ -97,6 +99,7 @@ export async function GET(request) {
         logos: Array.isArray(d.images?.logos)
           ? d.images.logos.slice(0, 25).map((img) => ({
             url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
+            previewUrl: `https://image.tmdb.org/t/p/w300${img.file_path}`,
             fullUrl: `https://image.tmdb.org/t/p/original${img.file_path}`,
             width: img.width,
             height: img.height,
@@ -185,6 +188,7 @@ export async function GET(request) {
         posters: Array.isArray(d.images?.posters)
           ? d.images.posters.slice(0, 30).map((img) => ({
             url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
+            previewUrl: `https://image.tmdb.org/t/p/w300${img.file_path}`,
             fullUrl: `https://image.tmdb.org/t/p/original${img.file_path}`,
             width: img.width,
             height: img.height,
@@ -195,6 +199,7 @@ export async function GET(request) {
         backdrops: Array.isArray(d.images?.backdrops)
           ? d.images.backdrops.slice(0, 30).map((img) => ({
             url: `https://image.tmdb.org/t/p/original${img.file_path}`,
+            previewUrl: `https://image.tmdb.org/t/p/w300${img.file_path}`,
             width: img.width,
             height: img.height,
             source: 'TMDB',
@@ -204,6 +209,7 @@ export async function GET(request) {
         logos: Array.isArray(d.images?.logos)
           ? d.images.logos.slice(0, 25).map((img) => ({
             url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
+            previewUrl: `https://image.tmdb.org/t/p/w300${img.file_path}`,
             fullUrl: `https://image.tmdb.org/t/p/original${img.file_path}`,
             width: img.width,
             height: img.height,
@@ -230,6 +236,74 @@ export async function GET(request) {
 
       const watchProviders = parseWatchProviders(d['watch/providers']?.results);
 
+      // Fetch seasons and episode details for web-series
+      const rawSeasons = Array.isArray(d.seasons) ? d.seasons : [];
+      const validSeasons = rawSeasons.filter((s) => s.season_number > 0);
+      const targetSeasons = validSeasons.length > 0 ? validSeasons : rawSeasons;
+
+      const seasonsWithEpisodes = await Promise.all(
+        targetSeasons.map(async (s) => {
+          try {
+            const sRes = await fetch(
+              `https://api.themoviedb.org/3/tv/${encodeURIComponent(tmdbId)}/season/${s.season_number}?api_key=${tmdbApiKey}&language=en-US`,
+              { headers: { Accept: 'application/json' }, next: { revalidate: 86400 } }
+            );
+
+            if (!sRes.ok) {
+              return {
+                id: s.id,
+                seasonNumber: s.season_number,
+                name: s.name || `Season ${s.season_number}`,
+                overview: s.overview || '',
+                episodeCount: s.episode_count || 0,
+                airDate: s.air_date || '',
+                posterUrl: s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : null,
+                episodes: [],
+              };
+            }
+
+            const sData = await sRes.json();
+            const epList = (sData.episodes || []).map((ep) => ({
+              id: ep.id,
+              episodeNumber: ep.episode_number,
+              seasonNumber: ep.season_number,
+              name: ep.name || `Episode ${ep.episode_number}`,
+              overview: ep.overview || '',
+              airDate: ep.air_date || '',
+              runtime: ep.runtime || 0,
+              voteAverage: ep.vote_average ? Number(ep.vote_average.toFixed(1)) : null,
+              voteCount: ep.vote_count || 0,
+              stillUrl: ep.still_path ? `https://image.tmdb.org/t/p/w500${ep.still_path}` : null,
+            }));
+
+            return {
+              id: s.id,
+              seasonNumber: s.season_number,
+              name: s.name || `Season ${s.season_number}`,
+              overview: sData.overview || s.overview || '',
+              episodeCount: epList.length || s.episode_count || 0,
+              airDate: sData.air_date || s.air_date || '',
+              posterUrl: s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : null,
+              episodes: epList,
+            };
+          } catch (sErr) {
+            console.warn(`[Details API] Failed to fetch season ${s.season_number}:`, sErr);
+            return {
+              id: s.id,
+              seasonNumber: s.season_number,
+              name: s.name || `Season ${s.season_number}`,
+              overview: s.overview || '',
+              episodeCount: s.episode_count || 0,
+              airDate: s.air_date || '',
+              posterUrl: s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : null,
+              episodes: [],
+            };
+          }
+        })
+      );
+
+      const totalEpisodesCount = seasonsWithEpisodes.reduce((acc, s) => acc + (s.episodes?.length || s.episodeCount || 0), 0);
+
       const seriesDetails = {
         id: `watchlist-${d.id}`,
         tmdbId: d.id,
@@ -240,8 +314,9 @@ export async function GET(request) {
         overview: d.overview || '',
         releaseDate: d.first_air_date || '',
         year: releaseYear,
-        seasonsCount: d.number_of_seasons || 1,
-        episodesCount: d.number_of_episodes || 0,
+        seasonsCount: d.number_of_seasons || seasonsWithEpisodes.length,
+        episodesCount: d.number_of_episodes || totalEpisodesCount,
+        seasons: seasonsWithEpisodes,
         genres,
         rating: d.vote_average ? Number(d.vote_average.toFixed(1)) : 0,
         voteCount: d.vote_count || 0,
@@ -355,6 +430,7 @@ export async function GET(request) {
           seenLogos.add(l.url);
           combinedLogos.push({
             url: toFanartBigPreview(l.url),
+            previewUrl: toFanartBigPreview(l.url),
             fullUrl: toFanartFull(l.url),
             source: 'Fanart.tv',
             mediaType: 'logo',
@@ -363,13 +439,14 @@ export async function GET(request) {
       }
     }
 
-    // TMDB Logos next (w300)
+    // TMDB Logos next (w500 stored, w300 preview)
     if (tmdbData?.images?.logos && Array.isArray(tmdbData.images.logos)) {
       for (const l of tmdbData.images.logos) {
         if (l.url && !seenLogos.has(l.url)) {
           seenLogos.add(l.url);
           combinedLogos.push({
             url: l.url,
+            previewUrl: l.previewUrl || l.url,
             fullUrl: l.fullUrl || l.url,
             source: 'TMDB',
             mediaType: 'logo',
@@ -386,6 +463,7 @@ export async function GET(request) {
       seenPosters.add(aniData.posterUrl);
       combinedPosters.push({
         url: aniData.posterUrl,
+        previewUrl: aniData.posterUrl,
         source: 'AniList',
         mediaType: 'poster',
       });
@@ -397,6 +475,7 @@ export async function GET(request) {
           seenPosters.add(p.url);
           combinedPosters.push({
             url: toFanartBigPreview(p.url),
+            previewUrl: toFanartBigPreview(p.url),
             fullUrl: toFanartFull(p.url),
             source: 'Fanart.tv',
             mediaType: 'poster',
@@ -409,7 +488,12 @@ export async function GET(request) {
       for (const p of tmdbData.images.posters) {
         if (p.url && !seenPosters.has(p.url)) {
           seenPosters.add(p.url);
-          combinedPosters.push(p);
+          combinedPosters.push({
+            url: p.url,
+            previewUrl: p.previewUrl || p.url,
+            source: 'TMDB',
+            mediaType: 'poster',
+          });
         }
       }
     }
@@ -754,6 +838,7 @@ async function fetchTmdbRichAnimeData(tmdbId, query, tmdbApiKey, isManga) {
       posters: Array.isArray(d.images?.posters)
         ? d.images.posters.slice(0, 25).map((img) => ({
           url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
+          previewUrl: `https://image.tmdb.org/t/p/w300${img.file_path}`,
           fullUrl: `https://image.tmdb.org/t/p/original${img.file_path}`,
           source: 'TMDB',
           mediaType: 'poster',
@@ -762,6 +847,7 @@ async function fetchTmdbRichAnimeData(tmdbId, query, tmdbApiKey, isManga) {
       backdrops: Array.isArray(d.images?.backdrops)
         ? d.images.backdrops.slice(0, 25).map((img) => ({
           url: `https://image.tmdb.org/t/p/original${img.file_path}`,
+          previewUrl: `https://image.tmdb.org/t/p/w300${img.file_path}`,
           source: 'TMDB',
           mediaType: 'backdrop',
         }))
@@ -769,6 +855,7 @@ async function fetchTmdbRichAnimeData(tmdbId, query, tmdbApiKey, isManga) {
       logos: Array.isArray(d.images?.logos)
         ? d.images.logos.slice(0, 20).map((img) => ({
           url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
+          previewUrl: `https://image.tmdb.org/t/p/w300${img.file_path}`,
           fullUrl: `https://image.tmdb.org/t/p/original${img.file_path}`,
           source: 'TMDB',
           mediaType: 'logo',

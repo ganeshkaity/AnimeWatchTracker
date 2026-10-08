@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Film, X, Search, Loader2, Sparkles, CheckCircle2,
   HardDrive, ImagePlus, Star, Clock, AlertTriangle, ExternalLink,
-  Users, Video, Layers, Check, Image as ImageIcon
+  Users, Video, Layers, Check, Image as ImageIcon, Youtube
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -21,6 +21,20 @@ const GRADIENTS = [
   "from-emerald-500 to-teal-700",
   "from-cyan-600 to-blue-700",
 ];
+
+export const extractYoutubeId = (urlOrId) => {
+  if (!urlOrId) return '';
+  const str = String(urlOrId).trim();
+  if (str.startsWith('youtube://')) return str.replace('youtube://', '');
+  const match = str.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|live\/))([\w-]{11})/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  if (/^[\w-]{11}$/.test(str)) {
+    return str;
+  }
+  return '';
+};
 
 const slugify = (text) => {
   return text
@@ -46,6 +60,9 @@ export default function AddMovieModal({
   const [searchError, setSearchError] = useState('');
   const [fetchingDetails, setFetchingDetails] = useState(false);
   const [selectedTmdbMovie, setSelectedTmdbMovie] = useState(null);
+
+  // YouTube Link State
+  const [isYouTube, setIsYouTube] = useState(false);
 
   // Local File State
   const [filePath, setFilePath] = useState('');
@@ -92,6 +109,7 @@ export default function AddMovieModal({
       setSearchError('');
       setFetchingDetails(false);
       setSelectedTmdbMovie(null);
+      setIsYouTube(false);
       setFilePath('');
       setFileName('');
       setFileVerified(null);
@@ -339,7 +357,7 @@ export default function AddMovieModal({
     }
 
     if (!cleanPath) {
-      alert('Please select or specify the local movie video file path.');
+      alert(isYouTube ? 'Please enter the YouTube video link or video ID.' : 'Please select or specify the local movie video file path.');
       return;
     }
 
@@ -359,6 +377,7 @@ export default function AddMovieModal({
       const randomGradient = GRADIENTS[Math.floor(Math.random() * GRADIENTS.length)];
       const runtimeMinutes = runtime ? parseInt(runtime, 10) : 0;
       const parsedRating = rating ? parseFloat(rating) : null;
+      const ytId = isYouTube ? extractYoutubeId(cleanPath) : '';
 
       const movieData = {
         id: movieId,
@@ -384,7 +403,10 @@ export default function AddMovieModal({
         crew: Array.isArray(crew) ? crew : [],
         images: images || { posters: [], backdrops: [], logos: [] },
         videos: Array.isArray(videos) ? videos : [],
-        localFileName: fileName || cleanPath.split(/[\\/]/).pop() || cleanTitle,
+        isYouTube: Boolean(isYouTube),
+        youtubeUrl: isYouTube ? cleanPath : '',
+        youtubeId: isYouTube ? (ytId || cleanPath) : '',
+        localFileName: isYouTube ? `YouTube: ${cleanTitle}` : (fileName || cleanPath.split(/[\\/]/).pop() || cleanTitle),
         localFilePath: cleanPath,
         addedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -575,56 +597,117 @@ export default function AddMovieModal({
               )}
             </div>
 
-            {/* ── 2. Local Movie File ──────────────────────────────────────── */}
+            {/* ── 2. Movie Video Source (Local File or YouTube Link) ──────── */}
             <div>
-              <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">
-                2. Select Local Movie Video File *
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Browse your PC or paste local video file path (MP4, MKV, WEBM, MOV, AVI)..."
-                  className="flex-grow px-3 py-2 rounded-xl glass-input text-xs text-white"
-                  value={filePath}
-                  onChange={(e) => handleManualPathChange(e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={handleBrowseFile}
-                  disabled={verifyingFile}
-                  className="px-3 py-2 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 hover:text-white text-xs font-bold whitespace-nowrap transition cursor-pointer disabled:opacity-50"
-                >
-                  {verifyingFile ? 'Locating...' : 'Browse PC File'}
-                </button>
-                <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1">
-                  <span>File</span>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs uppercase tracking-wider text-gray-400 font-bold flex items-center gap-1.5">
+                  {isYouTube ? (
+                    <>
+                      <Youtube size={14} className="text-red-500" />
+                      <span className="text-red-300">2. Enter Video Link *</span>
+                    </>
+                  ) : (
+                    <span>2. Select Local Movie Video File *</span>
+                  )}
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-gray-300 hover:text-white transition select-none bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded-xl border border-white/10">
                   <input
-                    type="file"
-                    accept="video/mp4,video/x-matroska,video/webm,video/quicktime,video/x-msvideo,.mp4,.mkv,.webm,.mov,.avi,.m4v"
-                    className="hidden"
-                    onChange={handleHtmlFileInput}
+                    type="checkbox"
+                    checked={isYouTube}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIsYouTube(checked);
+                      if (checked) {
+                        setFileVerified(null);
+                        setFileWarning('');
+                      }
+                    }}
+                    className="rounded bg-black/40 border-white/20 text-red-500 focus:ring-red-500 w-3.5 h-3.5 cursor-pointer accent-red-500"
                   />
+                  <Youtube size={13} className="text-red-500" />
+                  <span>YouTube Link</span>
                 </label>
               </div>
 
-              {/* Local File Verification Badge */}
-              {filePath && fileVerified === true && (
-                <div className="mt-1.5 p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between">
-                  <div className="flex items-center gap-2 font-bold">
-                    <CheckCircle2 size={14} className="text-emerald-400" />
-                    <span className="truncate max-w-sm">
-                      Found local video file: {fileName || filePath.split(/[\\/]/).pop()}
-                    </span>
+              {isYouTube ? (
+                <div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Enter video link (e.g. https://www.youtube.com/watch?v=... or youtu.be/... or Video ID)"
+                      className="flex-grow px-3 py-2 rounded-xl glass-input text-xs text-white focus:border-red-500/60"
+                      value={filePath}
+                      onChange={(e) => {
+                        setFilePath(e.target.value);
+                        setFileWarning('');
+                      }}
+                    />
                   </div>
-                  <span className="text-[10px] font-mono text-gray-400">Ready to track</span>
-                </div>
-              )}
 
-              {/* Invalid local file state */}
-              {fileWarning && (
-                <div className="mt-1.5 p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
-                  <AlertTriangle size={14} className="text-red-400 shrink-0" />
-                  <span>{fileWarning}</span>
+                  {/* YouTube link preview / verification badge */}
+                  {filePath.trim() && (
+                    <div className="mt-1.5 p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-bold">
+                        <Youtube size={14} className="text-red-400" />
+                        <span className="truncate max-w-sm">
+                          {extractYoutubeId(filePath)
+                            ? `YouTube Video ID: ${extractYoutubeId(filePath)}`
+                            : 'YouTube Video Link ready'}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-gray-400">Embed Player Ready</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Browse your PC or paste local video file path (MP4, MKV, WEBM, MOV, AVI)..."
+                      className="flex-grow px-3 py-2 rounded-xl glass-input text-xs text-white"
+                      value={filePath}
+                      onChange={(e) => handleManualPathChange(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleBrowseFile}
+                      disabled={verifyingFile}
+                      className="px-3 py-2 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 hover:text-white text-xs font-bold whitespace-nowrap transition cursor-pointer disabled:opacity-50"
+                    >
+                      {verifyingFile ? 'Locating...' : 'Browse PC File'}
+                    </button>
+                    <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1">
+                      <span>File</span>
+                      <input
+                        type="file"
+                        accept="video/mp4,video/x-matroska,video/webm,video/quicktime,video/x-msvideo,.mp4,.mkv,.webm,.mov,.avi,.m4v"
+                        className="hidden"
+                        onChange={handleHtmlFileInput}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Local File Verification Badge */}
+                  {filePath && fileVerified === true && (
+                    <div className="mt-1.5 p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-bold">
+                        <CheckCircle2 size={14} className="text-emerald-400" />
+                        <span className="truncate max-w-sm">
+                          Found local video file: {fileName || filePath.split(/[\\/]/).pop()}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-gray-400">Ready to track</span>
+                    </div>
+                  )}
+
+                  {/* Invalid local file state */}
+                  {fileWarning && (
+                    <div className="mt-1.5 p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                      <AlertTriangle size={14} className="text-red-400 shrink-0" />
+                      <span>{fileWarning}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -59,6 +59,8 @@ export default function PlayerPage() {
               name: localMovie.title,
               fileName: localMovie.localFileName || localMovie.title,
               filePath: localMovie.localFilePath,
+              youtubeId: localMovie.youtubeId || localMovie.youtubeUrl,
+              isYouTube: Boolean(localMovie.isYouTube || localMovie.youtubeUrl || localMovie.youtubeId),
               lastPositionSeconds: localMovie.currentTime || 0,
               watchedSeconds: localMovie.currentTime || 0,
               durationSeconds: localMovie.duration || (localMovie.runtime ? localMovie.runtime * 60 : 0),

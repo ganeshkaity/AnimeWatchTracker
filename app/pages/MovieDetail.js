@@ -8,7 +8,8 @@ import {
   CheckCircle2, AlertTriangle, Trash2, Edit3, HardDrive,
   Sparkles, ExternalLink, RefreshCw, Bookmark, Share2,
   Server, Settings2, ChevronDown, Check, Tv,
-  Users, Video, Image as ImageIcon, ChevronRight, X, Maximize2, Loader2, Copy, CheckCheck, Info, MoreVertical, Download
+  Users, Video, Image as ImageIcon, ChevronRight, X, Maximize2, Loader2, Copy, CheckCheck, Info, MoreVertical, Download, Youtube,
+  Menu
 } from 'lucide-react';
 import { doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -18,6 +19,7 @@ import {
   addToDirtyQueue, getUserId
 } from '../utils/localStore';
 import EditMovieModal from '../components/EditMovieModal';
+import { toFanartBigPreview } from '../lib/fanartUtils';
 
 // Custom VLC Icon matching AnimeDetail
 const VLCIcon = ({ className }) => (
@@ -158,6 +160,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [makeDefault, setMakeDefault] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showMobileActionModal, setShowMobileActionModal] = useState(false);
 
   // Active VLC playback state & polling
   const [activeVlcPlayback, setActiveVlcPlayback] = useState(null);
@@ -287,13 +290,29 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
         if (previewImage) setPreviewImage(null);
         if (showPlayerModal) setShowPlayerModal(false);
         if (showEditModal) setShowEditModal(false);
+        if (showMobileActionModal) setShowMobileActionModal(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [artworkTargetImage, activeVideo, previewImage, showPlayerModal, showEditModal]);
+  }, [artworkTargetImage, activeVideo, previewImage, showPlayerModal, showEditModal, showMobileActionModal]);
 
-  const verifyLocalFile = async (path) => {
+  const isYouTubeMovie = useMemo(() => {
+    return Boolean(
+      movie?.isYouTube ||
+      movie?.youtubeUrl ||
+      movie?.youtubeId ||
+      movie?.localFilePath?.includes('youtube.com') ||
+      movie?.localFilePath?.includes('youtu.be') ||
+      movie?.localFilePath?.startsWith('youtube://')
+    );
+  }, [movie]);
+
+  const verifyLocalFile = async (path, isYt) => {
+    if (isYt || path?.includes('youtube.com') || path?.includes('youtu.be') || path?.startsWith('youtube://')) {
+      setFileVerified(true);
+      return;
+    }
     if (!path) {
       setFileVerified(false);
       return;
@@ -510,6 +529,10 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
 
   // Trigger main Play button: uses default preference if set, or opens player modal
   const handleMainPlay = () => {
+    if (isYouTubeMovie) {
+      router.push(`/player/youtube/${encodeURIComponent(movie.id)}?type=movie`);
+      return;
+    }
     const savedDefault = localStorage.getItem('watchanime_movie_default_player') || currentUser?.defaultPlayer;
     if (savedDefault === 'vlc') {
       playInVlc();
@@ -839,6 +862,13 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
   const progressPct = movie.watchProgress || 0;
   const backdrop = movie.backdropUrl || (movie.posterUrl || null);
   const runtimeFormatted = formatRuntime(movie.runtime);
+  const movieLogo = movie.logoUrl || movie.logo || (movie.images?.logos?.[0]?.url) || null;
+
+  const getLogoSrc = (url) => {
+    if (!url) return '';
+    if (url.startsWith('http') || url.startsWith('data:')) return toFanartBigPreview(url);
+    return `/api/image?path=${encodeURIComponent(url)}`;
+  };
 
   return (
     <div className="min-h-screen bg-[#07090f] text-white flex flex-col relative pb-20 overflow-x-hidden">
@@ -866,7 +896,8 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
           <span>Dashboard</span>
         </button>
 
-        <div className="flex items-center gap-2">
+        {/* Desktop Action Buttons (sm and above) */}
+        <div className="hidden sm:flex items-center gap-2">
           <button
             type="button"
             onClick={() => setShowEditModal(true)}
@@ -874,7 +905,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
             title="Edit movie information"
           >
             <Edit3 size={14} />
-            <span className="hidden sm:inline">Edit</span>
+            <span>Edit</span>
           </button>
 
           <button
@@ -896,6 +927,19 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
             title="Remove movie"
           >
             <Trash2 size={15} />
+          </button>
+        </div>
+
+        {/* Mobile Hamburger Menu Button (mobile only) */}
+        <div className="flex sm:hidden items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowMobileActionModal(true)}
+            className="flex items-center justify-center p-2 rounded-xl bg-black/50 hover:bg-black/70 border border-white/15 text-gray-200 hover:text-white backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
+            aria-label="Open Actions Menu"
+            title="Movie Actions"
+          >
+            <Menu size={18} />
           </button>
         </div>
       </header>
@@ -936,6 +980,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
           {/* Details & Action Header */}
           <div className="flex-1 space-y-4 w-full">
             <div>
+              {/* Badges / Chips Row */}
               <div className="flex flex-wrap items-center gap-2 mb-2">
                 <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-bold uppercase tracking-wider">
                   Movie
@@ -947,7 +992,8 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                   </span>
                 )}
                 {movie.year && (
-                  <span className="px-2.5 py-0.5 rounded-lg bg-white/10 border border-white/10 text-gray-300 text-[10px] font-mono font-bold">
+                  <span className="px-2.5 py-0.5 rounded-lg bg-white/10 border border-white/10 text-gray-300 text-[10px] font-mono font-bold flex items-center gap-1">
+                    <Calendar size={11} className="text-gray-400" />
                     {movie.year}
                   </span>
                 )}
@@ -964,10 +1010,23 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                 )}
               </div>
 
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight drop-shadow-md">
+              {/* Movie Logo Art */}
+              {movieLogo && (
+                <div className="py-1 max-w-[180px] sm:max-w-[220px] md:max-w-[260px]">
+                  <img
+                    src={getLogoSrc(movieLogo)}
+                    alt={movie.title}
+                    className="max-h-12 sm:max-h-14 md:max-h-16 w-auto object-contain filter drop-shadow-[0_3px_12px_rgba(0,0,0,0.9)]"
+                  />
+                </div>
+              )}
+
+              {/* Main Movie Title */}
+              <h1 className={`${movieLogo ? 'text-lg sm:text-xs md:text-sm' : 'text-xl sm:text-2xl md:text-3xl'} font-bold text-white tracking-tight drop-shadow-md`}>
                 {movie.title}
               </h1>
 
+              {/* Original / Native Title */}
               {movie.originalTitle && movie.originalTitle !== movie.title && (
                 <p className="text-xs sm:text-sm text-gray-400 mt-1 italic">
                   {movie.originalTitle}
@@ -1025,27 +1084,41 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                   <Tv size={12} className="text-gray-400" /> Play with:
                 </span>
 
-                {/* Option 1: Media Server Player (Browser) */}
-                <button
-                  type="button"
-                  onClick={playInMediaServer}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold transition cursor-pointer hover:shadow-[0_0_15px_rgba(168,85,247,0.25)]"
-                  title="Stream in Web Browser via Windows Media Server"
-                >
-                  <Server size={14} className="text-purple-400" />
-                  <span>M.S Player</span>
-                </button>
+                {isYouTubeMovie ? (
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/player/youtube/${encodeURIComponent(movie.id)}?type=movie`)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-300 hover:text-white text-xs font-bold transition cursor-pointer hover:shadow-[0_0_15px_rgba(239,68,68,0.25)]"
+                    title="Stream in YouTube Embed Player"
+                  >
+                    <Youtube size={14} className="text-red-400" />
+                    <span>YouTube Player</span>
+                  </button>
+                ) : (
+                  <>
+                    {/* Option 1: Media Server Player (Browser) */}
+                    <button
+                      type="button"
+                      onClick={playInMediaServer}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold transition cursor-pointer hover:shadow-[0_0_15px_rgba(168,85,247,0.25)]"
+                      title="Stream in Web Browser via Windows Media Server"
+                    >
+                      <Server size={14} className="text-purple-400" />
+                      <span>M.S Player</span>
+                    </button>
 
-                {/* Option 2: PC's VLC Player */}
-                <button
-                  type="button"
-                  onClick={playInVlc}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 hover:text-white text-xs font-bold transition cursor-pointer hover:shadow-[0_0_15px_rgba(249,115,22,0.25)]"
-                  title="Launch directly in PC's desktop VLC Player"
-                >
-                  <VLCIcon className="w-4 h-4" />
-                  <span>VLC</span>
-                </button>
+                    {/* Option 2: PC's VLC Player */}
+                    <button
+                      type="button"
+                      onClick={playInVlc}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 hover:text-white text-xs font-bold transition cursor-pointer hover:shadow-[0_0_15px_rgba(249,115,22,0.25)]"
+                      title="Launch directly in PC's desktop VLC Player"
+                    >
+                      <VLCIcon className="w-4 h-4" />
+                      <span>VLC</span>
+                    </button>
+                  </>
+                )}
               </div>
 
               {/* Active VLC Status Banner if currently playing */}
@@ -1408,43 +1481,58 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
           </div>
         </section>
 
-        {/* 6. Local File Reference (Unboxed, Clean & Minimalist) */}
+        {/* 6. Media Source / File Reference (Unboxed, Clean & Minimalist) */}
         <section className="space-y-3 pt-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-xs font-extrabold uppercase tracking-wider text-gray-300 flex items-center gap-2">
-              <HardDrive size={15} className="text-amber-400" /> Local File Reference
+              {isYouTubeMovie ? (
+                <>
+                  <Youtube size={15} className="text-red-500" /> Video Reference: YouTube
+                </>
+              ) : (
+                <>
+                  <HardDrive size={15} className="text-amber-400" /> Local File Reference
+                </>
+              )}
             </h2>
-            {fileVerified === true && (
+            {isYouTubeMovie ? (
+              <span className="px-2.5 py-0.5 rounded-lg bg-red-500/15 text-red-300 text-[11px] font-bold flex items-center gap-1 border border-red-500/30">
+                <Youtube size={12} className="text-red-400" /> YouTube Stream Ready
+              </span>
+            ) : fileVerified === true ? (
               <span className="px-2.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-[11px] font-bold flex items-center gap-1 border border-emerald-500/30">
                 <CheckCircle2 size={12} /> Available on Disk
               </span>
-            )}
-            {fileVerified === false && (
+            ) : fileVerified === false ? (
               <span className="px-2.5 py-0.5 rounded-lg bg-red-500/15 text-red-300 text-[11px] font-bold flex items-center gap-1 border border-red-500/30">
                 <AlertTriangle size={12} /> File Missing
               </span>
-            )}
+            ) : null}
           </div>
 
           <div className="space-y-2 py-1">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
-              <span className="text-gray-400 shrink-0 font-medium">Local File Name:</span>
+              <span className="text-gray-400 shrink-0 font-medium">
+                {isYouTubeMovie ? 'Source:' : 'Local File Name:'}
+              </span>
               <span className="font-mono text-gray-200 text-xs truncate max-w-lg">
                 {movie.localFileName || movie.title}
               </span>
             </div>
             <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-1 text-xs">
-              <span className="text-gray-400 shrink-0 font-medium pt-0.5">Absolute Path:</span>
+              <span className="text-gray-400 shrink-0 font-medium pt-0.5">
+                {isYouTubeMovie ? 'Video Link / Path:' : 'Absolute Path:'}
+              </span>
               <div className="flex items-center gap-2 max-w-xl">
                 <span className="font-mono text-gray-400 text-[11px] break-all">
-                  {movie.localFilePath || 'Not specified'}
+                  {movie.localFilePath || movie.youtubeUrl || 'Not specified'}
                 </span>
-                {movie.localFilePath && (
+                {(movie.localFilePath || movie.youtubeUrl) && (
                   <button
                     type="button"
                     onClick={handleCopyPath}
                     className="p-1 rounded bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer shrink-0"
-                    title="Copy path"
+                    title="Copy path or URL"
                   >
                     {copiedPath ? <CheckCheck size={13} className="text-emerald-400" /> : <Copy size={13} />}
                   </button>
@@ -1453,7 +1541,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
             </div>
           </div>
 
-          {fileVerified === false && (
+          {!isYouTubeMovie && fileVerified === false && (
             <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
               <AlertTriangle size={16} className="shrink-0 text-red-400" />
               <span>This movie file is no longer available locally. Check your drive connection or edit path.</span>
@@ -1520,6 +1608,25 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
               </div>
 
               <div className="grid gap-4 mb-6 grid-cols-1 sm:grid-cols-2 max-w-md mx-auto">
+                {isYouTubeMovie && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPlayerModal(false);
+                      router.push(`/player/youtube/${encodeURIComponent(movie.id)}?type=movie`);
+                    }}
+                    className="p-5 rounded-2xl bg-red-500/10 border border-red-500/30 hover:border-red-400 text-red-300 hover:text-white hover:bg-red-500/20 transition-all duration-300 flex flex-col items-center justify-center gap-2 cursor-pointer group hover:shadow-[0_0_25px_rgba(239,68,68,0.35)] col-span-1 sm:col-span-2"
+                  >
+                    <div className="p-3 rounded-2xl bg-red-500/20 group-hover:bg-red-500/30 transition-colors">
+                      <Youtube size={26} className="text-red-400" />
+                    </div>
+                    <div className="text-center">
+                      <span className="text-xs font-black uppercase tracking-widest block text-white">YouTube Embed Player</span>
+                      <span className="text-[10px] text-gray-400 font-medium">Stream via YouTube Video Link</span>
+                    </div>
+                  </button>
+                )}
+
                 {/* 1. Media Server Player Card (Local Media) */}
                 <button
                   type="button"
@@ -1866,6 +1973,124 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                   Cancel
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Mobile Hamburger Action Modal (Edit, Complete, Delete) ─────────── */}
+      <AnimatePresence>
+        {showMobileActionModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md select-none"
+            onClick={() => setShowMobileActionModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 40, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 40, scale: 0.98 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="relative w-full max-w-sm bg-[#0e131f] border border-white/15 rounded-3xl p-5 shadow-2xl space-y-3.5 backdrop-blur-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Pill handle */}
+              <div className="w-10 h-1 rounded-full bg-white/20 mx-auto -mt-1 mb-1 sm:hidden" />
+
+              {/* Modal Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                <div className="min-w-0 pr-2">
+                  <h3 className="text-sm font-bold text-white">Movie Actions</h3>
+                  <p className="text-[11px] text-gray-400 truncate max-w-[240px]">{movie.title}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMobileActionModal(false)}
+                  className="p-1.5 rounded-full bg-white/5 hover:bg-white/15 text-gray-400 hover:text-white transition cursor-pointer shrink-0"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Action Buttons List */}
+              <div className="space-y-2">
+                {/* 1. Edit Action */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileActionModal(false);
+                    setShowEditModal(true);
+                  }}
+                  className="w-full flex items-center gap-3.5 p-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-left transition cursor-pointer group active:scale-[0.98]"
+                >
+                  <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/25 text-amber-400 group-hover:bg-amber-500/25 transition">
+                    <Edit3 size={18} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-white">Edit Movie</div>
+                    <div className="text-[11px] text-gray-400">Update title, poster, links & metadata</div>
+                  </div>
+                  <ChevronRight size={16} className="text-gray-500 group-hover:text-gray-300 transition" />
+                </button>
+
+                {/* 2. Mark Complete / Incomplete Action */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileActionModal(false);
+                    handleToggleCompleted();
+                  }}
+                  className={`w-full flex items-center gap-3.5 p-3 rounded-2xl border text-left transition cursor-pointer group active:scale-[0.98] ${
+                    isCompleted
+                      ? 'bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20'
+                      : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/10'
+                  }`}
+                >
+                  <div className={`p-2.5 rounded-xl border transition ${
+                    isCompleted
+                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                      : 'bg-white/10 border-white/15 text-gray-300 group-hover:text-emerald-400'
+                  }`}>
+                    <CheckCircle2 size={18} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-white">
+                      {isCompleted ? 'Mark as Incomplete' : 'Mark as Completed'}
+                    </div>
+                    <div className="text-[11px] text-gray-400">
+                      {isCompleted ? 'Reset watch status & progress' : 'Mark movie finished watching'}
+                    </div>
+                  </div>
+                  <ChevronRight size={16} className="text-gray-500 group-hover:text-gray-300 transition" />
+                </button>
+
+                {/* 3. Delete Action */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileActionModal(false);
+                    handleDelete();
+                  }}
+                  className="w-full flex items-center gap-3.5 p-3 rounded-2xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 text-left transition cursor-pointer group active:scale-[0.98]"
+                >
+                  <div className="p-2.5 rounded-xl bg-red-500/20 border border-red-500/30 text-red-400 group-hover:bg-red-500/30 transition">
+                    <Trash2 size={18} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-red-300">Delete Movie</div>
+                    <div className="text-[11px] text-red-400/80">Remove from library completely</div>
+                  </div>
+                  <ChevronRight size={16} className="text-red-400/60 group-hover:text-red-300 transition" />
+                </button>
+              </div>
+
+              {/* Cancel Button */}
+              <button
+                type="button"
+                onClick={() => setShowMobileActionModal(false)}
+                className="w-full py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-semibold transition cursor-pointer text-center"
+              >
+                Cancel
+              </button>
             </motion.div>
           </div>
         )}

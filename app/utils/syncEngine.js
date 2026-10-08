@@ -149,7 +149,9 @@ export async function pullFromFirestore(db) {
       watchlistSnap.forEach(d => {
         watchlist.push({ id: d.id, userId, ...d.data() });
       });
-      setLocalWatchlist(watchlist);
+      if (watchlist.length > 0) {
+        setLocalWatchlist(watchlist);
+      }
     } catch (wErr) {
       console.warn('Watchlist pull error:', wErr);
     }

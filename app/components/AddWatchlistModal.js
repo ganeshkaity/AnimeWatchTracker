@@ -7,9 +7,13 @@ import {
   Users, Video, Layers, Check, Image as ImageIcon,
   Film, Tv, BookOpen, Headphones, BookMarked, Globe,
   Plus, Trash2, ChevronRight, Play, DollarSign, ShieldAlert,
-  CreditCard, Eye
+  CreditCard, Eye, RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { useAuth } from '../context/AuthContext';
+import { upsertLocalWatchlist, getUserId } from '../utils/localStore';
 import { toFanartBigPreview, toFanartPreview } from '../lib/fanartUtils';
 
 const CONTENT_TYPES = [
@@ -43,6 +47,7 @@ export default function AddWatchlistModal({
   onClose,
   onAddWatchlist,
 }) {
+  const { currentUser } = useAuth();
   const [contentType, setContentType] = useState('movie');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -84,6 +89,12 @@ export default function AddWatchlistModal({
   const [newProviderPlan, setNewProviderPlan] = useState('needPlan');
   const [newProviderUrl, setNewProviderUrl] = useState('');
 
+  // Seasons & Episodes (for Web-Series)
+  const [seasonsCount, setSeasonsCount] = useState(0);
+  const [episodesCount, setEpisodesCount] = useState(0);
+  const [seasons, setSeasons] = useState([]);
+  const [fetchingSeasons, setFetchingSeasons] = useState(false);
+
   const [submitting, setSubmitting] = useState(false);
 
   // Reset form when modal closes
@@ -114,6 +125,10 @@ export default function AddWatchlistModal({
       setStreamProviders({ needPlan: [], rent: [], buy: [], free: [] });
       setNewProviderName('');
       setNewProviderUrl('');
+      setSeasonsCount(0);
+      setEpisodesCount(0);
+      setSeasons([]);
+      setFetchingSeasons(false);
       setSubmitting(false);
     }
   }, [isOpen]);
@@ -184,6 +199,9 @@ export default function AddWatchlistModal({
         setCast(Array.isArray(d.cast) ? d.cast : []);
         setImages(d.images || { posters: [], backdrops: [], logos: [], artworks: [] });
         setVideos(Array.isArray(d.videos) ? d.videos : []);
+        setSeasonsCount(d.seasonsCount || (Array.isArray(d.seasons) ? d.seasons.length : 0));
+        setEpisodesCount(d.episodesCount || 0);
+        setSeasons(Array.isArray(d.seasons) ? d.seasons : []);
 
         // Watch Providers
         if (d.watchProviders) {
@@ -210,6 +228,38 @@ export default function AddWatchlistModal({
       setPosterUrl(item.posterUrl || '');
     } finally {
       setFetchingDetails(false);
+    }
+  };
+
+  // Fetch / Refresh Seasons & Episodes
+  const handleFetchSeasons = async () => {
+    const tmdbId = selectedItem?.tmdbId || '';
+    const q = title.trim() || selectedItem?.title || searchQuery.trim();
+    if (!tmdbId && !q) {
+      alert('Please enter or select a web series title first.');
+      return;
+    }
+
+    setFetchingSeasons(true);
+    try {
+      const params = new URLSearchParams();
+      if (tmdbId) params.set('tmdbId', String(tmdbId));
+      if (q) params.set('q', q);
+
+      const res = await fetch(`/api/watchlist/seasons?${params.toString()}`);
+      const data = await res.json();
+      if (data.success) {
+        setSeasonsCount(data.seasonsCount || (Array.isArray(data.seasons) ? data.seasons.length : 0));
+        setEpisodesCount(data.episodesCount || 0);
+        setSeasons(Array.isArray(data.seasons) ? data.seasons : []);
+      } else {
+        alert(data.error || 'Failed to fetch seasons & episodes.');
+      }
+    } catch (err) {
+      console.error('[AddWatchlistModal] Error fetching seasons:', err);
+      alert('Error fetching seasons: ' + err.message);
+    } finally {
+      setFetchingSeasons(false);
     }
   };
 
@@ -302,6 +352,9 @@ export default function AddWatchlistModal({
         cast,
         images,
         videos,
+        seasonsCount: contentType === 'web-series' ? (seasonsCount || seasons.length || 0) : 0,
+        episodesCount: contentType === 'web-series' ? (episodesCount || seasons.reduce((acc, s) => acc + (s.episodes?.length || s.episodeCount || 0), 0)) : 0,
+        seasons: contentType === 'web-series' ? seasons : [],
         streamProviders,
         status: 'Plan to Watch', // Plan to Watch | Watching | Completed
         addedAt: new Date().toISOString(),
@@ -309,6 +362,22 @@ export default function AddWatchlistModal({
       };
 
       await onAddWatchlist(watchlistItem);
+
+      // Persist to localStore immediately
+      upsertLocalWatchlist(watchlistItem);
+
+      // Persist to Firestore
+      if (db) {
+        const uid = currentUser?.uid || getUserId();
+        if (uid) {
+          try {
+            await setDoc(doc(db, 'users', uid, 'watchlist', watchlistItem.id), watchlistItem, { merge: true });
+          } catch (dbErr) {
+            console.error('[AddWatchlistModal] Firestore save error:', dbErr);
+          }
+        }
+      }
+
       onClose();
     } catch (err) {
       console.error('[AddWatchlistModal] Submit error:', err);
@@ -435,20 +504,21 @@ export default function AddWatchlistModal({
                 <span className="text-[11px] text-gray-400 font-semibold block mb-2">
                   Select match below to auto-populate metadata:
                 </span>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-64 overflow-y-auto custom-scrollbar p-1">
+                <div className="flex flex-col gap-1.5 max-h-56 overflow-y-auto custom-scrollbar p-1">
                   {searchResults.map((item) => {
                     const isSelected = selectedItem?.id === item.id;
                     return (
                       <div
                         key={item.id}
                         onClick={() => handleSelectMedia(item)}
-                        className={`group relative rounded-2xl overflow-hidden border cursor-pointer transition-all flex flex-col bg-[#0e131f] ${
+                        className={`group flex items-center gap-3 p-2 rounded-xl border cursor-pointer transition-all ${
                           isSelected
-                            ? 'border-amber-500 ring-2 ring-amber-500/40 shadow-xl'
-                            : 'border-white/10 hover:border-white/30'
+                            ? 'bg-amber-500/15 border-amber-500 shadow-lg ring-1 ring-amber-500/30'
+                            : 'bg-[#0e131f] hover:bg-white/5 border-white/10 hover:border-white/20'
                         }`}
                       >
-                        <div className="aspect-[2/3] relative overflow-hidden bg-black/40">
+                        {/* Small Poster Thumbnail */}
+                        <div className="w-10 h-14 rounded-lg overflow-hidden shrink-0 bg-black/50 border border-white/10 relative">
                           {item.posterUrl ? (
                             <img
                               src={item.posterUrl}
@@ -456,27 +526,51 @@ export default function AddWatchlistModal({
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                             />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center text-gray-600">
-                              <Film size={28} />
-                            </div>
-                          )}
-                          <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/80 text-[8px] font-bold text-amber-300 border border-white/10">
-                            {item.source || 'Online'}
-                          </div>
-                          {item.rating > 0 && (
-                            <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/80 text-[8px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10">
-                              <Star size={9} className="fill-amber-400" />
-                              {item.rating}
+                            <div className="w-full h-full flex items-center justify-center text-gray-500">
+                              <Film size={16} />
                             </div>
                           )}
                         </div>
-                        <div className="p-2">
-                          <h4 className="text-xs font-bold text-white truncate" title={item.title}>
-                            {item.title}
-                          </h4>
-                          <p className="text-[10px] text-gray-400 truncate mt-0.5">
-                            {item.year || 'Unknown Year'}
-                          </p>
+
+                        {/* Title, Year, Source & Rating */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-bold text-white truncate group-hover:text-amber-300 transition-colors" title={item.title}>
+                              {item.title}
+                            </h4>
+                            {isSelected && (
+                              <span className="shrink-0 px-1.5 py-0.2 rounded bg-amber-500 text-black text-[9px] font-black uppercase tracking-wider">
+                                Selected
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-1">
+                            <span className="font-medium text-gray-300">{item.year || 'Unknown Year'}</span>
+                            <span>•</span>
+                            <span className="px-1.5 py-0.2 rounded bg-white/10 text-gray-300 font-mono text-[9px]">
+                              {item.source || 'Online'}
+                            </span>
+                            {item.rating > 0 && (
+                              <>
+                                <span>•</span>
+                                <span className="text-amber-400 flex items-center gap-0.5 font-bold">
+                                  <Star size={10} className="fill-amber-400" />
+                                  {item.rating}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Radio Checkmark */}
+                        <div className="shrink-0 pr-1">
+                          <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${
+                            isSelected
+                              ? 'bg-amber-500 border-amber-400 text-black'
+                              : 'border-white/20 group-hover:border-amber-400/50 text-transparent'
+                          }`}>
+                            <Check size={12} strokeWidth={3} className={isSelected ? 'text-black' : 'opacity-0'} />
+                          </div>
                         </div>
                       </div>
                     );
@@ -576,6 +670,54 @@ export default function AddWatchlistModal({
               />
             </div>
 
+            {/* Web-Series Seasons & Episodes Section */}
+            {contentType === 'web-series' && (
+              <div className="p-4 rounded-2xl bg-indigo-500/[0.07] border border-indigo-500/20 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Tv size={16} className="text-indigo-400" />
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                      Seasons & Episodes Breakdown
+                    </span>
+                    {seasons.length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-bold">
+                        {seasonsCount || seasons.length} Seasons · {episodesCount || 0} Episodes
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleFetchSeasons}
+                    disabled={fetchingSeasons}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 hover:text-white text-xs font-bold flex items-center gap-1.5 transition active:scale-95 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw size={12} className={fetchingSeasons ? "animate-spin" : ""} />
+                    <span>{fetchingSeasons ? "Fetching Details..." : (seasons.length > 0 ? "Refresh Seasons & Episodes" : "Fetch Seasons & Episode Details")}</span>
+                  </button>
+                </div>
+
+                {seasons.length > 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 pt-1 max-h-48 overflow-y-auto custom-scrollbar">
+                    {seasons.map((s, idx) => (
+                      <div
+                        key={s.id || idx}
+                        className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between"
+                      >
+                        <span className="text-xs font-bold text-white truncate">{s.name || `Season ${s.seasonNumber}`}</span>
+                        <span className="text-[11px] text-indigo-300 font-medium">
+                          {s.episodes?.length || s.episodeCount || 0} episodes
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-gray-400">
+                    Click "Fetch Seasons & Episode Details" to automatically query TMDB for all season numbers and episode breakdowns for this series.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Poster & Backdrop Picker / URL */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Poster */}
@@ -598,7 +740,7 @@ export default function AddWatchlistModal({
                 {/* Available Poster Thumbnails */}
                 {images.posters?.length > 1 && (
                   <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-1">
-                    {images.posters.slice(0, 8).map((p, idx) => (
+                    {images.posters.slice(0, 10).map((p, idx) => (
                       <button
                         key={idx}
                         type="button"
@@ -607,7 +749,7 @@ export default function AddWatchlistModal({
                           posterUrl === p.url ? 'border-amber-500 ring-2 ring-amber-500/50' : 'border-white/10 opacity-70 hover:opacity-100'
                         }`}
                       >
-                        <img src={p.url} alt="Option" className="w-full h-full object-cover" />
+                        <img src={p.previewUrl || p.url} alt="Option" className="w-full h-full object-cover" />
                       </button>
                     ))}
                   </div>
@@ -634,7 +776,7 @@ export default function AddWatchlistModal({
                 {/* Available Backdrop Thumbnails */}
                 {images.backdrops?.length > 1 && (
                   <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-1">
-                    {images.backdrops.slice(0, 6).map((b, idx) => (
+                    {images.backdrops.slice(0, 8).map((b, idx) => (
                       <button
                         key={idx}
                         type="button"
@@ -643,7 +785,7 @@ export default function AddWatchlistModal({
                           backdropUrl === b.url ? 'border-amber-500 ring-2 ring-amber-500/50' : 'border-white/10 opacity-70 hover:opacity-100'
                         }`}
                       >
-                        <img src={b.url} alt="Option" className="w-full h-full object-cover" />
+                        <img src={b.previewUrl || b.url} alt="Option" className="w-full h-full object-cover" />
                       </button>
                     ))}
                   </div>
@@ -687,7 +829,7 @@ export default function AddWatchlistModal({
                             logoUrl === l.url ? 'border-purple-500 ring-2 ring-purple-500/50' : 'border-white/10 opacity-70 hover:opacity-100'
                           }`}
                         >
-                          <img src={toFanartBigPreview(l.url)} alt="Logo" className="max-h-8 max-w-[100px] object-contain" />
+                          <img src={l.previewUrl || toFanartBigPreview(l.url)} alt="Logo" className="max-h-8 max-w-[100px] object-contain" />
                         </button>
                       ))}
                     </div>

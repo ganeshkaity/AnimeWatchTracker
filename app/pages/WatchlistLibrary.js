@@ -10,11 +10,11 @@ import {
   Eye, Check, Calendar, Tv, Loader2, HardDrive, Globe,
   CreditCard, DollarSign, Film, BookOpen, Headphones, Layers, BookMarked
 } from 'lucide-react';
-import { collection, getDocs, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, deleteDoc, updateDoc, onSnapshot, query, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import {
-  getLocalWatchlist, upsertLocalWatchlist, deleteLocalWatchlist,
+  getLocalWatchlist, setLocalWatchlist, upsertLocalWatchlist, deleteLocalWatchlist,
   getUserId
 } from '../utils/localStore';
 import AddWatchlistModal from '../components/AddWatchlistModal';
@@ -99,46 +99,53 @@ export default function WatchlistLibrary() {
   const [visibleCount, setVisibleCount] = useState(18);
   const loadMoreRef = useRef(null);
 
-  // Load from Firestore / localStore
+  // Load from Firestore / localStore with real-time sync
   useEffect(() => {
-    let isMounted = true;
-
-    async function loadWatchlist() {
-      const local = getLocalWatchlist();
-      if (local && local.length > 0 && isMounted) {
-        setWatchlist(local);
-        setLoading(false);
-      }
-
-      if (db) {
-        try {
-          const uid = currentUser?.uid || getUserId();
-          if (uid) {
-            const snap = await getDocs(collection(db, 'users', uid, 'watchlist'));
-            const list = [];
-            snap.forEach((d) => {
-              list.push({ id: d.id, userId: uid, ...d.data() });
-            });
-            if (isMounted) {
-              setWatchlist(list);
-              // Save to localStorage
-              if (typeof window !== 'undefined') {
-                localStorage.setItem('watchanime_watchlist', JSON.stringify(list));
-              }
-              setLoading(false);
-            }
-          }
-        } catch (err) {
-          console.warn('Firestore load watchlist error:', err);
-          if (isMounted) setLoading(false);
-        }
-      } else {
-        if (isMounted) setLoading(false);
-      }
+    const local = getLocalWatchlist() || [];
+    if (local.length > 0) {
+      setWatchlist(local);
+      setLoading(false);
     }
 
-    loadWatchlist();
-    return () => { isMounted = false; };
+    if (!db) {
+      setLoading(false);
+      return;
+    }
+
+    const uid = currentUser?.uid || getUserId();
+    if (!uid) {
+      setLoading(false);
+      return;
+    }
+
+    const watchlistRef = collection(db, 'users', uid, 'watchlist');
+    const unsubscribe = onSnapshot(query(watchlistRef), (snapshot) => {
+      const list = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, userId: uid, ...d.data() });
+      });
+      const localNow = getLocalWatchlist() || [];
+      if (list.length > 0) {
+        setWatchlist(list);
+        setLocalWatchlist(list);
+      } else if (localNow.length > 0) {
+        setWatchlist(localNow);
+        // Upload local items to Firestore so they are never lost on refresh
+        localNow.forEach((item) => {
+          setDoc(doc(db, 'users', uid, 'watchlist', item.id), item, { merge: true }).catch(console.warn);
+        });
+      } else {
+        setWatchlist([]);
+        setLocalWatchlist([]);
+      }
+      setLoading(false);
+    }, (err) => {
+      console.warn('Firestore load watchlist error:', err);
+      setWatchlist(getLocalWatchlist() || []);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, [currentUser]);
 
   // Add Item Handler
@@ -283,21 +290,12 @@ export default function WatchlistLibrary() {
               <ChevronLeft size={18} />
             </button>
             <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-gradient-to-tr from-amber-500/20 to-purple-600/20 border border-amber-500/30 text-amber-400">
-                <Bookmark size={20} />
-              </div>
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-base sm:text-lg font-black tracking-wide text-white">
-                    Watchlist Library
+                    Watchlist
                   </h1>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                    {watchlist.length}
-                  </span>
                 </div>
-                <p className="text-[11px] text-gray-400 hidden sm:block">
-                  Your tracked wishlist of movies, series, anime, manga, and audio stories
-                </p>
               </div>
             </div>
           </div>
@@ -310,7 +308,7 @@ export default function WatchlistLibrary() {
               className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 hover:from-amber-400 hover:to-purple-500 text-white font-black text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition"
             >
               <Plus size={16} />
-              <span>Add to Watchlist</span>
+              <span>Add</span>
             </button>
           </div>
         </div>
@@ -609,21 +607,7 @@ export default function WatchlistLibrary() {
                         className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-extrabold flex items-center gap-1.5 shadow-lg active:scale-95 transition"
                       >
                         <Eye size={13} />
-                        <span>View Details</span>
-                      </button>
-
-                      {/* Transfer to Library Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setTransferringItem(item);
-                        }}
-                        className="px-3 py-1 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center gap-1 transition"
-                        title="Link local PC file/folder and transfer to main library"
-                      >
-                        <HardDrive size={12} />
-                        <span>Transfer</span>
+                        <span>Details</span>
                       </button>
 
                       <div className="flex items-center gap-1.5 mt-1">

@@ -20,6 +20,13 @@ import AddMovieModal from '../components/AddMovieModal';
 import EditMovieModal from '../components/EditMovieModal';
 import CachedImage from '../utils/imageCache';
 
+const YoutubeLogo = ({ size = 16, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z" fill="#FF0000" />
+    <path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#FFFFFF" />
+  </svg>
+);
+
 const ALL_GENRES = [
   "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary",
   "Drama", "Family", "Fantasy", "History", "Horror", "Music", "Mystery",
@@ -618,9 +625,15 @@ export default function MoviesLibrary() {
                     </div>
 
                     <div className="absolute top-2 right-2">
-                      <span className="px-1.5 py-0.5 rounded-md bg-amber-500 text-black text-[9px] font-extrabold uppercase tracking-wider">
-                        TMDB
-                      </span>
+                      {Boolean(movie.isYouTube || movie.youtubeUrl || movie.youtubeId || movie.localFilePath?.includes('youtube')) ? (
+                        <div className="p-1 bg-black/60 rounded-lg shadow-lg border border-red-500/40 backdrop-blur-md flex items-center justify-center">
+                          <YoutubeLogo size={15} />
+                        </div>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded-md bg-amber-500 text-black text-[9px] font-extrabold uppercase tracking-wider">
+                          TMDB
+                        </span>
+                      )}
                     </div>
 
                     {/* Hover Play & Edit Overlay */}
