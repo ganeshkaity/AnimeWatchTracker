@@ -251,3 +251,16 @@ export function processScannedFiles(scanResult = [], rootPath = '', namingPatter
 
   return allProcessed;
 }
+
+/**
+ * Extract season number from file path or file name (e.g. S02, Season 2, etc.)
+ */
+export function extractSeasonNumber(filePath = '', fileName = '') {
+  const combined = `${filePath} ${fileName}`;
+  const match = combined.match(/(?:season|s)\s*(\d{1,2})/i);
+  if (match) {
+    const s = parseInt(match[1], 10);
+    if (!isNaN(s) && s > 0) return s;
+  }
+  return 1;
+}

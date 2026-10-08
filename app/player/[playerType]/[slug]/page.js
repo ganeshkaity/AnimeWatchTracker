@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../../../context/AuthContext';
-import { getLocalAnimes, getLocalEpisodes, getLocalMovie } from '../../../utils/localStore';
+import { getLocalAnimes, getLocalEpisodes, getLocalMovie, getLocalWebseriesItem, getLocalWebseriesEpisodes } from '../../../utils/localStore';
 import YoutubePlayerContainer from '../../../pages/YoutubePlayerContainer';
 import MediaServerPlayerContainer from '../../../pages/MediaServerPlayerContainer';
 import YtDlpPlayerContainer from '../../../pages/YtDlpPlayerContainer';
@@ -24,6 +24,7 @@ export default function PlayerPage() {
   const volumeParam = searchParams.get('volume');
   const qualityParam = searchParams.get('quality');
   const isMovieType = searchParams.get('type') === 'movie';
+  const isWebseriesType = searchParams.get('type') === 'webseries';
 
   const [episodes, setEpisodes] = useState([]);
   const [activeEpId, setActiveEpId] = useState(initialEpId);
@@ -74,6 +75,29 @@ export default function PlayerPage() {
           }
         }
 
+        // Check if webseries
+        let localSeries = getLocalWebseriesItem(animeId);
+        if (isWebseriesType || localSeries) {
+          let wsEps = getLocalWebseriesEpisodes(animeId) || [];
+          if (wsEps.length === 0 && currentUser?.uid && db) {
+            const snap = await getDocs(collection(db, 'users', currentUser.uid, 'webseries', animeId, 'episodes'));
+            const dbEps = [];
+            snap.forEach(d => dbEps.push({ id: d.id, ...d.data() }));
+            wsEps = dbEps;
+          }
+          if (wsEps.length > 0) {
+            if (qualityParam) {
+              wsEps = wsEps.map(e => ({ ...e, selectedQuality: qualityParam }));
+            }
+            setEpisodes(wsEps);
+            if (!activeEpId && wsEps.length > 0) {
+              setActiveEpId(wsEps[0].id);
+            }
+            setLoading(false);
+            return;
+          }
+        }
+
         let localEps = getLocalEpisodes(animeId) || [];
         if (localEps.length === 0 && currentUser?.uid && db) {
           const snap = await getDocs(collection(db, 'users', currentUser.uid, 'anime', animeId, 'episodes'));
@@ -99,11 +123,13 @@ export default function PlayerPage() {
     };
 
     loadEpisodes();
-  }, [animeId, currentUser, isMovieType]);
+  }, [animeId, currentUser, isMovieType, isWebseriesType]);
 
   const handleBack = () => {
     if (isMovieType || getLocalMovie(animeId)) {
       router.push(`/movies/${animeId}`);
+    } else if (isWebseriesType || getLocalWebseriesItem(animeId)) {
+      router.push(`/webseries/${animeId}`);
     } else {
       router.push(`/${animeId}`);
     }

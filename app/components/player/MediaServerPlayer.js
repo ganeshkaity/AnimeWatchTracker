@@ -13,7 +13,11 @@ import {
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
-import { upsertLocalAnime, getLocalEpisodes, setLocalEpisodes, getLocalAnime, getLocalMovie, upsertLocalMovie } from '../../utils/localStore';
+import {
+  upsertLocalAnime, getLocalEpisodes, setLocalEpisodes, getLocalAnime,
+  getLocalMovie, upsertLocalMovie,
+  getLocalWebseriesItem, getLocalWebseriesEpisodes, setLocalWebseriesEpisodes, upsertLocalWebseries
+} from '../../utils/localStore';
 
 // ── HTMLMediaElement Prototype Patch for Piped Remux Duration ────────────────
 let _protoPatched = false;
@@ -904,44 +908,89 @@ export default function MediaServerPlayer({
       )
     );
 
+    const isWebseries = Boolean(currentEp?.isWebseries || currentEp?.contentType === 'web-series' || getLocalWebseriesItem(animeId));
+
     // Update Local Storage
     try {
-      const storedEps = getLocalEpisodes(animeId) || [];
-      let found = false;
-      const updated = storedEps.map((e) => {
-        if (e.id === currentEpId) {
-          found = true;
-          return {
-            ...e,
-            lastPositionSeconds: roundTime,
-            durationSeconds: Math.floor(currentDuration) > 0 ? Math.floor(currentDuration) : e.durationSeconds,
-            isWatched: shouldMarkWatched,
-          };
-        }
-        return e;
-      });
+      if (isWebseries) {
+        const storedEps = getLocalWebseriesEpisodes(animeId) || [];
+        let found = false;
+        const updated = storedEps.map((e) => {
+          if (e.id === currentEpId) {
+            found = true;
+            return {
+              ...e,
+              lastPositionSeconds: roundTime,
+              durationSeconds: Math.floor(currentDuration) > 0 ? Math.floor(currentDuration) : e.durationSeconds,
+              isWatched: shouldMarkWatched,
+            };
+          }
+          return e;
+        });
 
-      if (!found && currentEp) {
-        updated.push({
-          ...currentEp,
-          lastPositionSeconds: roundTime,
-          durationSeconds: Math.floor(currentDuration),
-          isWatched: shouldMarkWatched,
+        if (!found && currentEp) {
+          updated.push({
+            ...currentEp,
+            lastPositionSeconds: roundTime,
+            durationSeconds: Math.floor(currentDuration),
+            isWatched: shouldMarkWatched,
+          });
+        }
+
+        setLocalWebseriesEpisodes(animeId, updated);
+
+        const totalEps = updated.length;
+        const watchedEps = updated.filter((e) => e.isWatched).length;
+        const wsProgress = totalEps > 0 ? Math.round((watchedEps / totalEps) * 100) : 0;
+
+        upsertLocalWebseries({
+          id: animeId,
+          lastWatchedEpisode: currentEp?.episodeNumber ? `EP-${currentEp.episodeNumber}` : '',
+          lastOpenedAt: new Date().toISOString(),
+          lastWatchedAt: new Date().toISOString(),
+          progressPercent: wsProgress,
+          watched: wsProgress >= 100,
+          isWatched: wsProgress >= 100,
+          watchStatus: wsProgress >= 100 ? 'Completed' : 'Watching',
+        });
+      } else {
+        const storedEps = getLocalEpisodes(animeId) || [];
+        let found = false;
+        const updated = storedEps.map((e) => {
+          if (e.id === currentEpId) {
+            found = true;
+            return {
+              ...e,
+              lastPositionSeconds: roundTime,
+              durationSeconds: Math.floor(currentDuration) > 0 ? Math.floor(currentDuration) : e.durationSeconds,
+              isWatched: shouldMarkWatched,
+            };
+          }
+          return e;
+        });
+
+        if (!found && currentEp) {
+          updated.push({
+            ...currentEp,
+            lastPositionSeconds: roundTime,
+            durationSeconds: Math.floor(currentDuration),
+            isWatched: shouldMarkWatched,
+          });
+        }
+
+        setLocalEpisodes(animeId, updated);
+
+        const totalAnimeEps = updated.length;
+        const watchedAnimeEps = updated.filter((e) => e.isWatched).length;
+        const animeProgressPercent = totalAnimeEps > 0 ? Math.round((watchedAnimeEps / totalAnimeEps) * 100) : 0;
+
+        upsertLocalAnime({
+          id: animeId,
+          lastWatchedEpisode: currentEp?.episodeNumber ? `EP-${currentEp.episodeNumber}` : '',
+          lastOpenedAt: new Date().toISOString(),
+          progressPercent: animeProgressPercent,
         });
       }
-
-      setLocalEpisodes(animeId, updated);
-
-      const totalAnimeEps = updated.length;
-      const watchedAnimeEps = updated.filter((e) => e.isWatched).length;
-      const animeProgressPercent = totalAnimeEps > 0 ? Math.round((watchedAnimeEps / totalAnimeEps) * 100) : 0;
-
-      upsertLocalAnime({
-        id: animeId,
-        lastWatchedEpisode: currentEp?.episodeNumber ? `EP-${currentEp.episodeNumber}` : '',
-        lastOpenedAt: new Date().toISOString(),
-        progressPercent: animeProgressPercent,
-      });
     } catch (e) {
       console.warn('[MediaServerPlayer] LocalStore sync error:', e);
     }
@@ -949,26 +998,53 @@ export default function MediaServerPlayer({
     // Remote Firestore sync
     if (currentUser && db) {
       try {
-        const epRef = doc(db, 'users', currentUser.uid, 'anime', animeId, 'episodes', currentEpId);
-        updateDoc(epRef, {
-          watchedSeconds: roundTime,
-          durationSeconds: Math.floor(currentDuration),
-          lastPositionSeconds: roundTime,
-          isWatched: shouldMarkWatched,
-          updatedAt: new Date().toISOString(),
-        }).catch(() => {});
+        if (isWebseries) {
+          const epRef = doc(db, 'users', currentUser.uid, 'webseries', animeId, 'episodes', currentEpId);
+          updateDoc(epRef, {
+            watchedSeconds: roundTime,
+            durationSeconds: Math.floor(currentDuration),
+            lastPositionSeconds: roundTime,
+            isWatched: shouldMarkWatched,
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {});
 
-        const animeRef = doc(db, 'users', currentUser.uid, 'anime', animeId);
-        const storedEps = getLocalEpisodes(animeId) || [];
-        const totalAnimeEps = storedEps.length;
-        const watchedAnimeEps = storedEps.filter((e) => e.isWatched).length;
-        const animeProgressPercent = totalAnimeEps > 0 ? Math.round((watchedAnimeEps / totalAnimeEps) * 100) : 0;
-        updateDoc(animeRef, {
-          progressPercent: animeProgressPercent,
-          lastWatchedEpisode: currentEp?.episodeNumber ? `EP-${currentEp.episodeNumber}` : '',
-          lastOpenedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }).catch(() => {});
+          const wsRef = doc(db, 'users', currentUser.uid, 'webseries', animeId);
+          const storedEps = getLocalWebseriesEpisodes(animeId) || [];
+          const totalEps = storedEps.length;
+          const watchedEps = storedEps.filter((e) => e.isWatched).length;
+          const wsProgress = totalEps > 0 ? Math.round((watchedEps / totalEps) * 100) : 0;
+          updateDoc(wsRef, {
+            progressPercent: wsProgress,
+            watched: wsProgress >= 100,
+            isWatched: wsProgress >= 100,
+            watchStatus: wsProgress >= 100 ? 'Completed' : 'Watching',
+            lastWatchedEpisode: currentEp?.episodeNumber ? `EP-${currentEp.episodeNumber}` : '',
+            lastOpenedAt: new Date().toISOString(),
+            lastWatchedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {});
+        } else {
+          const epRef = doc(db, 'users', currentUser.uid, 'anime', animeId, 'episodes', currentEpId);
+          updateDoc(epRef, {
+            watchedSeconds: roundTime,
+            durationSeconds: Math.floor(currentDuration),
+            lastPositionSeconds: roundTime,
+            isWatched: shouldMarkWatched,
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {});
+
+          const animeRef = doc(db, 'users', currentUser.uid, 'anime', animeId);
+          const storedEps = getLocalEpisodes(animeId) || [];
+          const totalAnimeEps = storedEps.length;
+          const watchedAnimeEps = storedEps.filter((e) => e.isWatched).length;
+          const animeProgressPercent = totalAnimeEps > 0 ? Math.round((watchedAnimeEps / totalAnimeEps) * 100) : 0;
+          updateDoc(animeRef, {
+            progressPercent: animeProgressPercent,
+            lastWatchedEpisode: currentEp?.episodeNumber ? `EP-${currentEp.episodeNumber}` : '',
+            lastOpenedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {});
+        }
       } catch (err) {
         console.warn('[MediaServerPlayer] Firestore sync error:', err);
       }

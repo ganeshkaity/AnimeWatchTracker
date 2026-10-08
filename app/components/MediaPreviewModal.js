@@ -295,6 +295,8 @@ export default function MediaPreviewModal({
   const ratingText = item.rating ? `★ ${parseFloat(item.rating).toFixed(1)}` : null;
   const runtimeStr = item.runtime
     ? `${Math.floor(item.runtime / 60)}h ${item.runtime % 60}m`
+    : item.episodeCount
+    ? `${item.episodeCount} Episodes`
     : item.duration
     ? `${Math.round(item.duration / 60)}m`
     : item.contentType || null;
@@ -305,6 +307,8 @@ export default function MediaPreviewModal({
     ? item.genres.split(',').slice(0, 2).join(' • ')
     : type === 'movie'
     ? 'Movie'
+    : type === 'webseries'
+    ? 'Web-series'
     : 'Watchlist';
 
   // Full language name resolution (e.g., "hi" -> "Hindi")

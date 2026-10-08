@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, Server, HardDrive, Film } from 'lucide-react';
 import MediaServerPlayer from '../components/player/MediaServerPlayer';
-import { getLocalAnime, getLocalEpisodes, getLocalMovie } from '../utils/localStore';
+import { getLocalAnime, getLocalEpisodes, getLocalMovie, getLocalWebseriesItem, getLocalWebseriesEpisodes } from '../utils/localStore';
 
 export default function MediaServerPlayerContainer({
   animeId,
@@ -27,12 +27,19 @@ export default function MediaServerPlayerContainer({
         setAnimeDetails(local);
       } else {
         const localMovie = getLocalMovie(animeId);
-        if (localMovie) setAnimeDetails(localMovie);
+        if (localMovie) {
+          setAnimeDetails(localMovie);
+        } else {
+          const localWs = getLocalWebseriesItem(animeId);
+          if (localWs) setAnimeDetails(localWs);
+        }
       }
     }
   }, [animeId]);
 
-  const storedEps = (typeof window !== 'undefined' && animeId) ? getLocalEpisodes(animeId) : [];
+  const storedEps = (typeof window !== 'undefined' && animeId) 
+    ? (getLocalEpisodes(animeId)?.length ? getLocalEpisodes(animeId) : (getLocalWebseriesEpisodes(animeId) || []))
+    : [];
   const mergedEpisodes = (episodes && episodes.length > 0)
     ? episodes.map(ep => {
         const s = storedEps?.find(x => x.id === ep.id);

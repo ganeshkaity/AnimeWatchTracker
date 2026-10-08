@@ -19,6 +19,8 @@ const KEYS = {
   AUDIO_STORIES: 'watchanime_audio_stories',
   AUDIO_TRACKS: (storyId) => `watchanime_audio_tracks_${storyId}`,
   MOVIES: 'watchanime_movies',
+  WEBSERIES: 'watchanime_webseries',
+  WEBSERIES_EPISODES: (seriesId) => `watchanime_webseries_episodes_${seriesId}`,
   WATCHLIST: 'watchanime_watchlist',
   NOTES: 'watchanime_notes',
   DIRTY_QUEUE: 'watchanime_dirty_queue',
@@ -303,6 +305,66 @@ export function upsertLocalMovie(movie) {
 export function deleteLocalMovie(movieId) {
   const movies = getLocalMovies().filter(m => m.id !== movieId && String(m.tmdbId) !== String(movieId));
   setLocalMovies(movies);
+}
+
+// ─── Webseries Library ────────────────────────────────────────────────────────
+
+export function getLocalWebseries() {
+  return read(KEYS.WEBSERIES) || [];
+}
+
+export function setLocalWebseries(seriesList) {
+  write(KEYS.WEBSERIES, seriesList);
+}
+
+export function getLocalWebseriesItem(seriesId) {
+  const list = getLocalWebseries();
+  return list.find(s => s.id === seriesId || String(s.tmdbId) === String(seriesId)) || null;
+}
+
+export function upsertLocalWebseries(series) {
+  const list = getLocalWebseries();
+  const idx = list.findIndex(s => s.id === series.id || (series.tmdbId && s.tmdbId === series.tmdbId));
+  if (idx >= 0) {
+    list[idx] = { ...list[idx], ...series };
+  } else {
+    list.unshift(series);
+  }
+  setLocalWebseries(list);
+}
+
+export function deleteLocalWebseries(seriesId) {
+  const list = getLocalWebseries().filter(s => s.id !== seriesId && String(s.tmdbId) !== String(seriesId));
+  setLocalWebseries(list);
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(KEYS.WEBSERIES_EPISODES(seriesId));
+  }
+}
+
+// ─── Webseries Episodes ───────────────────────────────────────────────────────
+
+export function getLocalWebseriesEpisodes(seriesId) {
+  return read(KEYS.WEBSERIES_EPISODES(seriesId)) || [];
+}
+
+export function setLocalWebseriesEpisodes(seriesId, episodes) {
+  write(KEYS.WEBSERIES_EPISODES(seriesId), episodes);
+}
+
+export function upsertLocalWebseriesEpisode(seriesId, episode) {
+  const episodes = getLocalWebseriesEpisodes(seriesId);
+  const idx = episodes.findIndex(e => e.id === episode.id);
+  if (idx >= 0) {
+    episodes[idx] = { ...episodes[idx], ...episode };
+  } else {
+    episodes.push(episode);
+  }
+  setLocalWebseriesEpisodes(seriesId, episodes);
+}
+
+export function deleteLocalWebseriesEpisode(seriesId, episodeId) {
+  const episodes = getLocalWebseriesEpisodes(seriesId).filter(e => e.id !== episodeId);
+  setLocalWebseriesEpisodes(seriesId, episodes);
 }
 
 // ─── Watchlist Library ────────────────────────────────────────────────────────
