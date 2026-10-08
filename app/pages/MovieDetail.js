@@ -82,9 +82,8 @@ function GalleryImageCard({
   return (
     <div
       onClick={onClick}
-      className={`relative overflow-hidden rounded-2xl bg-[#0e131f] border border-white/10 group cursor-pointer transition-all duration-300 hover:border-amber-500/50 hover:shadow-xl hover:shadow-black/70 ${
-        isPoster ? 'aspect-[2/3]' : isLogo ? 'aspect-[16/9] p-3 flex items-center justify-center bg-black/40' : 'aspect-[16/9]'
-      }`}
+      className={`relative overflow-hidden rounded-2xl bg-[#0e131f] border border-white/10 group cursor-pointer transition-all duration-300 hover:border-amber-500/50 hover:shadow-xl hover:shadow-black/70 ${isPoster ? 'aspect-[2/3]' : isLogo ? 'aspect-[16/9] p-3 flex items-center justify-center bg-black/40' : 'aspect-[16/9]'
+        }`}
     >
       {!loaded && (
         <div className="absolute inset-0 bg-white/[0.04] animate-pulse flex items-center justify-center">
@@ -96,9 +95,8 @@ function GalleryImageCard({
         alt={title}
         loading="lazy"
         onLoad={() => setLoaded(true)}
-        className={`w-full h-full ${isLogo ? 'object-contain' : 'object-cover'} group-hover:scale-105 transition-all duration-500 ${
-          loaded ? 'opacity-100' : 'opacity-0'
-        }`}
+        className={`w-full h-full ${isLogo ? 'object-contain' : 'object-cover'} group-hover:scale-105 transition-all duration-500 ${loaded ? 'opacity-100' : 'opacity-0'
+          }`}
       />
 
       {/* Active Badges */}
@@ -912,8 +910,8 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
             type="button"
             onClick={handleToggleCompleted}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border backdrop-blur-md transition cursor-pointer shadow-lg ${isCompleted
-                ? 'bg-emerald-500/25 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/35 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
-                : 'bg-black/40 border-white/15 text-gray-300 hover:text-white hover:bg-black/60'
+              ? 'bg-emerald-500/25 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/35 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
+              : 'bg-black/40 border-white/15 text-gray-300 hover:text-white hover:bg-black/60'
               }`}
           >
             <CheckCircle2 size={14} className={isCompleted ? 'text-emerald-400' : ''} />
@@ -982,30 +980,30 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
             <div>
               {/* Badges / Chips Row */}
               <div className="flex flex-wrap items-center gap-2 mb-2">
-                <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-bold uppercase tracking-wider">
-                  Movie
+                <span className="px-2.5 py-0.5 text-amber-300 text-[10px] font-bold uppercase tracking-wider">
+                  | Movie
                 </span>
                 {movie.rating && (
-                  <span className="px-2.5 py-0.5 rounded-lg bg-black/60 border border-white/15 text-amber-300 text-[10px] font-bold flex items-center gap-1 sm:hidden">
+                  <span className="px-2.5 py-0.5 text-amber-300 text-[10px] font-bold flex items-center gap-1 sm:hidden">
                     <Star size={11} className="fill-amber-400 text-amber-400" />
-                    {movie.rating}
+                   | {movie.rating}
                   </span>
                 )}
                 {movie.year && (
-                  <span className="px-2.5 py-0.5 rounded-lg bg-white/10 border border-white/10 text-gray-300 text-[10px] font-mono font-bold flex items-center gap-1">
+                  <span className="px-2.5 py-0.5 text-gray-300 text-[10px] font-mono font-bold flex items-center gap-1">
                     <Calendar size={11} className="text-gray-400" />
-                    {movie.year}
+                   | {movie.year}
                   </span>
                 )}
                 {runtimeFormatted && (
-                  <span className="px-2.5 py-0.5 rounded-lg bg-white/10 border border-white/10 text-gray-300 text-[10px] font-mono font-bold flex items-center gap-1">
+                  <span className="px-2.5 py-0.5 text-gray-300 text-[10px] font-mono font-bold flex items-center gap-1 uppercase">
                     <Clock size={11} className="text-gray-400" />
-                    {runtimeFormatted}
+                    | {runtimeFormatted}
                   </span>
                 )}
                 {movie.language && (
-                  <span className="px-2.5 py-0.5 rounded-lg bg-white/10 border border-white/10 text-gray-300 text-[10px] uppercase font-bold">
-                    {movie.language}
+                  <span className="px-2.5 py-0.5 text-gray-300 text-[10px] uppercase font-bold">
+                    | {movie.language}
                   </span>
                 )}
               </div>
@@ -1022,7 +1020,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
               )}
 
               {/* Main Movie Title */}
-              <h1 className={`${movieLogo ? 'text-lg sm:text-xs md:text-sm' : 'text-xl sm:text-2xl md:text-3xl'} font-bold text-white tracking-tight drop-shadow-md`}>
+              <h1 className={`${movieLogo ? 'text-lg sm:text-md md:text-sm' : 'text-xl sm:text-2xl md:text-3xl'} font-bold text-white tracking-tight drop-shadow-md`}>
                 {movie.title}
               </h1>
 
@@ -1033,6 +1031,19 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                 </p>
               )}
             </div>
+            {/* Genres */}
+            {Array.isArray(movie.genres) && movie.genres.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {movie.genres.map((g) => (
+                  <span
+                    key={g}
+                    className="px-3 py-0.5 text-gray-300 text-xs font-semibold"
+                  >
+                    | {g}
+                  </span>
+                ))}
+              </div>
+            )}
 
             {/* ── Player Action Buttons Area ────────────────────────────── */}
             <div className="space-y-3 pt-1">
@@ -1078,49 +1089,6 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                 )}
               </div>
 
-              {/* Direct Player Selection Quick Pills */}
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <span className="text-[11px] text-gray-400 font-semibold flex items-center gap-1 mr-1">
-                  <Tv size={12} className="text-gray-400" /> Play with:
-                </span>
-
-                {isYouTubeMovie ? (
-                  <button
-                    type="button"
-                    onClick={() => router.push(`/player/youtube/${encodeURIComponent(movie.id)}?type=movie`)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-300 hover:text-white text-xs font-bold transition cursor-pointer hover:shadow-[0_0_15px_rgba(239,68,68,0.25)]"
-                    title="Stream in YouTube Embed Player"
-                  >
-                    <Youtube size={14} className="text-red-400" />
-                    <span>YouTube Player</span>
-                  </button>
-                ) : (
-                  <>
-                    {/* Option 1: Media Server Player (Browser) */}
-                    <button
-                      type="button"
-                      onClick={playInMediaServer}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold transition cursor-pointer hover:shadow-[0_0_15px_rgba(168,85,247,0.25)]"
-                      title="Stream in Web Browser via Windows Media Server"
-                    >
-                      <Server size={14} className="text-purple-400" />
-                      <span>M.S Player</span>
-                    </button>
-
-                    {/* Option 2: PC's VLC Player */}
-                    <button
-                      type="button"
-                      onClick={playInVlc}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 hover:text-white text-xs font-bold transition cursor-pointer hover:shadow-[0_0_15px_rgba(249,115,22,0.25)]"
-                      title="Launch directly in PC's desktop VLC Player"
-                    >
-                      <VLCIcon className="w-4 h-4" />
-                      <span>VLC</span>
-                    </button>
-                  </>
-                )}
-              </div>
-
               {/* Active VLC Status Banner if currently playing */}
               {activeVlcPlayback && (
                 <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-orange-500/10 border border-orange-500/30 text-orange-200 text-xs shadow-lg animate-in fade-in duration-300">
@@ -1146,20 +1114,6 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                 </div>
               )}
             </div>
-
-            {/* Genres */}
-            {Array.isArray(movie.genres) && movie.genres.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {movie.genres.map((g) => (
-                  <span
-                    key={g}
-                    className="px-3 py-0.5 rounded-full bg-white/5 border border-white/10 text-gray-300 text-xs font-semibold"
-                  >
-                    {g}
-                  </span>
-                ))}
-              </div>
-            )}
             {/* Watch Status & Progress Bar */}
             <div className="p-3 sm:p-3.5 rounded-2xl bg-white/[0.04] border border-white/10 space-y-2 backdrop-blur-sm">
               <div className="flex justify-between items-center text-xs">
@@ -1179,8 +1133,8 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
               <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
                 <div
                   className={`h-full rounded-full transition-all duration-300 ${isCompleted
-                      ? 'bg-emerald-500'
-                      : 'bg-gradient-to-r from-amber-500 to-rose-500'
+                    ? 'bg-emerald-500'
+                    : 'bg-gradient-to-r from-amber-500 to-rose-500'
                     }`}
                   style={{ width: `${isCompleted ? 100 : progressPct}%` }}
                 />
@@ -1382,8 +1336,8 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                     type="button"
                     onClick={() => setImageTab(tab.id)}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${imageTab === tab.id
-                        ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20'
-                        : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10'
+                      ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20'
+                      : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10'
                       }`}
                   >
                     <span>{tab.label}</span>
@@ -1831,9 +1785,8 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                 <img
                   src={artworkTargetImage.url}
                   alt="Artwork Preview"
-                  className={`max-h-48 rounded-xl object-contain ${
-                    artworkTargetImage.isPoster ? 'aspect-[2/3] max-w-[130px]' : artworkTargetImage.isLogo ? 'max-w-[200px] py-2' : 'w-full aspect-[16/9] object-cover'
-                  }`}
+                  className={`max-h-48 rounded-xl object-contain ${artworkTargetImage.isPoster ? 'aspect-[2/3] max-w-[130px]' : artworkTargetImage.isLogo ? 'max-w-[200px] py-2' : 'w-full aspect-[16/9] object-cover'
+                    }`}
                 />
                 {artworkTargetImage.width && (
                   <span className="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded-md bg-black/80 border border-white/15 text-[10px] font-mono text-gray-300">
@@ -1849,11 +1802,10 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                     type="button"
                     disabled={artworkSaving || movie.backdropUrl === artworkTargetImage.url}
                     onClick={() => handleSetBackdrop(artworkTargetImage.url)}
-                    className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-lg ${
-                      movie.backdropUrl === artworkTargetImage.url
+                    className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-lg ${movie.backdropUrl === artworkTargetImage.url
                         ? 'bg-amber-500/15 border border-amber-500/30 text-amber-300 cursor-default'
                         : 'bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-black active:scale-98'
-                    }`}
+                      }`}
                   >
                     {artworkSaving ? (
                       <Loader2 size={15} className="animate-spin text-black" />
@@ -1874,11 +1826,10 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                     type="button"
                     disabled={artworkSaving || movie.posterUrl === artworkTargetImage.url}
                     onClick={() => handleSetPoster(artworkTargetImage.url)}
-                    className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-lg ${
-                      movie.posterUrl === artworkTargetImage.url
+                    className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-lg ${movie.posterUrl === artworkTargetImage.url
                         ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 cursor-default'
                         : 'bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-black active:scale-98'
-                    }`}
+                      }`}
                   >
                     {artworkSaving ? (
                       <Loader2 size={15} className="animate-spin text-black" />
@@ -1899,11 +1850,10 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                     type="button"
                     disabled={artworkSaving || movie.logoUrl === artworkTargetImage.url}
                     onClick={() => handleSetLogo(artworkTargetImage.url)}
-                    className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-lg ${
-                      movie.logoUrl === artworkTargetImage.url
+                    className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-lg ${movie.logoUrl === artworkTargetImage.url
                         ? 'bg-purple-500/15 border border-purple-500/30 text-purple-300 cursor-default'
                         : 'bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 hover:to-indigo-500 text-white active:scale-98'
-                    }`}
+                      }`}
                   >
                     {artworkSaving ? (
                       <Loader2 size={15} className="animate-spin text-white" />
@@ -2039,17 +1989,15 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                     setShowMobileActionModal(false);
                     handleToggleCompleted();
                   }}
-                  className={`w-full flex items-center gap-3.5 p-3 rounded-2xl border text-left transition cursor-pointer group active:scale-[0.98] ${
-                    isCompleted
+                  className={`w-full flex items-center gap-3.5 p-3 rounded-2xl border text-left transition cursor-pointer group active:scale-[0.98] ${isCompleted
                       ? 'bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20'
                       : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/10'
-                  }`}
+                    }`}
                 >
-                  <div className={`p-2.5 rounded-xl border transition ${
-                    isCompleted
+                  <div className={`p-2.5 rounded-xl border transition ${isCompleted
                       ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
                       : 'bg-white/10 border-white/15 text-gray-300 group-hover:text-emerald-400'
-                  }`}>
+                    }`}>
                     <CheckCircle2 size={18} />
                   </div>
                   <div className="flex-1 min-w-0">

@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Film, X, HardDrive, ImagePlus, CheckCircle2,
   AlertTriangle, Loader2, Image as ImageIcon, Sparkles,
-  Trash2, Search, Check, Youtube
+  Trash2, Search, Check, Youtube, Play, Video
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -49,6 +49,11 @@ export default function EditMovieModal({
   const [availableLogos, setAvailableLogos] = useState([]);
   const [fetchingLogos, setFetchingLogos] = useState(false);
   const [logoFetchMsg, setLogoFetchMsg] = useState('');
+  const [availableVideos, setAvailableVideos] = useState([]);
+  const [fetchingVideos, setFetchingVideos] = useState(false);
+  const [videoFetchMsg, setVideoFetchMsg] = useState('');
+  const [selectedVideoKey, setSelectedVideoKey] = useState('');
+  const [customYoutubeInput, setCustomYoutubeInput] = useState('');
   const [watchStatus, setWatchStatus] = useState('Not Started');
   const [genres, setGenres] = useState([]);
   const [verifyingFile, setVerifyingFile] = useState(false);
@@ -72,6 +77,12 @@ export default function EditMovieModal({
       setGenres(Array.isArray(movie.genres) ? movie.genres : []);
       setAvailableLogos(Array.isArray(movie?.images?.logos) ? movie.images.logos : []);
       setLogoFetchMsg('');
+      const initVideos = Array.isArray(movie?.videos) ? movie.videos : [];
+      setAvailableVideos(initVideos);
+      const curYtKey = extractYoutubeId(movie.youtubeId || movie.youtubeUrl || movie.trailerKey || movie.trailerUrl || (movie.isYouTube ? movie.localFilePath : ''));
+      setSelectedVideoKey(curYtKey || '');
+      setCustomYoutubeInput(curYtKey ? `https://www.youtube.com/watch?v=${curYtKey}` : (movie.youtubeUrl || movie.trailerUrl || ''));
+      setVideoFetchMsg('');
     }
   }, [movie]);
 
@@ -155,6 +166,67 @@ export default function EditMovieModal({
     }
   };
 
+  const handleFetchVideosFromTmdb = async () => {
+    setFetchingVideos(true);
+    setVideoFetchMsg('');
+    try {
+      let tmdbId = movie.tmdbId;
+      if (!tmdbId && title.trim()) {
+        const searchRes = await fetch(`/api/movies/search?query=${encodeURIComponent(title.trim())}`);
+        const searchData = await searchRes.json();
+        if (searchData.success && Array.isArray(searchData.movies) && searchData.movies.length > 0) {
+          tmdbId = searchData.movies[0].id;
+        }
+      }
+      if (!tmdbId) {
+        setVideoFetchMsg('No matching TMDB movie found.');
+        return;
+      }
+      const detRes = await fetch(`/api/movies/details?id=${encodeURIComponent(tmdbId)}`);
+      const detData = await detRes.json();
+      if (detData.success && Array.isArray(detData.movie?.videos) && detData.movie.videos.length > 0) {
+        setAvailableVideos(detData.movie.videos);
+        setVideoFetchMsg(`Found ${detData.movie.videos.length} YouTube video${detData.movie.videos.length > 1 ? 's' : ''} from TMDB!`);
+        if (!selectedVideoKey) {
+          const topVid = detData.movie.videos.find(v => (v.type || '').toLowerCase() === 'teaser') || detData.movie.videos.find(v => (v.type || '').toLowerCase() === 'trailer') || detData.movie.videos[0];
+          if (topVid?.key) {
+            setSelectedVideoKey(topVid.key);
+            setCustomYoutubeInput(`https://www.youtube.com/watch?v=${topVid.key}`);
+          }
+        }
+      } else {
+        setVideoFetchMsg('No YouTube videos found on TMDB for this movie.');
+      }
+    } catch (err) {
+      console.error('Failed to fetch videos from TMDB:', err);
+      setVideoFetchMsg('Error connecting to TMDB service.');
+    } finally {
+      setFetchingVideos(false);
+    }
+  };
+
+  const handleSelectVideo = (vid) => {
+    const key = extractYoutubeId(vid.key || vid.url || vid.id);
+    if (key) {
+      if (selectedVideoKey === key) {
+        setSelectedVideoKey('');
+        setCustomYoutubeInput('');
+      } else {
+        setSelectedVideoKey(key);
+        setCustomYoutubeInput(`https://www.youtube.com/watch?v=${key}`);
+        if (isYouTube && !filePath) {
+          setFilePath(`https://www.youtube.com/watch?v=${key}`);
+        }
+      }
+    }
+  };
+
+  const handleCustomYoutubeChange = (val) => {
+    setCustomYoutubeInput(val);
+    const key = extractYoutubeId(val);
+    setSelectedVideoKey(key || '');
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -167,13 +239,40 @@ export default function EditMovieModal({
       const cleanPath = filePath.trim();
       const ytId = isYouTube ? extractYoutubeId(cleanPath) : '';
 
+      const chosenKey = selectedVideoKey || extractYoutubeId(customYoutubeInput);
+      const chosenUrl = chosenKey ? `https://www.youtube.com/watch?v=${chosenKey}` : (customYoutubeInput.trim() || '');
+
+      let updatedVideos = [...availableVideos];
+      if (chosenKey) {
+        const existingIdx = updatedVideos.findIndex(v => (v.key === chosenKey || v.id === chosenKey));
+        if (existingIdx >= 0) {
+          const [matched] = updatedVideos.splice(existingIdx, 1);
+          updatedVideos = [matched, ...updatedVideos];
+        } else {
+          updatedVideos = [
+            {
+              id: `custom-${chosenKey}`,
+              name: `${title.trim()} Selected Video`,
+              key: chosenKey,
+              site: 'YouTube',
+              type: 'Trailer',
+              official: true,
+            },
+            ...updatedVideos
+          ];
+        }
+      }
+
       const updated = {
         ...movie,
         title: title.trim(),
         originalTitle: originalTitle.trim(),
         isYouTube: Boolean(isYouTube),
-        youtubeUrl: isYouTube ? cleanPath : '',
-        youtubeId: isYouTube ? (ytId || cleanPath) : '',
+        youtubeUrl: isYouTube ? cleanPath : (chosenUrl || movie.youtubeUrl || ''),
+        youtubeId: isYouTube ? (ytId || cleanPath) : (chosenKey || movie.youtubeId || ''),
+        trailerUrl: chosenUrl || movie.trailerUrl || '',
+        trailerKey: chosenKey || movie.trailerKey || '',
+        videos: updatedVideos,
         localFilePath: cleanPath,
         localFileName: isYouTube ? `YouTube: ${title.trim()}` : (fileName || cleanPath.split(/[\\/]/).pop() || movie.localFileName),
         year: year.trim(),
@@ -302,6 +401,129 @@ export default function EditMovieModal({
                   </button>
                 )}
               </div>
+            </div>
+
+            {/* Playable Video / YouTube Teaser & Trailer Picker */}
+            <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-xs uppercase tracking-wider text-gray-300 font-bold flex items-center gap-1.5">
+                  <Youtube size={15} className="text-red-500" />
+                  <span>Playable Video / Teaser Trailer (YouTube)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleFetchVideosFromTmdb}
+                  disabled={fetchingVideos}
+                  className="text-[11px] px-2.5 py-1 rounded-lg bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-300 hover:text-white font-bold flex items-center gap-1 transition cursor-pointer disabled:opacity-50"
+                  title="Fetch trailers and teasers from TMDB"
+                >
+                  {fetchingVideos ? (
+                    <Loader2 size={12} className="animate-spin text-red-400" />
+                  ) : (
+                    <Sparkles size={12} className="text-red-400" />
+                  )}
+                  <span>{fetchingVideos ? 'Fetching...' : 'Fetch Videos (TMDB)'}</span>
+                </button>
+              </div>
+
+              <p className="text-[11px] text-gray-400 leading-relaxed">
+                Select a fetched YouTube teaser/trailer below or paste any YouTube video link to play in the preview modal and player.
+              </p>
+
+              {videoFetchMsg && (
+                <div className="text-[11px] p-2.5 rounded-xl bg-red-500/10 border border-red-500/25 text-red-300 flex items-center justify-between gap-2">
+                  <span>{videoFetchMsg}</span>
+                  <button
+                    type="button"
+                    onClick={() => setVideoFetchMsg('')}
+                    className="text-gray-400 hover:text-white text-xs cursor-pointer"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
+
+              {/* Custom YouTube Link Input */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Paste any YouTube video link (e.g. https://www.youtube.com/watch?v=... or ID)"
+                  className="flex-1 px-3 py-2 rounded-xl glass-input text-xs text-white"
+                  value={customYoutubeInput}
+                  onChange={(e) => handleCustomYoutubeChange(e.target.value)}
+                />
+                {selectedVideoKey && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedVideoKey('');
+                      setCustomYoutubeInput('');
+                    }}
+                    className="px-2.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white text-xs font-bold transition cursor-pointer"
+                    title="Clear selected video"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {/* Fetched Videos List */}
+              {availableVideos.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    <span>Available TMDB Videos ({availableVideos.length})</span>
+                    <span className="text-gray-500 font-normal">Click to set as playable video</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1.5 rounded-xl bg-black/40 border border-white/5 custom-scrollbar">
+                    {availableVideos.map((vid, idx) => {
+                      const vKey = extractYoutubeId(vid.key || vid.url || vid.id);
+                      const isSelected = selectedVideoKey === vKey;
+                      const isTeaser = (vid.type || '').toLowerCase() === 'teaser';
+                      return (
+                        <div
+                          key={vid.id || `vid-${idx}`}
+                          onClick={() => handleSelectVideo(vid)}
+                          className={`p-2 rounded-xl border flex items-center gap-2.5 cursor-pointer transition-all ${
+                            isSelected
+                              ? 'bg-red-500/20 border-red-500 shadow-md ring-1 ring-red-500/50'
+                              : 'bg-white/5 border-white/10 hover:border-white/30 hover:bg-white/10'
+                          }`}
+                        >
+                          {vKey ? (
+                            <div className="relative w-16 h-10 rounded-lg overflow-hidden shrink-0 bg-black/60 border border-white/10">
+                              <img
+                                src={`https://img.youtube.com/vi/${vKey}/mqdefault.jpg`}
+                                alt=""
+                                className="w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                                <Play size={10} className="text-white fill-white" />
+                              </div>
+                            </div>
+                          ) : null}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                                isTeaser ? 'bg-amber-500/20 text-amber-300' : 'bg-red-500/20 text-red-300'
+                              }`}>
+                                {vid.type || 'Video'}
+                              </span>
+                              {isSelected && (
+                                <span className="text-[9px] font-bold text-emerald-400 flex items-center gap-0.5">
+                                  <Check size={9} /> Selected
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-gray-200 font-medium truncate mt-0.5">
+                              {vid.name || `Video #${idx + 1}`}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Year, Runtime, Watch Status */}

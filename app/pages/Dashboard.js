@@ -24,7 +24,8 @@ import {
   Star, Flame, TrendingUp, Clock, Sparkles, Film, Bookmark, Bell, Menu, X,
   Tv, Eye, ShieldCheck, Heart, User, Filter, Compass, Calendar, AlertTriangle,
   Youtube, Video, CheckSquare, Square, ExternalLink, Globe, Trophy, Award,
-  BookOpen, HardDrive, Headphones, Music, Disc, Edit3, Check, Image as ImageIcon
+  BookOpen, HardDrive, Headphones, Music, Disc, Edit3, Check, Image as ImageIcon,
+  MoreVertical
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -34,7 +35,9 @@ import MangaCoverSearch from '../components/MangaCoverSearch';
 import AddMovieModal from '../components/AddMovieModal';
 import EditMovieModal from '../components/EditMovieModal';
 import AddWatchlistModal from '../components/AddWatchlistModal';
+import EditWatchlistModal from '../components/EditWatchlistModal';
 import TransferWatchlistModal from '../components/TransferWatchlistModal';
+import MediaPreviewModal from '../components/MediaPreviewModal';
 import CachedImage from '../utils/imageCache';
 import { toFanartPreview, toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 
@@ -427,11 +430,79 @@ export default function Dashboard({ onSelectAnime }) {
 
   // Watchlist Modal & Action States
   const [showAddWatchlistModal, setShowAddWatchlistModal] = useState(false);
+  const [editingWatchlistItem, setEditingWatchlistItem] = useState(null);
+  const [watchlistCompleteConfirm, setWatchlistCompleteConfirm] = useState(null);
   const [transferringWatchlistItem, setTransferringWatchlistItem] = useState(null);
   const watchlistScrollRef = useRef(null);
   const isWatchlistDraggingRef = useRef(false);
   const watchlistStartXRef = useRef(0);
   const watchlistScrollLeftRef = useRef(0);
+
+  // Card Hover Preview Modal & Mobile Menu States
+  const [activePreview, setActivePreview] = useState(null); // { item, type, rect }
+  const [activeMobileMenu, setActiveMobileMenu] = useState(null); // { type, id, item }
+  const hoverTimeoutRef = useRef(null);
+  const closeTimeoutRef = useRef(null);
+
+  const handleCardMouseEnter = (item, type, e) => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) return;
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+    if (activePreview?.item?.id === item.id) return;
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    // Fast switch (80ms) if already previewing another card, else 500ms initial hover
+    const delay = activePreview ? 80 : 500;
+    hoverTimeoutRef.current = setTimeout(() => {
+      setActivePreview({ item, type, rect });
+    }, delay);
+  };
+
+  const handleCardMouseLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    closeTimeoutRef.current = setTimeout(() => {
+      setActivePreview(null);
+    }, 140);
+  };
+
+  const handleModalMouseEnter = () => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+  };
+
+  const handleModalMouseLeave = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+    setActivePreview(null);
+  };
+
+  useEffect(() => {
+    const handleDismissOnScroll = () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+        hoverTimeoutRef.current = null;
+      }
+      if (activePreview) {
+        setActivePreview(null);
+      }
+    };
+    window.addEventListener('scroll', handleDismissOnScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleDismissOnScroll);
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+      if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+    };
+  }, [activePreview]);
 
   const scrollWatchlist = (direction) => {
     if (watchlistScrollRef.current) {
@@ -2706,7 +2777,62 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
+  const handleToggleWatchlistStatus = async (item) => {
+    try {
+      const isCompleted = item.status === 'Completed';
+      const newStatus = isCompleted ? 'Plan to Watch' : 'Completed';
+      const updated = {
+        ...item,
+        status: newStatus,
+        completed: !isCompleted,
+        updatedAt: new Date().toISOString()
+      };
+      upsertLocalWatchlist(updated);
+      setWatchlist(prev => prev.map(w => w.id === item.id ? updated : w));
+      const uid = currentUser?.uid || getUserId();
+      if (!isOffline && db && uid) {
+        await setDoc(doc(db, 'users', uid, 'watchlist', item.id), updated, { merge: true });
+      }
+    } catch (err) {
+      console.error('Toggle watchlist status error:', err);
+    }
+  };
+
+  const handleSaveWatchlistEdit = async (updatedItem) => {
+    setWatchlist(prev => prev.map(i => i.id === updatedItem.id ? updatedItem : i));
+    upsertLocalWatchlist(updatedItem);
+    const uid = currentUser?.uid || getUserId();
+    if (!isOffline && db && uid) {
+      try {
+        await setDoc(doc(db, 'users', uid, 'watchlist', updatedItem.id), updatedItem, { merge: true });
+      } catch (err) {
+        console.warn('Dashboard save watchlist edit error:', err);
+      }
+    }
+  };
+
+  const handleDeleteWatchlist = async (item, e) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    if (!confirm(`Are you sure you want to remove "${item.title}" from your watchlist?`)) return;
+    try {
+      const itemId = item.id;
+      const targetUserId = currentUser?.uid || getUserId();
+      deleteLocalWatchlist(itemId);
+      setWatchlist(prev => prev.filter(i => i.id !== itemId));
+      if (!isOffline && db && targetUserId) {
+        await deleteDoc(doc(db, 'users', targetUserId, 'watchlist', itemId));
+      }
+    } catch (err) {
+      console.error('Delete watchlist error:', err);
+    }
+  };
+
   const scrollMovie = (direction) => {
+    if (activePreview) setActivePreview(null);
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     if (movieScrollRef.current) {
       const { scrollLeft, clientWidth } = movieScrollRef.current;
       const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.7 : scrollLeft + clientWidth * 0.7;
@@ -4465,9 +4591,9 @@ export default function Dashboard({ onSelectAnime }) {
                     {currentHero.genres && currentHero.genres.slice(0, 2).map((genre, idx) => (
                       <span
                         key={idx}
-                        className="px-2.5 py-0.5 rounded-full bg-cyan-400/20 border border-cyan-400 text-cyan text-[10px] font-black uppercase tracking-wider"
+                        className="px-2.5 py-0.5 text-cyan text-[10px] font-black uppercase tracking-wider"
                       >
-                        {genre}
+                        | {genre}
                       </span>
                     ))}
                   </div>
@@ -5128,7 +5254,7 @@ export default function Dashboard({ onSelectAnime }) {
               {[1, 2, 3, 4, 5, 6].map((i) => (
                 <div
                   key={`movie-skeleton-${i}`}
-                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden border border-white/5 bg-[#0f141f]/70 animate-pulse flex flex-col self-start"
+                  className="flex-none w-36 sm:w-40 md:w-44 glass-card rounded-2xl overflow-hidden border border-white/5 bg-[#0f141f]/70 animate-pulse flex flex-col self-start"
                 >
                   <div className="relative aspect-[2/3] bg-white/[0.04] overflow-hidden">
                     <div className="absolute inset-0 bg-gradient-to-t from-[#07090f] via-transparent to-transparent opacity-80" />
@@ -5182,9 +5308,11 @@ export default function Dashboard({ onSelectAnime }) {
                   <div
                     key={`movie-${movie.id}`}
                     onClick={() => router.push(`/movies/${movie.id}`)}
-                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-xl relative self-start"
+                    onMouseEnter={(e) => handleCardMouseEnter(movie, 'movie', e)}
+                    onMouseLeave={handleCardMouseLeave}
+                    className="flex-none w-36 sm:w-40 md:w-44 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-xl relative self-start"
                   >
-                    <div className="relative aspect-[2/3] overflow-hidden bg-[#181c24] flex items-center justify-center">
+                    <div className="relative aspect-[2/3] overflow-hidden bg-[#181c24] flex items-center justify-center z-10">
                       {coverImg ? (
                         <CachedImage
                           src={coverImg}
@@ -5193,7 +5321,7 @@ export default function Dashboard({ onSelectAnime }) {
                         />
                       ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center text-amber-400/80 bg-gradient-to-br from-amber-950/30 to-rose-950/20 gap-1.5">
-                          <Film size={36} />
+                          <Film size={32} />
                           <span className="text-[9px] font-mono uppercase tracking-wider">Movie</span>
                         </div>
                       )}
@@ -5214,7 +5342,7 @@ export default function Dashboard({ onSelectAnime }) {
 
                       {Boolean(movie.isYouTube || movie.youtubeUrl || movie.youtubeId || movie.localFilePath?.includes('youtube')) ? (
                         <div className="absolute top-2 right-2 p-1 bg-black/60 rounded-lg shadow-lg border border-red-500/40 backdrop-blur-md flex items-center justify-center">
-                          <YoutubeLogo size={15} />
+                          <YoutubeLogo size={14} />
                         </div>
                       ) : (
                         <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-amber-500 text-black font-extrabold text-[8px] shadow">
@@ -5222,77 +5350,22 @@ export default function Dashboard({ onSelectAnime }) {
                         </div>
                       )}
 
-                      {/* Hover Overlay with Action Buttons */}
-                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center justify-center p-3 gap-2">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            router.push(`/movies/${movie.id}`);
-                          }}
-                          className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold flex items-center gap-1.5 shadow-lg transition active:scale-95 cursor-pointer"
-                        >
-                          <Play size={14} fill="currentColor" />
-                          <span>{movie.currentTime ? 'Resume' : 'Play'}</span>
-                        </button>
-
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              router.push(`/movies/${movie.id}`);
-                            }}
-                            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-white transition cursor-pointer"
-                            title="Movie Details"
-                          >
-                            <Eye size={13} />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              setMovieEditing(movie);
-                            }}
-                            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-white transition cursor-pointer"
-                            title="Edit Movie"
-                          >
-                            <Edit3 size={13} />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              setMovieCompleteConfirm(movie);
-                            }}
-                            className={`p-1.5 rounded-lg border transition cursor-pointer ${isWatched
-                              ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
-                              : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
-                              }`}
-                            title={isWatched ? 'Mark Incomplete' : 'Mark Watched (Complete)'}
-                          >
-                            <CheckCircle2 size={13} />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteMovie(movie, e)}
-                            className="p-1.5 rounded-lg bg-white/10 hover:bg-rose-600/40 border border-white/20 text-gray-300 hover:text-rose-300 transition cursor-pointer"
-                            title="Remove Movie"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </div>
+                      {/* Mobile 3-dot Options Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setActiveMobileMenu({ type: 'movie', id: movie.id, item: movie });
+                        }}
+                        className="md:hidden absolute bottom-2 right-2 z-20 p-2 rounded-xl bg-black/85 hover:bg-black text-white border border-white/20 backdrop-blur-md shadow-lg active:scale-90 transition cursor-pointer"
+                        title="Options"
+                      >
+                        <MoreVertical size={14} />
+                      </button>
                     </div>
 
-                    <div className="p-3 bg-white/[0.03]">
+                    <div className="p-2.5 sm:p-3 bg-white/[0.03]">
                       <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-amber-300 transition-colors">
                         {movie.title}
                       </h4>
@@ -5324,7 +5397,7 @@ export default function Dashboard({ onSelectAnime }) {
               {sortedMovies.length > 10 && (
                 <div
                   onClick={() => router.push('/movies')}
-                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-amber-950/10 hover:bg-amber-950/20 self-start"
+                  className="flex-none w-36 sm:w-40 md:w-44 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-amber-950/10 hover:bg-amber-950/20 self-start"
                 >
                   <div className="aspect-[2/3] flex flex-col items-center justify-center p-6 text-center space-y-3">
                     <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-300 flex items-center justify-center group-hover:scale-110 transition-transform">
@@ -5961,7 +6034,9 @@ export default function Dashboard({ onSelectAnime }) {
                   <div
                     key={`wl-${item.id}`}
                     onClick={() => router.push(`/watchlist/${item.id}`)}
-                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-xl"
+                    onMouseEnter={(e) => handleCardMouseEnter(item, 'watchlist', e)}
+                    onMouseLeave={handleCardMouseLeave}
+                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-xl relative"
                   >
                     <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
                       {coverImg ? (
@@ -5992,25 +6067,19 @@ export default function Dashboard({ onSelectAnime }) {
                         </div>
                       )}
 
-                      {/* Hover Overlay */}
-                      <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center justify-center p-3 gap-2">
-                        <div className="px-3.5 py-1.5 rounded-xl bg-amber-500 text-black text-xs font-black flex items-center gap-1.5 shadow-lg">
-                          <Eye size={13} />
-                          <span>View Details</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setTransferringWatchlistItem(item);
-                          }}
-                          className="px-3 py-1 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center gap-1 transition"
-                          title="Transfer to active library"
-                        >
-                          <HardDrive size={12} />
-                          <span>Transfer</span>
-                        </button>
-                      </div>
+                      {/* Mobile 3-dot Options Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setActiveMobileMenu({ type: 'watchlist', id: item.id, item });
+                        }}
+                        className="md:hidden absolute bottom-2 right-2 z-20 p-2 rounded-xl bg-black/85 hover:bg-black text-white border border-white/20 backdrop-blur-md shadow-lg active:scale-90 transition cursor-pointer"
+                        title="Options"
+                      >
+                        <MoreVertical size={14} />
+                      </button>
                     </div>
 
                     <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
@@ -9092,6 +9161,100 @@ export default function Dashboard({ onSelectAnime }) {
         )}
       </AnimatePresence>
 
+      {/* Quick Mark Watchlist Complete/Incomplete Confirmation Modal */}
+      <AnimatePresence>
+        {watchlistCompleteConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm glass-panel p-6 rounded-3xl border border-white/10 shadow-2xl space-y-4 bg-[#0d1117] text-white text-center"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+                <CheckCircle2 size={24} />
+              </div>
+              <h3 className="text-base font-bold">
+                {watchlistCompleteConfirm.status === 'Completed' || watchlistCompleteConfirm.completed
+                  ? 'Mark Item Incomplete?'
+                  : 'Mark Item as Completed?'}
+              </h3>
+              <p className="text-xs text-gray-400">
+                {watchlistCompleteConfirm.status === 'Completed' || watchlistCompleteConfirm.completed
+                  ? `Reset "${watchlistCompleteConfirm.title}" back to Plan to Watch.`
+                  : `Mark "${watchlistCompleteConfirm.title}" as Completed.`}
+              </p>
+              <div className="flex justify-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setWatchlistCompleteConfirm(null)}
+                  className="px-4 py-2 rounded-xl bg-white/10 text-xs font-semibold text-gray-300 hover:text-white cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = watchlistCompleteConfirm;
+                    setWatchlistCompleteConfirm(null);
+                    handleToggleWatchlistStatus(target);
+                  }}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 text-black text-xs font-bold cursor-pointer"
+                >
+                  Yes, Confirm
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Desktop Card Hover Preview Modal with YouTube Teaser/Trailer Autoplay */}
+      <MediaPreviewModal
+        isOpen={Boolean(activePreview)}
+        item={activePreview?.item}
+        type={activePreview?.type}
+        cardRect={activePreview?.rect}
+        onClose={() => setActivePreview(null)}
+        onMouseEnter={handleModalMouseEnter}
+        onMouseLeave={handleModalMouseLeave}
+        onOpenDetails={(item) => {
+          setActivePreview(null);
+          if (activePreview?.type === 'movie') {
+            router.push(`/movies/${item.id}`);
+          } else {
+            router.push(`/watchlist/${item.id}`);
+          }
+        }}
+        onAskComplete={(item) => {
+          if (activePreview?.type === 'movie') {
+            setMovieCompleteConfirm(item);
+          } else {
+            setWatchlistCompleteConfirm(item);
+          }
+        }}
+        onEdit={(item) => {
+          setActivePreview(null);
+          if (activePreview?.type === 'movie') {
+            setMovieEditing(item);
+          } else {
+            setEditingWatchlistItem(item);
+          }
+        }}
+        onDelete={(item) => {
+          setActivePreview(null);
+          if (activePreview?.type === 'movie') {
+            handleDeleteMovie(item);
+          } else {
+            handleDeleteWatchlist(item);
+          }
+        }}
+        onTransfer={(item) => {
+          setActivePreview(null);
+          setTransferringWatchlistItem(item);
+        }}
+      />
+
       <AddWatchlistModal
         isOpen={showAddWatchlistModal}
         onClose={() => setShowAddWatchlistModal(false)}
@@ -9111,6 +9274,14 @@ export default function Dashboard({ onSelectAnime }) {
         }}
       />
 
+      {/* Edit Watchlist Item Modal */}
+      <EditWatchlistModal
+        isOpen={Boolean(editingWatchlistItem)}
+        onClose={() => setEditingWatchlistItem(null)}
+        item={editingWatchlistItem}
+        onSave={handleSaveWatchlistEdit}
+      />
+
       <TransferWatchlistModal
         isOpen={Boolean(transferringWatchlistItem)}
         onClose={() => setTransferringWatchlistItem(null)}
@@ -9120,6 +9291,161 @@ export default function Dashboard({ onSelectAnime }) {
           setTransferringWatchlistItem(null);
         }}
       />
+
+      {/* Mobile 3-Dot Options Bottom Sheet / Action Sheet */}
+      <AnimatePresence>
+        {activeMobileMenu && (
+          <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm"
+            onClick={() => setActiveMobileMenu(null)}
+          >
+            <motion.div
+              initial={{ y: '100%', opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: '100%', opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl bg-[#111622] border-t sm:border border-white/20 p-5 shadow-2xl space-y-3 text-white pb-8 sm:pb-5"
+            >
+              {/* Header */}
+              <div className="flex items-center gap-3 border-b border-white/10 pb-3">
+                {activeMobileMenu.item?.posterUrl || activeMobileMenu.item?.posterPath ? (
+                  <img
+                    src={activeMobileMenu.item.posterUrl || activeMobileMenu.item.posterPath}
+                    alt={activeMobileMenu.item.title}
+                    className="w-10 h-14 object-cover rounded-lg shadow"
+                  />
+                ) : (
+                  <div className="w-10 h-14 bg-white/10 rounded-lg flex items-center justify-center">
+                    <Film size={18} className="text-amber-400" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-sm text-white truncate">
+                    {activeMobileMenu.item?.title}
+                  </h4>
+                  <p className="text-xs text-gray-400">
+                    {activeMobileMenu.item?.year || ''} • {activeMobileMenu.type === 'movie' ? 'Movie' : 'Watchlist'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveMobileMenu(null)}
+                  className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-gray-300 cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-1 pt-1">
+                {/* Complete / Incomplete */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMobileMenu.item;
+                    const mType = activeMobileMenu.type;
+                    setActiveMobileMenu(null);
+                    if (mType === 'movie') {
+                      setMovieCompleteConfirm(target);
+                    } else {
+                      setWatchlistCompleteConfirm(target);
+                    }
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl hover:bg-white/10 flex items-center gap-3 text-sm font-semibold text-white transition active:scale-98 cursor-pointer"
+                >
+                  <CheckCircle2
+                    size={18}
+                    className={
+                      activeMobileMenu.item?.watched || activeMobileMenu.item?.status === 'Completed'
+                        ? 'text-emerald-400'
+                        : 'text-gray-400'
+                    }
+                  />
+                  <span>
+                    {activeMobileMenu.item?.watched || activeMobileMenu.item?.status === 'Completed'
+                      ? 'Mark Incomplete'
+                      : 'Mark as Completed'}
+                  </span>
+                </button>
+
+                {/* Edit */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMobileMenu.item;
+                    const mType = activeMobileMenu.type;
+                    setActiveMobileMenu(null);
+                    if (mType === 'movie') {
+                      setMovieEditing(target);
+                    } else {
+                      setEditingWatchlistItem(target);
+                    }
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl hover:bg-white/10 flex items-center gap-3 text-sm font-semibold text-white transition active:scale-98 cursor-pointer"
+                >
+                  <Edit3 size={18} className="text-amber-400" />
+                  <span>Edit Details</span>
+                </button>
+
+                {/* Transfer (if watchlist) */}
+                {activeMobileMenu.type === 'watchlist' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = activeMobileMenu.item;
+                      setActiveMobileMenu(null);
+                      setTransferringWatchlistItem(target);
+                    }}
+                    className="w-full text-left px-3.5 py-3 rounded-2xl hover:bg-white/10 flex items-center gap-3 text-sm font-semibold text-white transition active:scale-98 cursor-pointer"
+                  >
+                    <HardDrive size={18} className="text-cyan-400" />
+                    <span>Transfer to Active Library</span>
+                  </button>
+                )}
+
+                {/* Delete */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    const target = activeMobileMenu.item;
+                    const mType = activeMobileMenu.type;
+                    setActiveMobileMenu(null);
+                    if (mType === 'movie') {
+                      handleDeleteMovie(target, e);
+                    } else {
+                      handleDeleteWatchlist(target, e);
+                    }
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl hover:bg-rose-500/20 text-rose-300 flex items-center gap-3 text-sm font-semibold transition active:scale-98 cursor-pointer"
+                >
+                  <Trash2 size={18} className="text-rose-400" />
+                  <span>Delete</span>
+                </button>
+
+                {/* View Details */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMobileMenu.item;
+                    const mType = activeMobileMenu.type;
+                    setActiveMobileMenu(null);
+                    if (mType === 'movie') {
+                      router.push(`/movies/${target.id}`);
+                    } else {
+                      router.push(`/watchlist/${target.id}`);
+                    }
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl hover:bg-white/10 flex items-center gap-3 text-sm font-semibold text-gray-300 transition active:scale-98 cursor-pointer"
+                >
+                  <Eye size={18} className="text-indigo-400" />
+                  <span>View Full Details</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

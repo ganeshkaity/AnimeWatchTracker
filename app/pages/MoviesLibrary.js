@@ -7,7 +7,7 @@ import {
   Film, Search, Filter, ArrowUpDown, ChevronLeft, Plus,
   Star, Clock, CheckCircle2, AlertTriangle, X, Play,
   Edit3, Trash2, RotateCcw, Sparkles, SlidersHorizontal,
-  Eye, Check, Calendar, Tv, Loader2
+  Eye, Check, Calendar, Tv, Loader2, MoreVertical
 } from 'lucide-react';
 import { collection, getDocs, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -18,6 +18,7 @@ import {
 } from '../utils/localStore';
 import AddMovieModal from '../components/AddMovieModal';
 import EditMovieModal from '../components/EditMovieModal';
+import MediaPreviewModal from '../components/MediaPreviewModal';
 import CachedImage from '../utils/imageCache';
 
 const YoutubeLogo = ({ size = 16, className = "" }) => (
@@ -63,13 +64,14 @@ function formatRuntime(minutes) {
 let persistedMovieVisibleCount = 0;
 
 const getMovieInitialScreenCount = () => {
-  if (typeof window === 'undefined') return 12;
+  if (typeof window === 'undefined') return 16;
   const w = window.innerWidth;
-  if (w < 640) return 6;   // mobile: 2 cols x 3 rows = 6 cards
-  if (w < 768) return 9;   // sm: 3 cols x 3 rows = 9 cards
-  if (w < 1024) return 12; // md: 4 cols x 3 rows = 12 cards
-  if (w < 1280) return 15; // lg: 5 cols x 3 rows = 15 cards
-  return 18;               // xl: 6 cols x 3 rows = 18 cards
+  if (w < 460) return 8;   // mobile: 2 cols x 4 rows
+  if (w < 640) return 12;  // 3 cols x 4 rows
+  if (w < 768) return 16;  // 4 cols x 4 rows
+  if (w < 1024) return 20; // 5 cols x 4 rows
+  if (w < 1280) return 24; // 6 cols x 4 rows
+  return 28;               // 7-8 cols
 };
 
 export default function MoviesLibrary() {
@@ -101,7 +103,7 @@ export default function MoviesLibrary() {
       } catch (e) {}
       return getMovieInitialScreenCount();
     }
-    return 12;
+    return 16;
   });
 
   const loadMoreRef = useRef(null);
@@ -116,6 +118,72 @@ export default function MoviesLibrary() {
       } catch (e) {}
     }
   }, [visibleCount]);
+
+  // Card Hover Preview Modal & Mobile Action Sheet States
+  const [activePreview, setActivePreview] = useState(null); // { item, type, rect }
+  const [activeMobileMenu, setActiveMobileMenu] = useState(null); // { type, id, item }
+  const hoverTimeoutRef = useRef(null);
+  const closeTimeoutRef = useRef(null);
+
+  const handleCardMouseEnter = (item, type, e) => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) return;
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+    if (activePreview?.item?.id === item.id) return;
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    // Fast switch (80ms) if already previewing another card, else 500ms initial hover
+    const delay = activePreview ? 80 : 500;
+    hoverTimeoutRef.current = setTimeout(() => {
+      setActivePreview({ item, type, rect });
+    }, delay);
+  };
+
+  const handleCardMouseLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    closeTimeoutRef.current = setTimeout(() => {
+      setActivePreview(null);
+    }, 140);
+  };
+
+  const handleModalMouseEnter = () => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+  };
+
+  const handleModalMouseLeave = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+    setActivePreview(null);
+  };
+
+  useEffect(() => {
+    const handleDismissOnScroll = () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+        hoverTimeoutRef.current = null;
+      }
+      if (activePreview) {
+        setActivePreview(null);
+      }
+    };
+    window.addEventListener('scroll', handleDismissOnScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleDismissOnScroll);
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+      if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+    };
+  }, [activePreview]);
 
   // Search & Filter State
   const [search, setSearch] = useState('');
@@ -582,7 +650,7 @@ export default function MoviesLibrary() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 pt-2">
+          <div className="grid grid-cols-2 min-[460px]:grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3 sm:gap-3.5 md:gap-4 pt-2">
             {displayedMovies.map((movie) => {
               const isWatched = Boolean(movie.watched || movie.completed || movie.watchStatus === 'Completed' || (movie.watchProgress && movie.watchProgress >= 95));
               const pct = movie.watchProgress || (movie.duration ? Math.min(100, Math.round(((movie.currentTime || 0) / movie.duration) * 100)) : 0);
@@ -594,6 +662,8 @@ export default function MoviesLibrary() {
                 <div
                   key={`lib-movie-${movie.id}`}
                   onClick={() => router.push(`/movies/${movie.id}`)}
+                  onMouseEnter={(e) => handleCardMouseEnter(movie, 'movie', e)}
+                  onMouseLeave={handleCardMouseLeave}
                   className="glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-2xl relative"
                 >
                   {/* Poster Area */}
@@ -636,63 +706,19 @@ export default function MoviesLibrary() {
                       )}
                     </div>
 
-                    {/* Hover Play & Edit Overlay */}
-                    <div className="absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center justify-center p-3 gap-2">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          router.push(`/movies/${movie.id}`);
-                        }}
-                        className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-extrabold flex items-center gap-1.5 shadow-lg transition active:scale-95 cursor-pointer"
-                      >
-                        <Play size={13} fill="currentColor" />
-                        <span>{movie.currentTime ? 'Resume' : 'Play'}</span>
-                      </button>
-
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            setMovieEditing(movie);
-                          }}
-                          className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-white transition cursor-pointer"
-                          title="Edit Movie"
-                        >
-                          <Edit3 size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            setMovieCompleteConfirm(movie);
-                          }}
-                          className={`p-1.5 rounded-lg border transition cursor-pointer ${isWatched
-                              ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
-                              : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
-                            }`}
-                          title={isWatched ? 'Mark Incomplete' : 'Mark Complete'}
-                        >
-                          <CheckCircle2 size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            handleDeleteMovie(movie.id, movie.title);
-                          }}
-                          className="p-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-300 transition cursor-pointer"
-                          title="Delete Movie"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
+                    {/* Mobile 3-Dot Options Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setActiveMobileMenu({ type: 'movie', id: movie.id, item: movie });
+                      }}
+                      className="md:hidden absolute bottom-2 right-2 z-20 p-1.5 rounded-lg bg-black/80 hover:bg-black text-gray-200 border border-white/20 shadow-lg backdrop-blur-md active:scale-90 transition cursor-pointer"
+                      title="Options"
+                    >
+                      <MoreVertical size={13} />
+                    </button>
                   </div>
 
                   {/* Card Bottom Details */}
@@ -948,6 +974,134 @@ export default function MoviesLibrary() {
                   className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 text-black text-xs font-bold cursor-pointer"
                 >
                   Yes, Confirm
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Desktop Card Hover Preview Modal with YouTube Teaser/Trailer Autoplay */}
+      <MediaPreviewModal
+        isOpen={Boolean(activePreview)}
+        item={activePreview?.item}
+        type="movie"
+        cardRect={activePreview?.rect}
+        onClose={() => setActivePreview(null)}
+        onMouseEnter={handleModalMouseEnter}
+        onMouseLeave={handleModalMouseLeave}
+        onOpenDetails={(item) => {
+          setActivePreview(null);
+          router.push(`/movies/${item.id}`);
+        }}
+        onAskComplete={(item) => {
+          setMovieCompleteConfirm(item);
+        }}
+        onEdit={(item) => {
+          setActivePreview(null);
+          setMovieEditing(item);
+        }}
+        onDelete={(item) => {
+          setActivePreview(null);
+          handleDeleteMovie(item.id, item.title);
+        }}
+      />
+
+      {/* Mobile 3-Dot Bottom Action Sheet (Unclipped, Accessible) */}
+      <AnimatePresence>
+        {activeMobileMenu && (
+          <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4"
+            onClick={() => setActiveMobileMenu(null)}
+          >
+            <motion.div
+              initial={{ y: '100%', opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: '100%', opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 280 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full sm:max-w-sm bg-[#121622] border-t sm:border border-white/15 rounded-t-3xl sm:rounded-3xl p-4 shadow-2xl space-y-2 text-white max-h-[85vh] overflow-y-auto"
+            >
+              <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                <div className="min-w-0 pr-2">
+                  <h4 className="text-sm font-bold text-white truncate">{activeMobileMenu.item?.title}</h4>
+                  <span className="text-[11px] text-gray-400">Movie Options</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveMobileMenu(null)}
+                  className="p-1 rounded-lg text-gray-400 hover:text-white"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="space-y-1 pt-1">
+                {/* Play */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMobileMenu.item;
+                    setActiveMobileMenu(null);
+                    router.push(`/movies/${target.id}`);
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 flex items-center gap-3 text-sm font-bold transition active:scale-98 cursor-pointer"
+                >
+                  <Play size={18} fill="currentColor" />
+                  <span>Play Movie</span>
+                </button>
+
+                {/* Mark Complete */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMobileMenu.item;
+                    setActiveMobileMenu(null);
+                    setMovieCompleteConfirm(target);
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl hover:bg-white/10 flex items-center gap-3 text-sm font-semibold text-white transition active:scale-98 cursor-pointer"
+                >
+                  <CheckCircle2
+                    size={18}
+                    className={
+                      activeMobileMenu.item?.watched || activeMobileMenu.item?.completed || activeMobileMenu.item?.watchStatus === 'Completed'
+                        ? 'text-emerald-400'
+                        : 'text-gray-400'
+                    }
+                  />
+                  <span>
+                    {activeMobileMenu.item?.watched || activeMobileMenu.item?.completed || activeMobileMenu.item?.watchStatus === 'Completed'
+                      ? 'Mark Incomplete'
+                      : 'Mark as Completed'}
+                  </span>
+                </button>
+
+                {/* Edit */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMobileMenu.item;
+                    setActiveMobileMenu(null);
+                    setMovieEditing(target);
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl hover:bg-white/10 flex items-center gap-3 text-sm font-semibold text-white transition active:scale-98 cursor-pointer"
+                >
+                  <Edit3 size={18} className="text-amber-400" />
+                  <span>Edit Details</span>
+                </button>
+
+                {/* Delete */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMobileMenu.item;
+                    setActiveMobileMenu(null);
+                    handleDeleteMovie(target.id, target.title);
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl hover:bg-rose-500/20 text-rose-300 flex items-center gap-3 text-sm font-semibold transition active:scale-98 cursor-pointer"
+                >
+                  <Trash2 size={18} className="text-rose-400" />
+                  <span>Delete Movie</span>
                 </button>
               </div>
             </motion.div>
