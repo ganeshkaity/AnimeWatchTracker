@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { collection, query, onSnapshot, doc, updateDoc, getDocs, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
@@ -10,14 +11,20 @@ import {
   getLocalEpisodes, upsertLocalEpisode, setLocalEpisodes, deleteLocalEpisode,
   addToDirtyQueue, getUserId
 } from '../utils/localStore';
-import { sortEpisodes, getSubfolder, getSafeDocId, processScannedFiles } from '../utils/parser';
+import {
+  sortEpisodes, getSubfolder, getSafeDocId, processScannedFiles,
+  extractSeasonNumber, NAMING_PATTERNS
+} from '../utils/parser';
+import { toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
+import EditAnimeModal from '../components/EditAnimeModal';
 import { 
   ArrowLeft, Play, CheckCircle2, Bookmark, StickyNote, Star, AlertTriangle, 
   Sparkles, History, RotateCcw, X, Heart, EyeOff, Film, Clock, Search,
   ChevronDown, ChevronUp, Folder, Tv, ExternalLink, RefreshCw, Loader2, CheckCheck,
   Wifi, Laptop, Smartphone, Settings2, QrCode, Youtube, FolderPlus, Trash2, Edit3,
   Move, Upload, FolderTree, FileVideo, HardDrive, FilePlus, Server,
-  PlusCircle, CheckSquare, Square, SlidersHorizontal, ShieldCheck, Check, Layers, FolderMinus
+  PlusCircle, CheckSquare, Square, SlidersHorizontal, ShieldCheck, Check, Layers, FolderMinus,
+  Users, Video, Image as ImageIcon, Download, Menu, Calendar, ChevronLeft, ChevronRight, Maximize2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -67,12 +74,234 @@ const VLCIcon = ({ className }) => (
   </svg>
 );
 
+function GalleryImageCard({
+  img,
+  type,
+  title,
+  onClick,
+  onOpenArtworkModal,
+  isCurrentPoster,
+  isCurrentBackdrop,
+  isCurrentLogo,
+}) {
+  const [loaded, setLoaded] = useState(false);
+  const isPoster = type === 'posters' || img.mediaType === 'poster';
+  const isLogo = type === 'logos' || img.mediaType === 'logo';
+  const isBackdrop = type === 'backdrops' || img.mediaType === 'backdrop' || (!isPoster && !isLogo);
+
+  return (
+    <div
+      onClick={onClick}
+      className={`relative overflow-hidden rounded-2xl bg-[#0e131f] border border-white/10 group cursor-pointer transition-all duration-300 hover:border-[#7c5cff]/50 hover:shadow-xl hover:shadow-black/70 ${
+        isPoster ? 'aspect-[2/3]' : isLogo ? 'aspect-[16/9] p-3 flex items-center justify-center bg-black/40' : 'aspect-[16/9]'
+      }`}
+    >
+      {!loaded && (
+        <div className="absolute inset-0 bg-white/[0.04] animate-pulse flex items-center justify-center">
+          <Loader2 size={16} className="text-gray-600 animate-spin" />
+        </div>
+      )}
+      <img
+        src={img.url}
+        alt={title}
+        loading="lazy"
+        onLoad={() => setLoaded(true)}
+        className={`w-full h-full ${isLogo ? 'object-contain' : 'object-cover'} group-hover:scale-105 transition-all duration-500 ${
+          loaded ? 'opacity-100' : 'opacity-0'
+        }`}
+      />
+
+      {/* Active Badges */}
+      {isCurrentPoster && (
+        <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow-lg backdrop-blur-sm border border-emerald-400/30">
+          <Check size={10} /> Active Poster
+        </div>
+      )}
+      {isCurrentBackdrop && !isCurrentPoster && (
+        <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-[#7c5cff]/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow-lg backdrop-blur-sm border border-[#7c5cff]/30">
+          <Check size={10} /> Active Backdrop
+        </div>
+      )}
+      {isCurrentLogo && !isCurrentPoster && !isCurrentBackdrop && (
+        <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-purple-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow-lg backdrop-blur-sm border border-purple-400/30">
+          <Check size={10} /> Active Logo
+        </div>
+      )}
+
+      {/* Hover action overlay */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-2.5 gap-1.5">
+        <div className="text-[10px] text-gray-300 font-medium truncate">
+          {img.source || (isLogo ? 'ClearLogo' : isPoster ? 'Poster' : 'Backdrop')}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenArtworkModal({ ...img, isPoster, isBackdrop, isLogo });
+            }}
+            className="flex-1 py-1 px-2 rounded-lg bg-[#7c5cff] hover:bg-[#6c4cef] text-white text-[10px] font-bold text-center transition cursor-pointer shadow"
+          >
+            Manage Artwork
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatDuration(minutes) {
+  if (!minutes || minutes <= 0) return null;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+function formatAirDate(dateStr) {
+  if (!dateStr) return null;
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+}
+
+function formatRatingDisplay(rating) {
+  if (!rating || rating <= 0) return null;
+  return Number(rating).toFixed(1);
+}
+
+function parseLocalEpisodeSeasonAndNumber(ep, folderPath, seriesTotalSeasons = 1, seasonCumulativeMap = {}) {
+  let season = ep?.seasonNumber ? Number(ep.seasonNumber) : null;
+  let epNum = ep?.episodeNumber ? Number(ep.episodeNumber) : null;
+
+  const fileName = ep?.fileName || '';
+  const filePath = ep?.filePath || '';
+
+  // 1. Check SxxExx regex (e.g. S01E02, s2.e14)
+  const sxxMatch = fileName.match(/[Ss](\d{1,3})[\s_.\-]*[Ee](\d{1,4})/i) ||
+                   filePath.match(/[Ss](\d{1,3})[\s_.\-]*[Ee](\d{1,4})/i);
+  if (sxxMatch) {
+    return {
+      seasonNumber: parseInt(sxxMatch[1], 10),
+      episodeNumber: parseInt(sxxMatch[2], 10),
+    };
+  }
+
+  // 2. Check "Episode X Season Y" or "Season Y Episode X"
+  const seasonEpMatch = fileName.match(/Season\s*(\d{1,3})[^\d]+Episode\s*(\d{1,4})/i) ||
+                        filePath.match(/Season\s*(\d{1,3})[^\d]+Episode\s*(\d{1,4})/i);
+  if (seasonEpMatch) {
+    return {
+      seasonNumber: parseInt(seasonEpMatch[1], 10),
+      episodeNumber: parseInt(seasonEpMatch[2], 10),
+    };
+  }
+
+  const epSeasonMatch = fileName.match(/Episode\s*(\d{1,4})[^\d]+Season\s*(\d{1,3})/i) ||
+                        filePath.match(/Episode\s*(\d{1,4})[^\d]+Season\s*(\d{1,3})/i);
+  if (epSeasonMatch) {
+    return {
+      seasonNumber: parseInt(epSeasonMatch[2], 10),
+      episodeNumber: parseInt(epSeasonMatch[1], 10),
+    };
+  }
+
+  // 3. Extract season from folder path
+  const folderSeason = extractSeasonNumber(filePath, fileName);
+  if (folderSeason) {
+    season = folderSeason;
+  }
+
+  // 4. Extract episode number from filename if not yet parsed
+  if (!epNum) {
+    const epPatterns = [
+      /\[EP[\s\-_.]*(\d{1,4})\]/i,
+      /EP[\s\-_.]*(\d{1,4})/i,
+      /Episode[\s\-_.]*(\d{1,4})/i,
+      /[Ee](\d{1,4})(?:[^\d]|$)/i,
+      /(?:^|[^\d])(\d{1,4})(?:[^\d]|$)/,
+    ];
+    for (const pat of epPatterns) {
+      const m = fileName.match(pat);
+      if (m) {
+        epNum = parseInt(m[1], 10);
+        break;
+      }
+    }
+  }
+
+  // 5. If season is not determined (or default 1) but epNum is absolute and multi-season cumulative map exists:
+  if ((!season || season === 1) && epNum && seasonCumulativeMap && Object.keys(seasonCumulativeMap).length > 1) {
+    const sortedKeys = Object.keys(seasonCumulativeMap).map(Number).sort((a, b) => a - b);
+    for (const sNum of sortedKeys) {
+      const entry = seasonCumulativeMap[sNum];
+      if (entry && epNum >= entry.start && epNum <= entry.end) {
+        season = entry.seasonNum;
+        epNum = epNum - entry.start + 1;
+        break;
+      }
+    }
+  }
+
+  return {
+    seasonNumber: season || 1,
+    episodeNumber: epNum || 1,
+  };
+}
+
 export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
+  const router = useRouter();
   const { currentUser, updateDefaultPlayer } = useAuth();
   const { isOffline } = useOffline();
   const [anime, setAnime] = useState(null);
   const [episodes, setEpisodes] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Online Metadata & Enrichment (TMDB + AniList)
+  const [onlineData, setOnlineData] = useState(null);
+  const [onlineSeasons, setOnlineSeasons] = useState([]);
+  const [loadingOnlineData, setLoadingOnlineData] = useState(false);
+  const [activeSeasonNumber, setActiveSeasonNumber] = useState(1);
+
+  // Seasons & Episodes View Mode: 'all_seasons' | 'local_cards' | 'folder_tree'
+  const [episodeViewMode, setEpisodeViewMode] = useState('folder_tree');
+
+  // Local cards expanded state (first 4 items + vignette toggle)
+  const [isCardsExpanded, setIsCardsExpanded] = useState(false);
+
+  // Non-local Episode Info Modal (Image 5)
+  const [selectedOnlineEpModal, setSelectedOnlineEpModal] = useState(null);
+
+  // Active Trailer Video (YouTube modal)
+  const [activeVideo, setActiveVideo] = useState(null);
+
+  // Mobile Top Actions Modal
+  const [showMobileActionModal, setShowMobileActionModal] = useState(false);
+
+  // Edit Anime Info Modal
+  const [showEditModal, setShowEditModal] = useState(false);
+
+  // Gallery Tabs & Artwork Management
+  const [imageTab, setImageTab] = useState('all');
+  const [previewImage, setPreviewImage] = useState(null);
+  const [artworkTargetImage, setArtworkTargetImage] = useState(null);
+  const [artworkSaving, setArtworkSaving] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+
+  // Overview Expand
+  const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
+
+  // Resume Quick Dropdown
+  const [showResumeDropdown, setShowResumeDropdown] = useState(false);
+
+  // Horizontal Carousels Refs
+  const castScrollRef = useRef(null);
+  const videosScrollRef = useRef(null);
   
   // Local state for currently playing episode
   const [activePlayback, setActivePlayback] = useState(null);
@@ -1929,155 +2158,752 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     return `EP ${String(trueIndex + 1 - offPatternBefore).padStart(2, '0')}`;
   };
 
+  // Toast notification feedback
+  const showToast = useCallback((msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(''), 3500);
+  }, []);
+
+  // Enrich Anime with online TMDB / AniList metadata (cast, videos, artworks, seasons)
+  useEffect(() => {
+    if (!anime?.title) return;
+    const title = anime.title;
+    let isCancelled = false;
+    setLoadingOnlineData(true);
+
+    fetch(`/api/anime/details?q=${encodeURIComponent(title)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (!isCancelled && data.success && data.anime) {
+          setOnlineData(data.anime);
+        }
+      })
+      .catch(err => console.warn('[AnimeDetail] enrich details error:', err));
+
+    fetch(`/api/watchlist/seasons?title=${encodeURIComponent(title)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (!isCancelled && data.success && Array.isArray(data.seasons)) {
+          setOnlineSeasons(data.seasons);
+        }
+      })
+      .catch(err => console.warn('[AnimeDetail] enrich seasons error:', err))
+      .finally(() => {
+        if (!isCancelled) setLoadingOnlineData(false);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [anime?.title]);
+
+  // Horizontal scroll helpers for Cast & Videos carousels
+  const scrollCast = (direction) => {
+    if (castScrollRef.current) {
+      const { scrollLeft, clientWidth } = castScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
+      castScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  const scrollVideos = (direction) => {
+    if (videosScrollRef.current) {
+      const { scrollLeft, clientWidth } = videosScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
+      videosScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  // Artwork Management Handlers
+  const handleSetPoster = async (imageUrl) => {
+    if (!anime || !imageUrl) return;
+    setArtworkSaving(true);
+    try {
+      const updated = {
+        ...anime,
+        coverUrl: imageUrl,
+        posterUrl: imageUrl,
+        updatedAt: new Date().toISOString(),
+      };
+      setAnime(updated);
+      upsertLocalAnime(updated);
+      const targetUserId = getUserId();
+      if (!isOffline && db && targetUserId) {
+        await updateDoc(doc(db, 'users', targetUserId, 'anime', animeId), {
+          coverUrl: imageUrl,
+          posterUrl: imageUrl,
+          updatedAt: updated.updatedAt,
+        }).catch(err => {
+          addToDirtyQueue({
+            type: 'SET_ANIME',
+            dedupeKey: `SET_ANIME_${animeId}`,
+            payload: updated,
+          });
+        });
+      } else {
+        addToDirtyQueue({
+          type: 'SET_ANIME',
+          dedupeKey: `SET_ANIME_${animeId}`,
+          payload: updated,
+        });
+      }
+      setArtworkTargetImage(null);
+      showToast('Anime poster updated!');
+    } catch (err) {
+      console.error('[AnimeDetail] handleSetPoster error:', err);
+      alert('Failed to set poster: ' + err.message);
+    } finally {
+      setArtworkSaving(false);
+    }
+  };
+
+  const handleSetBackdrop = async (imageUrl) => {
+    if (!anime || !imageUrl) return;
+    setArtworkSaving(true);
+    try {
+      const updated = {
+        ...anime,
+        bannerUrl: imageUrl,
+        backdropUrl: imageUrl,
+        updatedAt: new Date().toISOString(),
+      };
+      setAnime(updated);
+      upsertLocalAnime(updated);
+      const targetUserId = getUserId();
+      if (!isOffline && db && targetUserId) {
+        await updateDoc(doc(db, 'users', targetUserId, 'anime', animeId), {
+          bannerUrl: imageUrl,
+          backdropUrl: imageUrl,
+          updatedAt: updated.updatedAt,
+        }).catch(err => {
+          addToDirtyQueue({
+            type: 'SET_ANIME',
+            dedupeKey: `SET_ANIME_${animeId}`,
+            payload: updated,
+          });
+        });
+      } else {
+        addToDirtyQueue({
+          type: 'SET_ANIME',
+          dedupeKey: `SET_ANIME_${animeId}`,
+          payload: updated,
+        });
+      }
+      setArtworkTargetImage(null);
+      showToast('Anime backdrop updated!');
+    } catch (err) {
+      console.error('[AnimeDetail] handleSetBackdrop error:', err);
+      alert('Failed to set backdrop: ' + err.message);
+    } finally {
+      setArtworkSaving(false);
+    }
+  };
+
+  const handleSetLogo = async (imageUrl) => {
+    if (!anime || !imageUrl) return;
+    setArtworkSaving(true);
+    try {
+      const updated = {
+        ...anime,
+        logoUrl: imageUrl,
+        updatedAt: new Date().toISOString(),
+      };
+      setAnime(updated);
+      upsertLocalAnime(updated);
+      const targetUserId = getUserId();
+      if (!isOffline && db && targetUserId) {
+        await updateDoc(doc(db, 'users', targetUserId, 'anime', animeId), {
+          logoUrl: imageUrl,
+          updatedAt: updated.updatedAt,
+        }).catch(err => {
+          addToDirtyQueue({
+            type: 'SET_ANIME',
+            dedupeKey: `SET_ANIME_${animeId}`,
+            payload: updated,
+          });
+        });
+      } else {
+        addToDirtyQueue({
+          type: 'SET_ANIME',
+          dedupeKey: `SET_ANIME_${animeId}`,
+          payload: updated,
+        });
+      }
+      setArtworkTargetImage(null);
+      showToast('Anime logo updated!');
+    } catch (err) {
+      console.error('[AnimeDetail] handleSetLogo error:', err);
+      alert('Failed to set logo: ' + err.message);
+    } finally {
+      setArtworkSaving(false);
+    }
+  };
+
+  const handleDownloadImage = (url) => {
+    if (!url) return;
+    const safeTitle = (anime?.title || 'anime_artwork').replace(/[^a-zA-Z0-9]/g, '_');
+    const ext = url.split('.').pop().split('?')[0] || 'jpg';
+    const filename = `${safeTitle}_artwork.${ext}`;
+    const downloadUrl = `/api/download-image?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`;
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('Downloading image...');
+  };
+
+  const handleToggleCompleted = async () => {
+    if (!anime) return;
+    const isCompleted = effectiveProgressPercent >= 100 || anime.progressPercent === 100;
+    if (isCompleted) {
+      const updatedEps = episodes.map(ep => ({ ...ep, isWatched: false, updatedAt: new Date().toISOString() }));
+      setLocalEpisodes(animeId, updatedEps);
+      setEpisodes(updatedEps);
+      const updateAnime = { id: animeId, progressPercent: 0, updatedAt: new Date().toISOString() };
+      upsertLocalAnime(updateAnime);
+      setAnime(prev => prev ? { ...prev, progressPercent: 0 } : prev);
+      const targetUserId = getUserId();
+      if (!isOffline && db && targetUserId) {
+        const batch = writeBatch(db);
+        updatedEps.forEach(ep => {
+          const { id } = ep;
+          batch.update(doc(db, 'users', targetUserId, 'anime', animeId, 'episodes', id), {
+            isWatched: false, updatedAt: new Date().toISOString()
+          });
+        });
+        batch.update(doc(db, 'users', targetUserId, 'anime', animeId), {
+          progressPercent: 0, updatedAt: new Date().toISOString()
+        });
+        batch.commit().catch(err => console.error("Toggle complete error:", err));
+      }
+      showToast('Marked as Unwatched');
+    } else {
+      handleMarkAllWatched();
+      showToast('Marked all as Completed');
+    }
+  };
+
+  const handleSaveAnimeEdit = async (editedData) => {
+    if (!anime) return;
+    const updated = {
+      ...anime,
+      ...editedData,
+      updatedAt: new Date().toISOString(),
+    };
+    setAnime(updated);
+    upsertLocalAnime(updated);
+    const targetUserId = getUserId();
+    if (!isOffline && db && targetUserId) {
+      await updateDoc(doc(db, 'users', targetUserId, 'anime', animeId), updated).catch(err => {
+        addToDirtyQueue({
+          type: 'SET_ANIME',
+          dedupeKey: `SET_ANIME_${animeId}`,
+          payload: updated,
+        });
+      });
+    } else {
+      addToDirtyQueue({
+        type: 'SET_ANIME',
+        dedupeKey: `SET_ANIME_${animeId}`,
+        payload: updated,
+      });
+    }
+    setShowEditModal(false);
+    showToast('Anime details updated!');
+  };
+
+  // Cumulative season counts for absolute number mapping across seasons
+  const seasonCumulativeMap = useMemo(() => {
+    if (!onlineSeasons || onlineSeasons.length === 0) return {};
+    const map = {};
+    let accumulated = 0;
+    onlineSeasons.forEach(s => {
+      const count = (s.episodes && s.episodes.length > 0) ? s.episodes.length : (s.episodeCount || 0);
+      const start = accumulated + 1;
+      const end = accumulated + count;
+      map[s.seasonNumber] = { seasonNum: s.seasonNumber, start, end, count };
+      accumulated = end;
+    });
+    return map;
+  }, [onlineSeasons]);
+
+  // Lookup map: `${seasonNumber}_${episodeNumber}` -> local episode object
+  const localEpLookup = useMemo(() => {
+    const lookup = new Map();
+    episodes.forEach(ep => {
+      const { seasonNumber, episodeNumber } = parseLocalEpisodeSeasonAndNumber(
+        ep, anime?.folderPath, anime?.totalSeasons, seasonCumulativeMap
+      );
+      lookup.set(`${seasonNumber}_${episodeNumber}`, ep);
+    });
+    return lookup;
+  }, [episodes, anime?.folderPath, anime?.totalSeasons, seasonCumulativeMap]);
+
+  // Seasons structure (combines online seasons with local episode status)
+  const seasons = useMemo(() => {
+    if (Array.isArray(onlineSeasons) && onlineSeasons.length > 0) {
+      return onlineSeasons.map(s => {
+        const sEps = (s.episodes || []).map(tep => {
+          const localMatch = localEpLookup.get(`${s.seasonNumber}_${tep.episodeNumber}`);
+          return {
+            ...tep,
+            seasonNumber: s.seasonNumber,
+            hasLocalFile: Boolean(localMatch),
+            localEp: localMatch || null,
+            isWatched: localMatch?.isWatched || false,
+            watchedSeconds: localMatch?.watchedSeconds || 0,
+            durationSeconds: localMatch?.durationSeconds || (tep.runtime ? tep.runtime * 60 : 0),
+          };
+        });
+        return {
+          ...s,
+          episodes: sEps,
+        };
+      });
+    }
+
+    // Fallback: group local episodes by seasonNumber
+    const grouped = {};
+    episodes.forEach(ep => {
+      const { seasonNumber } = parseLocalEpisodeSeasonAndNumber(ep, anime?.folderPath, anime?.totalSeasons);
+      if (!grouped[seasonNumber]) grouped[seasonNumber] = [];
+      grouped[seasonNumber].push(ep);
+    });
+    const sNums = Object.keys(grouped).map(Number).sort((a, b) => a - b);
+    if (sNums.length === 0) {
+      return [{ seasonNumber: 1, name: 'Season 1', episodes: [] }];
+    }
+    return sNums.map(sNum => ({
+      seasonNumber: sNum,
+      name: `Season ${sNum}`,
+      episodes: grouped[sNum].map(e => ({
+        episodeNumber: e.episodeNumber,
+        seasonNumber: sNum,
+        name: e.fileName,
+        overview: e.note || '',
+        runtime: e.durationSeconds ? Math.round(e.durationSeconds / 60) : 24,
+        hasLocalFile: true,
+        localEp: e,
+        isWatched: e.isWatched,
+      }))
+    }));
+  }, [onlineSeasons, episodes, anime?.folderPath, anime?.totalSeasons, localEpLookup]);
+
+  const activeSeason = useMemo(() => {
+    if (!seasons || seasons.length === 0) return null;
+    return seasons.find(s => s.seasonNumber === activeSeasonNumber) || seasons[0];
+  }, [seasons, activeSeasonNumber]);
+
+  // Combined images for the Artwork Gallery
+  const allImages = useMemo(() => {
+    const sourceImages = anime?.images || onlineData?.images;
+    if (!sourceImages) return [];
+    const backdrops = (sourceImages.backdrops || sourceImages.banners || []).map(img => ({ ...img, mediaType: 'backdrop' }));
+    const posters = (sourceImages.posters || sourceImages.covers || []).map(img => ({ ...img, mediaType: 'poster' }));
+    const logos = (sourceImages.logos || []).map(img => ({ ...img, mediaType: 'logo' }));
+    return [...backdrops, ...posters, ...logos];
+  }, [anime?.images, onlineData?.images]);
+
+  const randomMixedImages = useMemo(() => {
+    const sourceImages = anime?.images || onlineData?.images;
+    if (!sourceImages) return [];
+    const backdrops = (sourceImages.backdrops || sourceImages.banners || []).map(img => ({ ...img, mediaType: 'backdrop' }));
+    const posters = (sourceImages.posters || sourceImages.covers || []).map(img => ({ ...img, mediaType: 'poster' }));
+    const logos = (sourceImages.logos || []).map(img => ({ ...img, mediaType: 'logo' }));
+
+    const shuffle = (list) => {
+      const arr = [...list];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    };
+
+    const sBackdrops = shuffle(backdrops);
+    const sPosters = shuffle(posters);
+    const sLogos = shuffle(logos);
+
+    const mixed = [];
+    const maxItems = 10;
+    let b = 0, p = 0, l = 0;
+
+    while (mixed.length < maxItems && (b < sBackdrops.length || p < sPosters.length || l < sLogos.length)) {
+      if (p < sPosters.length && mixed.length < maxItems) mixed.push(sPosters[p++]);
+      if (b < sBackdrops.length && mixed.length < maxItems) mixed.push(sBackdrops[b++]);
+      if (l < sLogos.length && mixed.length < maxItems) mixed.push(sLogos[l++]);
+    }
+
+    return mixed.slice(0, 10);
+  }, [anime?.images, onlineData?.images, animeId]);
+
+  const displayedImages = useMemo(() => {
+    const sourceImages = anime?.images || onlineData?.images;
+    if (!sourceImages) return [];
+    if (imageTab === 'backdrops') return (sourceImages.backdrops || sourceImages.banners || []).map(img => ({ ...img, mediaType: 'backdrop' }));
+    if (imageTab === 'posters') return (sourceImages.posters || sourceImages.covers || []).map(img => ({ ...img, mediaType: 'poster' }));
+    if (imageTab === 'logos') return (sourceImages.logos || []).map(img => ({ ...img, mediaType: 'logo' }));
+    return randomMixedImages;
+  }, [anime?.images, onlineData?.images, imageTab, randomMixedImages]);
+
+  const totalGalleryCount = allImages.length;
+  const galleryHasImages = totalGalleryCount > 0;
+
+  // Visual Assets
+  const backdrop = anime?.bannerUrl || anime?.backdropUrl || onlineData?.bannerUrl || onlineData?.backdropUrl || anime?.coverUrl || null;
+  const animeLogo = anime?.logoUrl || onlineData?.logoUrl || onlineData?.images?.logos?.[0]?.url || null;
+  const posterUrl = anime?.coverUrl || anime?.posterUrl || onlineData?.coverUrl || onlineData?.posterUrl || null;
+
+  const castList = useMemo(() => {
+    if (Array.isArray(anime?.cast) && anime.cast.length > 0) return anime.cast;
+    if (Array.isArray(onlineData?.cast) && onlineData.cast.length > 0) return onlineData.cast;
+    return [];
+  }, [anime?.cast, onlineData?.cast]);
+
+  const videosList = useMemo(() => {
+    if (Array.isArray(anime?.videos) && anime.videos.length > 0) return anime.videos;
+    if (Array.isArray(onlineData?.videos) && onlineData.videos.length > 0) return onlineData.videos;
+    return [];
+  }, [anime?.videos, onlineData?.videos]);
+
+  const storylineText = anime?.overview || anime?.synopsis || onlineData?.overview || onlineData?.synopsis || '';
+  const animeRating = anime?.rating || onlineData?.rating || null;
+  const animeYear = anime?.year || onlineData?.year || null;
+
+  const resumeEp = useMemo(() => {
+    if (!episodes || episodes.length === 0) return null;
+    const inProgress = episodes.filter(e => e.lastPositionSeconds > 0 && !e.isWatched);
+    if (inProgress.length > 0) {
+      return inProgress.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))[0];
+    }
+    return null;
+  }, [episodes]);
+
+  const nextPlayableEp = useMemo(() => {
+    if (resumeEp) return resumeEp;
+    if (!episodes || episodes.length === 0) return null;
+    const unwatched = episodes.find(e => !e.isWatched);
+    return unwatched || episodes[0];
+  }, [episodes, resumeEp]);
+
+  const isAllWatched = effectiveProgressPercent >= 100;
+
+  // Episode click in All Seasons view
+  const handleSeasonEpClick = (ep) => {
+    if (ep.hasLocalFile && ep.localEp) {
+      handlePlayEpisode(ep.localEp);
+    } else {
+      setSelectedOnlineEpModal({
+        ...ep,
+        seasonNumber: ep.seasonNumber || activeSeason?.seasonNumber || 1,
+        showLogo: animeLogo,
+        seriesTitle: anime?.title,
+      });
+    }
+  };
+
   return (
-    <div className="min-h-screen text-white bg-transparent">
-      {/* Sticky Detail Header */}
+    <div className="min-h-screen bg-[#07090f] text-white flex flex-col relative pb-20 overflow-x-hidden">
+      {/* ── Ambient Backdrop Image Layer (Extends from top-0 behind transparent header & hero) ── */}
+      {backdrop && (
+        <div className="absolute top-0 inset-x-0 h-[460px] sm:h-[540px] pointer-events-none overflow-hidden z-0">
+          <img
+            src={backdrop}
+            alt={anime?.title}
+            className="w-full h-full object-cover object-top filter brightness-[0.40] blur-[1px] scale-105"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#07090f] via-[#07090f]/75 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-[#07090f]/80" />
+        </div>
+      )}
+
+      {/* ── Top Navigation Header (Completely Transparent - Background Visible Behind) ── */}
+      <header className="relative z-30 h-14 md:h-16 px-4 md:px-8 flex items-center justify-between bg-transparent">
+        <button
+          type="button"
+          onClick={onBack || (() => router.push('/'))}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-200 hover:text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer shadow-lg"
+        >
+          <ChevronLeft size={16} />
+          <span>Dashboard</span>
+        </button>
+
+        {/* Desktop Action Buttons (sm and above) */}
+        <div className="hidden sm:flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowEditModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-300 hover:text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg"
+            title="Edit anime information"
+          >
+            <Edit3 size={14} />
+            <span>Edit</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleToggleCompleted}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border backdrop-blur-md transition cursor-pointer shadow-lg ${
+              isAllWatched
+                ? 'bg-emerald-500/25 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/35 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
+                : 'bg-black/40 border-white/15 text-gray-300 hover:text-white hover:bg-black/60'
+            }`}
+          >
+            <CheckCircle2 size={14} className={isAllWatched ? 'text-emerald-400' : ''} />
+            <span>{isAllWatched ? 'Completed' : 'Mark Completed'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowDeleteFolderConfirm(true)}
+            className="p-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 hover:text-red-200 text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg"
+            title="Delete anime folder from database"
+          >
+            <Trash2 size={15} />
+          </button>
+        </div>
+
+        {/* Mobile Hamburger Menu Button (mobile only) */}
+        <div className="flex sm:hidden items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowMobileActionModal(true)}
+            className="flex items-center justify-center p-2 rounded-xl bg-black/50 hover:bg-black/70 border border-white/15 text-gray-200 hover:text-white backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
+            aria-label="Open Actions Menu"
+            title="Anime Actions"
+          >
+            <Menu size={18} />
+          </button>
+        </div>
+      </header>
+
+      {/* ── Hero Content (Poster + Details - Image 1 exact UI) ── */}
       {anime && (
-        <div className="sticky top-0 z-20 glass-panel border-b border-white/5 py-4 px-6 md:px-12">
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
-            
-            <div className="flex items-center gap-4">
-              <button 
-                onClick={onBack}
-                className="p-2 rounded-lg bg-white/5 border border-white/5 hover:text-neonCyan hover:bg-white/10 transition cursor-pointer"
-              >
-                <ArrowLeft size={18} />
-              </button>
-              
-              <div>
-                <h1 className="text-xl font-bold tracking-wide flex items-center gap-2">
-                  {anime.title}
-                  {anime.isYouTube && (
-                    <span className="bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                      YouTube
-                    </span>
-                  )}
-                  <span className="text-xs text-gray-500 font-normal hidden sm:inline">
-                    ({anime.totalSeasons ? `Season ${anime.totalSeasons} • ` : ''}
-                    {anime.totalEpisodes ? (
-                      anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
-                        ? `${anime.episodeCount}/${anime.totalEpisodes} Episodes`
-                        : `${anime.totalEpisodes} Episodes`
-                    ) : `${anime.episodeCount || 0} Episodes`})
-                  </span>
-                </h1>
-                <p className="text-[10px] text-gray-500 line-clamp-1 max-w-md">
-                  {anime.folderPath}
-                </p>
-              </div>
-            </div>
-
-            {/* Desktop Resume button & progress */}
-            <div className="hidden md:flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
-              <div className="text-right">
-                <div className="text-xs text-gray-400 mb-1">
-                  Library Progress: <span className="font-semibold text-white">{effectiveProgressPercent}%</span>
+        <div className="relative z-10 max-w-7xl w-full mx-auto px-4 md:px-8 pt-2 pb-8 sm:pb-10 border-b border-white/5">
+          <div className="flex flex-col sm:flex-row gap-6 md:gap-8 items-start">
+            {/* Poster Card */}
+            <div className="hidden sm:block relative w-44 sm:w-52 md:w-60 shrink-0 rounded-2xl sm:rounded-3xl overflow-hidden glass-card border border-white/15 shadow-2xl bg-[#0d1117] group">
+              {posterUrl ? (
+                <img
+                  src={posterUrl}
+                  alt={anime.title}
+                  className="w-full h-auto aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500"
+                />
+              ) : (
+                <div className="w-full aspect-[2/3] flex flex-col items-center justify-center text-[#7c5cff]/80 bg-gradient-to-br from-purple-950/30 to-black gap-2">
+                  <Tv size={44} />
+                  <span className="text-[10px] font-mono uppercase tracking-wider">No Poster</span>
                 </div>
-                <div className="w-32 md:w-40 h-2 bg-white/5 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-neon-gradient shadow-purple-glow rounded-full"
-                    style={{ width: `${effectiveProgressPercent}%` }}
-                  />
-                </div>
-              </div>
-
-              {effectiveProgressPercent !== 100 && (
-                <button
-                  onClick={() => setShowMarkCompleteConfirm(true)}
-                  className="px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500 text-emerald-300 hover:text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-all shadow-inner whitespace-nowrap"
-                >
-                  <CheckCheck size={14} />
-                  Mark Complete
-                </button>
               )}
 
-              <button
-                onClick={() => handleRescan()}
-                className="px-4 py-2 rounded-xl bg-white/5 border border-white/5 hover:text-neonCyan hover:bg-white/10 hover:border-neonCyan/20 text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-all shadow-inner"
-              >
-                <RefreshCw size={14} />
-                Rescan Folder
-              </button>
+              {/* Poster Badges */}
+              <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
+                {animeRating && (
+                  <span className="px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md border border-white/15 text-amber-300 font-bold text-xs flex items-center gap-1 shadow">
+                    <Star size={11} className="fill-amber-400 text-amber-400" />
+                    {formatRatingDisplay(animeRating)}
+                  </span>
+                )}
+              </div>
 
-              <button
-                onClick={handleResumeAnime}
-                className="px-5 py-2 rounded-xl bg-neon-gradient hover:brightness-110 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-purple-glow transition-all"
-              >
-                <Play size={14} fill="currentColor" />
-                Resume Tracking
-              </button>
+              <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-[#7c5cff] text-white font-extrabold text-[9px] shadow uppercase tracking-wider">
+                ANIME
+              </div>
             </div>
 
-            {/* Mobile Collapsible Actions Block */}
-            <div className="flex md:hidden flex-col w-full gap-2 mt-2 bg-white/5 p-3.5 rounded-2xl border border-white/10 shadow-lg">
-              <div 
-                onClick={() => setActionsCollapsed(!actionsCollapsed)}
-                className="flex items-center justify-between cursor-pointer select-none"
-              >
-                <div className="flex-1">
-                  <div className="text-[11px] text-gray-400 mb-1 flex justify-between items-center pr-2">
-                    <span>Watch Progress</span>
-                    <span className="font-bold text-neonCyan">{effectiveProgressPercent}%</span>
+            {/* Details & Action Header */}
+            <div className="flex-1 space-y-4 w-full">
+              <div>
+                {/* Badges / Chips Row with pipe dividers */}
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="px-2.5 py-0.5 text-[#7c5cff] text-[10px] font-bold uppercase tracking-wider">
+                    | ANIME
+                  </span>
+                  {animeRating && (
+                    <span className="px-2.5 py-0.5 text-amber-300 text-[10px] font-bold flex items-center gap-1 sm:hidden">
+                      <Star size={11} className="fill-amber-400 text-amber-400" />
+                      | {formatRatingDisplay(animeRating)}
+                    </span>
+                  )}
+                  {animeYear && (
+                    <span className="px-2.5 py-0.5 text-gray-300 text-[10px] font-mono font-bold flex items-center gap-1">
+                      <Calendar size={11} className="text-gray-400" />
+                      | {animeYear}
+                    </span>
+                  )}
+                  <span className="px-2.5 py-0.5 text-gray-300 text-[10px] font-mono font-bold flex items-center gap-1 uppercase">
+                    <Clock size={11} className="text-gray-400" />
+                    | {episodes.length} EPS
+                  </span>
+                  {(anime.status || onlineData?.status) && (
+                    <span className="px-2.5 py-0.5 text-gray-300 text-[10px] uppercase font-bold">
+                      | {anime.status || onlineData?.status}
+                    </span>
+                  )}
+                </div>
+
+                {/* Series Logo Art */}
+                {animeLogo && (
+                  <div className="py-1 max-w-[180px] sm:max-w-[220px] md:max-w-[280px]">
+                    <img
+                      src={toFanartBigPreview(animeLogo)}
+                      alt={anime.title}
+                      className="max-h-12 sm:max-h-14 md:max-h-16 w-auto object-contain filter drop-shadow-[0_3px_12px_rgba(0,0,0,0.9)]"
+                    />
                   </div>
-                  <div className="w-full h-1.5 bg-white/15 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-neon-gradient shadow-purple-glow rounded-full"
-                      style={{ width: `${effectiveProgressPercent}%` }}
+                )}
+
+                {/* Main Series Title */}
+                <h1 className={`${animeLogo ? 'text-lg sm:text-md md:text-xl' : 'text-xl sm:text-2xl md:text-3xl'} font-bold text-white tracking-tight drop-shadow-md`}>
+                  {anime.title}
+                </h1>
+
+                {/* Romaji / Alternative Title in italic */}
+                {(anime.romajiTitle || anime.englishTitle || onlineData?.romajiTitle || onlineData?.englishTitle) && (
+                  <p className="text-xs sm:text-sm text-gray-400 mt-1 italic">
+                    {anime.romajiTitle || onlineData?.romajiTitle || anime.englishTitle || onlineData?.englishTitle}
+                  </p>
+                )}
+              </div>
+
+              {/* Genres with pipes */}
+              {Array.isArray(anime.genres || onlineData?.genres) && (anime.genres || onlineData?.genres).length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {(anime.genres || onlineData?.genres).map((g) => (
+                    <span
+                      key={g}
+                      className="px-3 py-0.5 text-gray-300 text-xs font-semibold"
+                    >
+                      | {g}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Action Buttons Area (Matching Image 1) */}
+              <div className="space-y-3 pt-1">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {/* Primary Resume / Play Button */}
+                  <div className="relative flex items-center rounded-2xl overflow-hidden shadow-lg shadow-purple-500/20 bg-gradient-to-r from-neonCyan via-[#7c5cff] to-purple-600 hover:brightness-110 transition">
+                    <button
+                      type="button"
+                      onClick={() => handlePlayEpisode(nextPlayableEp || episodes[0])}
+                      className="px-5 py-2.5 sm:px-6 sm:py-3 text-white font-extrabold text-sm flex items-center gap-2 cursor-pointer active:scale-95 transition"
+                    >
+                      <Play size={18} fill="currentColor" />
+                      <span>
+                        {resumeEp
+                          ? `Resume from EP-${resumeEp.episodeNumber || '?'} (${formatTime(resumeEp.lastPositionSeconds)})`
+                          : isAllWatched
+                            ? 'Watch Again'
+                            : `Play Next (EP-${nextPlayableEp?.episodeNumber || 1})`}
+                      </span>
+                    </button>
+
+                    {/* Chevron Dropdown for Quick Jump */}
+                    <button
+                      type="button"
+                      onClick={() => setShowResumeDropdown(!showResumeDropdown)}
+                      className="px-2.5 py-2.5 sm:py-3 border-l border-white/20 text-white/90 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                      title="Quick Jump to Episode"
+                    >
+                      <ChevronDown size={17} />
+                    </button>
+
+                    {/* Quick Jump Dropdown Menu */}
+                    {showResumeDropdown && (
+                      <div className="absolute top-full left-0 mt-2 w-64 max-h-60 overflow-y-auto bg-[#0d1117] border border-white/15 rounded-2xl shadow-2xl p-2 z-50 space-y-1">
+                        <div className="text-[10px] text-gray-400 font-bold px-2 py-1 uppercase tracking-wider border-b border-white/10">
+                          Quick Jump to Episode
+                        </div>
+                        {episodes.map(ep => (
+                          <button
+                            key={ep.id}
+                            type="button"
+                            onClick={() => {
+                              setShowResumeDropdown(false);
+                              handlePlayEpisode(ep);
+                            }}
+                            className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-xs flex items-center justify-between transition cursor-pointer text-gray-200"
+                          >
+                            <span className="truncate pr-2">EP {ep.episodeNumber}: {ep.fileName}</span>
+                            {ep.isWatched && <Check size={12} className="text-emerald-400 shrink-0" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Play from Start */}
+                  {resumeEp && (
+                    <button
+                      type="button"
+                      onClick={() => handlePlayEpisode(episodes[0])}
+                      className="px-4 py-2.5 sm:py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs transition cursor-pointer border border-white/10"
+                    >
+                      Play From Start
+                    </button>
+                  )}
+
+                  {/* Watch Trailer */}
+                  {videosList.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveVideo(videosList[0])}
+                      className="px-4 py-2.5 sm:py-3 rounded-2xl bg-red-600/20 hover:bg-red-600/30 border border-red-500/40 text-red-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Video size={14} className="text-red-400" />
+                      <span>Watch Trailer</span>
+                    </button>
+                  )}
+
+                  {/* Rescan Folder */}
+                  <button
+                    type="button"
+                    onClick={() => handleRescan()}
+                    className="px-4 py-2.5 sm:py-3 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-gray-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition"
+                  >
+                    <RefreshCw size={13} />
+                    <span>Rescan Folder</span>
+                  </button>
+                </div>
+
+                {/* Watch Status Progress Bar (Exact matching Image 1) */}
+                <div className="space-y-1.5 pt-2 max-w-xl">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-400 font-medium">Watch Status:</span>
+                    <span className="text-neonCyan font-bold">
+                      {isAllWatched
+                        ? 'Completed (100%)'
+                        : resumeEp
+                          ? `${effectiveProgressPercent}% watched • EP ${resumeEp.episodeNumber} (${formatTime(resumeEp.lastPositionSeconds)})`
+                          : `${effectiveProgressPercent}% watched (${episodes.filter(e => e.isWatched).length}/${episodes.length} episodes)`}
+                    </span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        isAllWatched
+                          ? 'bg-emerald-500'
+                          : 'bg-gradient-to-r from-neonCyan via-[#7c5cff] to-rose-500'
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(0, isAllWatched ? 100 : effectiveProgressPercent))}%` }}
                     />
                   </div>
                 </div>
-                <div className="p-1 text-gray-400 hover:text-white ml-3 shrink-0 transition-transform duration-200">
-                  {actionsCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
-                </div>
               </div>
-
-              <AnimatePresence>
-                {!actionsCollapsed && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="flex flex-col gap-2 pt-2 border-t border-white/5 overflow-hidden"
-                  >
-                    <button
-                      onClick={handleResumeAnime}
-                      className="w-full py-2.5 rounded-xl bg-neon-gradient hover:brightness-110 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-purple-glow"
-                    >
-                      <Play size={14} fill="currentColor" />
-                      Resume Tracking
-                    </button>
-
-                    <button
-                      onClick={() => handleRescan()}
-                      className="w-full py-2.5 rounded-xl bg-white/5 border border-white/10 hover:text-neonCyan text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <RefreshCw size={14} />
-                      Rescan Folder
-                    </button>
-
-                    {effectiveProgressPercent !== 100 && (
-                      <button
-                        onClick={() => setShowMarkCompleteConfirm(true)}
-                        className="w-full py-2.5 rounded-xl bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500 text-emerald-300 hover:text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
-                      >
-                        <CheckCheck size={14} />
-                        Mark Complete
-                      </button>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
             </div>
-
           </div>
         </div>
       )}
 
-      {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-6 md:px-12 py-8 grid grid-cols-1 lg:grid-cols-4 gap-8">
+      {/* Main Content (Two-column layout on desktop, right column at bottom on mobile) */}
+      <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 grid grid-cols-1 lg:grid-cols-4 gap-8">
         
-        {/* Left column: Episode list */}
-        <div className="lg:col-span-3 space-y-4">
+        {/* Left column: Seasons, Episodes, Storyline, Cast, Trailers, Artworks */}
+        <div className="lg:col-span-3 space-y-8">
           
           {/* Paired Playback Target Toggle (PC Host vs Mobile Stream) */}
           {streamPairing && (
@@ -2117,236 +2943,794 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
             </div>
           )}
 
-          {/* Episode Filters & Search */}
-          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 z-10 pointer-events-none" size={16} />
-              <input
-                type="text"
-                placeholder="Search episodes/notes..."
-                className="w-full pl-9 pr-4 py-2 rounded-lg glass-input text-xs text-white"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+          {/* ── 1. SEASONS & EPISODES SECTION (IMAGES 2, 3, 4) ──────────────── */}
+          <section className="space-y-4">
+            {/* Prominent Pill-Shaped 3-Way Mode Toggle Bar */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-3 bg-white/[0.03] border border-white/10 rounded-2xl shadow-xl backdrop-blur-md">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-neonCyan/10 border border-neonCyan/20 text-neonCyan">
+                  <Tv size={18} />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-black text-white tracking-wide">
+                    Seasons & Episodes
+                  </h2>
+                  <p className="text-[11px] text-gray-400 font-medium">
+                    {episodes.length} local files tracked
+                  </p>
+                </div>
+              </div>
+
+              {/* Pill Shaped Toggle Switcher */}
+              <div className="inline-flex p-1.5 bg-[#0b0f19] border border-white/20 rounded-full shadow-2xl overflow-x-auto no-scrollbar">
+                <button
+                  type="button"
+                  onClick={() => setEpisodeViewMode('all_seasons')}
+                  className={`px-4 py-2 rounded-full font-black text-xs transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+                    episodeViewMode === 'all_seasons'
+                      ? 'bg-gradient-to-r from-neonCyan via-[#7c5cff] to-purple-600 text-white shadow-lg shadow-purple-500/30'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Layers size={14} />
+                  <span>All Seasons</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEpisodeViewMode('local_cards')}
+                  className={`px-4 py-2 rounded-full font-black text-xs transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+                    episodeViewMode === 'local_cards'
+                      ? 'bg-gradient-to-r from-neonCyan via-[#7c5cff] to-purple-600 text-white shadow-lg shadow-purple-500/30'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Film size={14} />
+                  <span>Local Available</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEpisodeViewMode('folder_tree')}
+                  className={`px-4 py-2 rounded-full font-black text-xs transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+                    episodeViewMode === 'folder_tree'
+                      ? 'bg-gradient-to-r from-neonCyan via-[#7c5cff] to-purple-600 text-white shadow-lg shadow-purple-500/30'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <FolderTree size={14} />
+                  <span>Folder Tree</span>
+                </button>
+              </div>
             </div>
 
-            <div className="flex gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-              <button
-                onClick={() => setFilter('all')}
-                className={`px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold cursor-pointer transition ${
-                  filter === 'all' ? 'bg-neonCyan/10 border border-neonCyan text-neonCyan' : 'bg-white/5 border border-transparent text-gray-400'
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setFilter('watched')}
-                className={`px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold cursor-pointer transition ${
-                  filter === 'watched' ? 'bg-emerald-500/15 border border-emerald-500 text-emerald-400' : 'bg-white/5 border border-transparent text-gray-400'
-                }`}
-              >
-                Watched
-              </button>
-              <button
-                onClick={() => setFilter('unwatched')}
-                className={`px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold cursor-pointer transition ${
-                  filter === 'unwatched' ? 'bg-neonPurple/15 border border-neonPurple text-neonPurple' : 'bg-white/5 border border-transparent text-gray-400'
-                }`}
-              >
-                Unwatched
-              </button>
-              <button
-                onClick={() => setFilter('flagged')}
-                className={`px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold cursor-pointer transition ${
-                  filter === 'flagged' ? 'bg-neonPink/15 border border-neonPink text-neonPink' : 'bg-white/5 border border-transparent text-gray-400'
-                }`}
-              >
-                Flagged
-              </button>
-            </div>
-          </div>
-
-          {/* Episode Cards */}
-          {loading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-16 rounded-xl bg-white/5 shimmer" />
-              ))}
-            </div>
-          ) : filteredEpisodes.length === 0 ? (
-            <div className="text-center p-12 bg-white/[0.01] border border-white/5 rounded-2xl text-gray-500">
-              No matching episodes found.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {sortedFolderKeys.map((folderKey) => {
-                const folderEpisodes = groupedEpisodes[folderKey];
-                const isExpanded = !!expandedFolders[folderKey];
-                const folderLabel = folderKey === '' ? 'Main / Specials' : folderKey;
-
-                return (
-                  <div key={folderKey} className="glass-panel rounded-2xl border border-white/5 overflow-hidden">
-                    {/* Collapsible Header */}
-                    <button
-                      onClick={() => setExpandedFolders(prev => ({ ...prev, [folderKey]: !isExpanded }))}
-                      className="w-full px-5 py-4 flex items-center justify-between bg-white/[0.02] hover:bg-white/[0.04] transition duration-200 cursor-pointer"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Folder className="text-neonPurple shrink-0" size={16} />
-                        <span className="text-sm font-bold text-white tracking-wide text-left">{folderLabel}</span>
-                        <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/5 text-[10px] text-gray-400 font-semibold">
-                          {folderEpisodes.length} {folderEpisodes.length === 1 ? 'episode' : 'episodes'}
+            {/* MODE 1: ALL SEASONS (Image 2 Style with Season Selector Tabs & Online TMDB/AniList Episodes) */}
+            {episodeViewMode === 'all_seasons' && (
+              <div className="space-y-4">
+                {/* Season Pills */}
+                {seasons.length > 0 && (
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                    {seasons.map((s) => (
+                      <button
+                        key={s.seasonNumber}
+                        type="button"
+                        onClick={() => setActiveSeasonNumber(s.seasonNumber)}
+                        className={`px-4 py-2 rounded-2xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-2 border ${
+                          (activeSeason?.seasonNumber || 1) === s.seasonNumber
+                            ? 'bg-gradient-to-r from-neonCyan/20 to-purple-600/30 border-neonCyan text-neonCyan shadow-md shadow-neonCyan/10'
+                            : 'bg-white/5 border-white/5 text-gray-400 hover:text-white hover:bg-white/10'
+                        }`}
+                      >
+                        <span>{s.name || `Season ${s.seasonNumber}`}</span>
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                          (activeSeason?.seasonNumber || 1) === s.seasonNumber
+                            ? 'bg-neonCyan/20 text-neonCyan'
+                            : 'bg-white/10 text-gray-400'
+                        }`}>
+                          {s.episodes?.length || 0}
                         </span>
-                      </div>
-                      {isExpanded ? (
-                        <ChevronUp size={16} className="text-gray-400" />
-                      ) : (
-                        <ChevronDown size={16} className="text-gray-400" />
-                      )}
-                    </button>
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-                    {/* Collapsible Content */}
-                    <AnimatePresence initial={false}>
-                      {isExpanded && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.2 }}
-                          className="overflow-hidden border-t border-white/5 bg-[#0b0b1a]/20 p-4 space-y-3"
+                {/* Episode Cards in Active Season */}
+                {activeSeason && activeSeason.episodes?.length > 0 ? (
+                  <div className="space-y-2.5">
+                    {activeSeason.episodes.map((ep) => {
+                      const stillImage = ep.stillUrl || (ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : backdrop || posterUrl);
+                      const durationStr = formatDuration(ep.runtime || Math.round((ep.durationSeconds || 0) / 60));
+                      const dateStr = formatAirDate(ep.airDate || ep.air_date);
+                      const ratingStr = formatRatingDisplay(ep.voteAverage || ep.vote_average);
+
+                      return (
+                        <div
+                          key={`season_ep_${ep.episodeNumber}_${ep.id || ep.name}`}
+                          onClick={() => handleSeasonEpClick(ep)}
+                          className={`group flex items-start gap-4 p-3 rounded-2xl border transition-all duration-200 cursor-pointer ${
+                            ep.hasLocalFile
+                              ? 'bg-white/[0.02] hover:bg-white/[0.06] border-white/5 hover:border-neonCyan/30'
+                              : 'bg-white/[0.01] hover:bg-white/[0.03] border-dashed border-white/10 hover:border-purple-500/40 opacity-85 hover:opacity-100'
+                          }`}
                         >
-                          {folderEpisodes.map((ep) => {
-                            const percentage = ep.durationSeconds > 0 ? (ep.watchedSeconds / ep.durationSeconds) * 100 : 0;
-                            // Stable display number — always based on the full unfiltered folder list
-                            const displayNumber = getEpisodeDisplayNumber(ep, folderKey);
-                            
-                            return (
-                              <div
-                                key={ep.id}
-                                className={`glass-card p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition duration-300 relative group overflow-hidden ${
-                                  ep.isWatched ? 'border-emerald-500/20 bg-emerald-950/5' : 'border-white/5'
-                                }`}
-                              >
-                                {/* Tiny Bottom Progress bar */}
-                                {percentage > 0 && !ep.isWatched && (
-                                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/5">
-                                    <div 
-                                      className="h-full bg-neonCyan shadow-cyan-glow" 
-                                      style={{ width: `${percentage}%` }}
-                                    />
-                                  </div>
-                                )}
+                          {/* Thumbnail */}
+                          <div className="relative w-32 sm:w-44 aspect-video rounded-xl overflow-hidden bg-black/60 shrink-0 border border-white/10 group-hover:border-neonCyan/50 transition shadow-md">
+                            {stillImage ? (
+                              <img
+                                src={stillImage}
+                                alt={ep.name || `Episode ${ep.episodeNumber}`}
+                                loading="lazy"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-gray-600">
+                                <Tv size={20} />
+                              </div>
+                            )}
 
-                                <div className="flex items-center gap-4 flex-grow min-w-0">
-                                  {/* Play Action */}
-                                  <button
-                                    onClick={() => handlePlayEpisode(ep)}
-                                    className={`p-3 rounded-lg flex items-center justify-center cursor-pointer transition ${
-                                      ep.isWatched 
-                                        ? 'bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500 group-hover:text-bgDark' 
-                                        : 'bg-white/5 text-gray-400 group-hover:bg-neonCyan group-hover:text-bgDark group-hover:shadow-cyan-glow'
-                                    }`}
-                                  >
-                                    <Play size={16} fill="currentColor" />
-                                  </button>
+                            {/* Play Circle Icon */}
+                            <div className={`absolute bottom-2 left-2 w-7 h-7 rounded-full flex items-center justify-center text-white shadow-lg backdrop-blur-sm ${
+                              ep.hasLocalFile ? 'bg-gradient-to-r from-neonCyan to-purple-600' : 'bg-black/75 border border-white/20'
+                            }`}>
+                              {ep.hasLocalFile ? (
+                                <Play size={11} className="fill-white translate-x-0.5" />
+                              ) : (
+                                <Sparkles size={11} className="text-neonCyan" />
+                              )}
+                            </div>
 
-                                  <div className="min-w-0">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <span className={`text-xs font-bold uppercase tracking-wider ${
-                                        ep.isWatched ? 'text-emerald-400' : ep.isOffPattern ? 'text-amber-400' : 'text-neonCyan'
-                                      }`}>
-                                        {displayNumber}
-                                      </span>
-                                      
-                                      {/* Active flag chips */}
-                                      {ep.flags && ep.flags.map(fName => {
-                                        const match = FLAG_TYPES.find(ft => ft.name === fName);
-                                        const Icon = match ? match.icon : Bookmark;
-                                        return (
-                                          <span 
-                                            key={fName} 
-                                            className={`px-2 py-0.5 rounded-full border text-[9px] font-semibold flex items-center gap-1 ${match ? match.color : 'bg-white/5'}`}
-                                          >
-                                            <Icon size={8} />
-                                            {fName}
-                                          </span>
-                                        );
-                                      })}
-                                    </div>
-                                    
-                                    <h4 className="text-sm font-semibold text-white/90 truncate mt-1" title={ep.fileName}>
-                                      {ep.fileName}
-                                    </h4>
+                            {/* Watched Badge */}
+                            {ep.isWatched && (
+                              <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-bold flex items-center gap-1 shadow backdrop-blur-sm">
+                                <Check size={10} /> Watched
+                              </div>
+                            )}
+                          </div>
 
-                                    {/* Note snippet */}
-                                    {ep.note && (
-                                      <div className="flex items-center gap-1.5 mt-1 text-[11px] text-gray-400 bg-white/5 border border-white/5 rounded-md px-2 py-1 max-w-prose">
-                                        <StickyNote size={12} className="text-neonPurple flex-shrink-0" />
-                                        <span className="truncate italic">"{ep.note}"</span>
-                                      </div>
-                                    )}
-                                  </div>
+                          {/* Info */}
+                          <div className="flex-1 min-w-0 pt-0.5 space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <h3 className="text-sm sm:text-base font-bold text-white group-hover:text-neonCyan transition truncate">
+                                {ep.name || ep.title || `Episode ${ep.episodeNumber}`}
+                              </h3>
+
+                              {/* Local File Ready vs Not Downloaded Badge */}
+                              {ep.hasLocalFile ? (
+                                <span className="hidden sm:inline-flex px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold shrink-0">
+                                  Local Ready
+                                </span>
+                              ) : (
+                                <span className="hidden sm:inline-flex px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold shrink-0">
+                                  Not in folder
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="text-xs text-gray-400 font-medium flex flex-wrap items-center gap-1.5 sm:gap-2">
+                              <span className="text-white font-bold">
+                                S{ep.seasonNumber || activeSeason?.seasonNumber} E{ep.episodeNumber}
+                              </span>
+                              {dateStr && (
+                                <>
+                                  <span>•</span>
+                                  <span>{dateStr}</span>
+                                </>
+                              )}
+                              {durationStr && (
+                                <>
+                                  <span>•</span>
+                                  <span>{durationStr}</span>
+                                </>
+                              )}
+                              {ratingStr && (
+                                <>
+                                  <span>•</span>
+                                  <span className="text-amber-400 flex items-center gap-0.5 font-semibold">
+                                    ★ {ratingStr}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+
+                            {ep.overview && (
+                              <p className="text-[11px] text-gray-400 line-clamp-2 max-w-2xl pt-0.5">
+                                {ep.overview}
+                              </p>
+                            )}
+
+                            {/* Mobile only status badge */}
+                            <div className="sm:hidden pt-1">
+                              {ep.hasLocalFile ? (
+                                <span className="text-[10px] text-emerald-400 font-bold">● Local file ready</span>
+                              ) : (
+                                <span className="text-[10px] text-amber-400 font-bold">○ Click to view episode info</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-8 rounded-2xl bg-white/[0.02] border border-white/5 text-center text-gray-400 text-xs">
+                    No episode metadata discovered for this season.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* MODE 2: LOCAL AVAILABLE (Cards View with first 4 episodes + black vignette gradient - Image 3) */}
+            {episodeViewMode === 'local_cards' && (
+              <div className="relative space-y-3">
+                {episodes.length === 0 ? (
+                  <div className="p-8 rounded-2xl bg-white/[0.02] border border-white/5 text-center text-gray-400 text-xs">
+                    No local episodes found in scanned folder.
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2.5">
+                      {(isCardsExpanded ? episodes : episodes.slice(0, 4)).map((ep) => {
+                        const { seasonNumber, episodeNumber } = parseLocalEpisodeSeasonAndNumber(
+                          ep, anime?.folderPath, anime?.totalSeasons, seasonCumulativeMap
+                        );
+                        const matchedOnline = activeSeason?.episodes?.find(e => e.episodeNumber === episodeNumber);
+                        const stillImage = matchedOnline?.stillUrl || backdrop || posterUrl;
+                        const durationStr = ep.durationSeconds ? formatDuration(Math.round(ep.durationSeconds / 60)) : null;
+
+                        return (
+                          <div
+                            key={ep.id}
+                            onClick={() => handlePlayEpisode(ep)}
+                            className="group flex items-start gap-4 p-3 rounded-2xl bg-white/[0.02] hover:bg-white/[0.06] border border-white/5 hover:border-neonCyan/30 transition-all duration-200 cursor-pointer"
+                          >
+                            {/* Thumbnail */}
+                            <div className="relative w-32 sm:w-44 aspect-video rounded-xl overflow-hidden bg-black/60 shrink-0 border border-white/10 group-hover:border-neonCyan/50 transition shadow-md">
+                              {stillImage ? (
+                                <img
+                                  src={stillImage}
+                                  alt={ep.fileName}
+                                  loading="lazy"
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-gray-600">
+                                  <Tv size={20} />
                                 </div>
+                              )}
 
-                                {/* Actions block */}
-                                <div className="flex items-center gap-3 sm:self-center justify-end">
-                                  {ep.lastPositionSeconds > 0 && !ep.isWatched && (
-                                    <span className="text-[10px] text-gray-400 flex items-center gap-1 bg-white/5 px-2 py-1 rounded border border-white/5">
-                                      <Clock size={10} />
+                              <div className="absolute bottom-2 left-2 w-7 h-7 rounded-full bg-gradient-to-r from-neonCyan to-purple-600 flex items-center justify-center text-white shadow-lg">
+                                <Play size={11} className="fill-white translate-x-0.5" />
+                              </div>
+
+                              {ep.isWatched && (
+                                <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-bold flex items-center gap-1 shadow backdrop-blur-sm">
+                                  <Check size={10} /> Watched
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Info */}
+                            <div className="flex-1 min-w-0 pt-0.5 space-y-1">
+                              <h3 className="text-sm sm:text-base font-bold text-white group-hover:text-neonCyan transition truncate">
+                                {matchedOnline?.name || ep.fileName}
+                              </h3>
+
+                              <div className="text-xs text-gray-400 font-medium flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                <span className="text-white font-bold">
+                                  S{seasonNumber} E{episodeNumber}
+                                </span>
+                                {durationStr && (
+                                  <>
+                                    <span>•</span>
+                                    <span>{durationStr}</span>
+                                  </>
+                                )}
+                                {ep.lastPositionSeconds > 0 && !ep.isWatched && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="text-neonCyan font-mono">
                                       {formatTime(ep.lastPositionSeconds)} / {formatTime(ep.durationSeconds)}
                                     </span>
-                                  )}
-
-                                  {/* Flag Editor Toggle */}
-                                  <button
-                                    onClick={() => setFlaggingEp(ep)}
-                                    className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
-                                    title="Flags"
-                                  >
-                                    <Bookmark size={14} />
-                                  </button>
-
-                                  {/* Note Editor Toggle */}
-                                  <button
-                                    onClick={() => {
-                                      setEditingEp(ep);
-                                      setNoteText(ep.note || '');
-                                    }}
-                                    className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
-                                    title="Notes"
-                                  >
-                                    <StickyNote size={14} />
-                                  </button>
-
-                                  {/* Watched State Toggle */}
-                                  <button
-                                    onClick={(e) => handleToggleWatched(ep, e)}
-                                    className={`p-2 rounded-lg border transition cursor-pointer ${
-                                      ep.isWatched 
-                                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
-                                        : 'bg-white/5 border-transparent text-gray-500 hover:text-white hover:border-white/10'
-                                    }`}
-                                    title={ep.isWatched ? "Mark Unwatched" : "Mark Watched"}
-                                  >
-                                    <CheckCircle2 size={14} />
-                                  </button>
-                                </div>
+                                  </>
+                                )}
                               </div>
-                            );
-                          })}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+
+                              {/* Filename snippet */}
+                              <p className="text-[11px] text-gray-500 font-mono truncate">
+                                {ep.fileName}
+                              </p>
+
+                              {ep.note && (
+                                <p className="text-[11px] text-gray-400 italic bg-white/5 px-2 py-0.5 rounded inline-block">
+                                  "{ep.note}"
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Watched Toggle Button */}
+                            <div className="shrink-0 pt-1 flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={(e) => handleToggleWatched(ep, e)}
+                                className={`p-2 rounded-xl border transition cursor-pointer ${
+                                  ep.isWatched
+                                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                                    : 'bg-white/5 border-transparent text-gray-500 hover:text-white'
+                                }`}
+                                title={ep.isWatched ? 'Mark Unwatched' : 'Mark Watched'}
+                              >
+                                <CheckCircle2 size={16} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Black Vignette overlay & Show All toggle button (Image 3 exact styling) */}
+                    {episodes.length > 4 && !isCardsExpanded && (
+                      <div className="relative -mt-20 pt-24 pb-4 bg-gradient-to-t from-[#07090f] via-[#07090f]/90 to-transparent flex flex-col items-center justify-center z-10 pointer-events-auto">
+                        <button
+                          type="button"
+                          onClick={() => setIsCardsExpanded(true)}
+                          className="px-6 py-2.5 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-xs flex items-center gap-2 shadow-2xl backdrop-blur-md transition hover:scale-105 active:scale-95 cursor-pointer"
+                        >
+                          <span>Show All ({episodes.length} Episodes)</span>
+                          <ChevronDown size={14} />
+                        </button>
+                      </div>
+                    )}
+
+                    {episodes.length > 4 && isCardsExpanded && (
+                      <div className="pt-3 flex justify-center">
+                        <button
+                          type="button"
+                          onClick={() => setIsCardsExpanded(false)}
+                          className="px-6 py-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-xs flex items-center gap-2 transition cursor-pointer hover:scale-105 active:scale-95"
+                        >
+                          <span>Show Less</span>
+                          <ChevronUp size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* MODE 3: FOLDER TREE (Classic View with Filters, Search and Folder Accordions - Image 4) */}
+            {episodeViewMode === 'folder_tree' && (
+              <div className="space-y-4">
+                {/* Episode Filters & Search */}
+                <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+                  <div className="relative w-full sm:max-w-xs">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 z-10 pointer-events-none" size={16} />
+                    <input
+                      type="text"
+                      placeholder="Search episodes/notes..."
+                      className="w-full pl-9 pr-4 py-2 rounded-lg glass-input text-xs text-white"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
                   </div>
-                );
-              })}
-            </div>
+
+                  <div className="flex gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+                    <button
+                      onClick={() => setFilter('all')}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold cursor-pointer transition ${
+                        filter === 'all' ? 'bg-neonCyan/10 border border-neonCyan text-neonCyan' : 'bg-white/5 border border-transparent text-gray-400'
+                      }`}
+                    >
+                      All
+                    </button>
+                    <button
+                      onClick={() => setFilter('watched')}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold cursor-pointer transition ${
+                        filter === 'watched' ? 'bg-emerald-500/15 border border-emerald-500 text-emerald-400' : 'bg-white/5 border border-transparent text-gray-400'
+                      }`}
+                    >
+                      Watched
+                    </button>
+                    <button
+                      onClick={() => setFilter('unwatched')}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold cursor-pointer transition ${
+                        filter === 'unwatched' ? 'bg-neonPurple/15 border border-neonPurple text-neonPurple' : 'bg-white/5 border border-transparent text-gray-400'
+                      }`}
+                    >
+                      Unwatched
+                    </button>
+                    <button
+                      onClick={() => setFilter('flagged')}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold cursor-pointer transition ${
+                        filter === 'flagged' ? 'bg-neonPink/15 border border-neonPink text-neonPink' : 'bg-white/5 border border-transparent text-gray-400'
+                      }`}
+                    >
+                      Flagged
+                    </button>
+                  </div>
+                </div>
+
+                {/* Folder Accordions */}
+                {loading ? (
+                  <div className="space-y-3">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="h-16 rounded-xl bg-white/5 shimmer" />
+                    ))}
+                  </div>
+                ) : filteredEpisodes.length === 0 ? (
+                  <div className="text-center p-12 bg-white/[0.01] border border-white/5 rounded-2xl text-gray-500">
+                    No matching episodes found.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {sortedFolderKeys.map((folderKey) => {
+                      const folderEpisodes = groupedEpisodes[folderKey];
+                      const isExpanded = !!expandedFolders[folderKey];
+                      const folderLabel = folderKey === '' ? 'Main / Specials' : folderKey;
+
+                      return (
+                        <div key={folderKey} className="glass-panel rounded-2xl border border-white/5 overflow-hidden">
+                          {/* Collapsible Header */}
+                          <button
+                            onClick={() => setExpandedFolders(prev => ({ ...prev, [folderKey]: !isExpanded }))}
+                            className="w-full px-5 py-4 flex items-center justify-between bg-white/[0.02] hover:bg-white/[0.04] transition duration-200 cursor-pointer"
+                          >
+                            <div className="flex items-center gap-3">
+                              <Folder className="text-neonPurple shrink-0" size={16} />
+                              <span className="text-sm font-bold text-white tracking-wide text-left">{folderLabel}</span>
+                              <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/5 text-[10px] text-gray-400 font-semibold">
+                                {folderEpisodes.length} {folderEpisodes.length === 1 ? 'episode' : 'episodes'}
+                              </span>
+                            </div>
+                            {isExpanded ? (
+                              <ChevronUp size={16} className="text-gray-400" />
+                            ) : (
+                              <ChevronDown size={16} className="text-gray-400" />
+                            )}
+                          </button>
+
+                          {/* Collapsible Content */}
+                          <AnimatePresence initial={false}>
+                            {isExpanded && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="overflow-hidden border-t border-white/5 bg-[#0b0b1a]/20 p-4 space-y-3"
+                              >
+                                {folderEpisodes.map((ep) => {
+                                  const percentage = ep.durationSeconds > 0 ? (ep.watchedSeconds / ep.durationSeconds) * 100 : 0;
+                                  const displayNumber = getEpisodeDisplayNumber(ep, folderKey);
+
+                                  return (
+                                    <div
+                                      key={ep.id}
+                                      className={`glass-card p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition duration-300 relative group overflow-hidden ${
+                                        ep.isWatched ? 'border-emerald-500/20 bg-emerald-950/5' : 'border-white/5'
+                                      }`}
+                                    >
+                                      {/* Tiny Bottom Progress bar */}
+                                      {percentage > 0 && !ep.isWatched && (
+                                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/5">
+                                          <div
+                                            className="h-full bg-neonCyan shadow-cyan-glow"
+                                            style={{ width: `${percentage}%` }}
+                                          />
+                                        </div>
+                                      )}
+
+                                      <div className="flex items-center gap-4 flex-grow min-w-0">
+                                        <button
+                                          onClick={() => handlePlayEpisode(ep)}
+                                          className={`p-3 rounded-lg flex items-center justify-center cursor-pointer transition ${
+                                            ep.isWatched
+                                              ? 'bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500 group-hover:text-bgDark'
+                                              : 'bg-white/5 text-gray-400 group-hover:bg-neonCyan group-hover:text-bgDark group-hover:shadow-cyan-glow'
+                                          }`}
+                                        >
+                                          <Play size={16} fill="currentColor" />
+                                        </button>
+
+                                        <div className="min-w-0">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className={`text-xs font-bold uppercase tracking-wider ${
+                                              ep.isWatched ? 'text-emerald-400' : ep.isOffPattern ? 'text-amber-400' : 'text-neonCyan'
+                                            }`}>
+                                              {displayNumber}
+                                            </span>
+
+                                            {ep.flags && ep.flags.map(fName => {
+                                              const match = FLAG_TYPES.find(ft => ft.name === fName);
+                                              const Icon = match ? match.icon : Bookmark;
+                                              return (
+                                                <span
+                                                  key={fName}
+                                                  className={`px-2 py-0.5 rounded-full border text-[9px] font-semibold flex items-center gap-1 ${match ? match.color : 'bg-white/5'}`}
+                                                >
+                                                  <Icon size={8} />
+                                                  {fName}
+                                                </span>
+                                              );
+                                            })}
+                                          </div>
+
+                                          <h4 className="text-sm font-semibold text-white/90 truncate mt-1" title={ep.fileName}>
+                                            {ep.fileName}
+                                          </h4>
+
+                                          {ep.note && (
+                                            <div className="flex items-center gap-1.5 mt-1 text-[11px] text-gray-400 bg-white/5 border border-white/5 rounded-md px-2 py-1 max-w-prose">
+                                              <StickyNote size={12} className="text-neonPurple flex-shrink-0" />
+                                              <span className="truncate italic">"{ep.note}"</span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div className="flex items-center gap-3 sm:self-center justify-end">
+                                        {ep.lastPositionSeconds > 0 && !ep.isWatched && (
+                                          <span className="text-[10px] text-gray-400 flex items-center gap-1 bg-white/5 px-2 py-1 rounded border border-white/5">
+                                            <Clock size={10} />
+                                            {formatTime(ep.lastPositionSeconds)} / {formatTime(ep.durationSeconds)}
+                                          </span>
+                                        )}
+
+                                        <button
+                                          onClick={() => setFlaggingEp(ep)}
+                                          className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
+                                          title="Flags"
+                                        >
+                                          <Bookmark size={14} />
+                                        </button>
+
+                                        <button
+                                          onClick={() => {
+                                            setEditingEp(ep);
+                                            setNoteText(ep.note || '');
+                                          }}
+                                          className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
+                                          title="Notes"
+                                        >
+                                          <StickyNote size={14} />
+                                        </button>
+
+                                        <button
+                                          onClick={(e) => handleToggleWatched(ep, e)}
+                                          className={`p-2 rounded-lg border transition cursor-pointer ${
+                                            ep.isWatched
+                                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                                              : 'bg-white/5 border-transparent text-gray-500 hover:text-white hover:border-white/10'
+                                          }`}
+                                          title={ep.isWatched ? "Mark Unwatched" : "Mark Watched"}
+                                        >
+                                          <CheckCircle2 size={14} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
+          {/* ── 2. STORYLINE / OVERVIEW SECTION ─────────────────────────────── */}
+          {storylineText && (
+            <section className="space-y-3 pt-2">
+              <h2 className="text-sm sm:text-base font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
+                <Sparkles size={16} className="text-neonCyan" /> Storyline & Overview
+              </h2>
+              <div className="glass-panel p-5 sm:p-6 rounded-2xl border border-white/5 space-y-3 bg-white/[0.015]">
+                <p className={`text-xs sm:text-sm text-gray-300 leading-relaxed ${isOverviewExpanded ? '' : 'line-clamp-3'}`}>
+                  {storylineText}
+                </p>
+                {storylineText.length > 220 && (
+                  <button
+                    type="button"
+                    onClick={() => setIsOverviewExpanded(!isOverviewExpanded)}
+                    className="text-xs font-bold text-neonCyan hover:underline inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>{isOverviewExpanded ? 'Show less' : 'Show more'}</span>
+                    {isOverviewExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* ── 3. CAST & VOICE ACTORS CAROUSEL ─────────────────────────────── */}
+          {castList.length > 0 && (
+            <section className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm sm:text-base font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
+                  <Users size={17} className="text-neonCyan" /> Cast & Voice Actors
+                </h2>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => scrollCast('left')}
+                    className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition cursor-pointer"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollCast('right')}
+                    className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition cursor-pointer"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <div ref={castScrollRef} className="flex gap-3 overflow-x-auto pb-2 custom-scrollbar">
+                {castList.slice(0, 24).map((actor, idx) => (
+                  <div
+                    key={`${actor.id || actor.name}-${idx}`}
+                    className="w-28 sm:w-32 shrink-0 p-2.5 rounded-2xl bg-white/[0.02] border border-white/5 text-center space-y-1.5 group hover:border-white/15 transition"
+                  >
+                    <div className="w-20 h-20 mx-auto rounded-full overflow-hidden bg-black/60 border border-white/10 group-hover:scale-105 transition">
+                      {actor.profileUrl || actor.profile_path ? (
+                        <img
+                          src={actor.profileUrl || `https://image.tmdb.org/t/p/w185${actor.profile_path}`}
+                          alt={actor.name}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-600">
+                          <Users size={22} />
+                        </div>
+                      )}
+                    </div>
+                    <h4 className="text-xs font-bold text-white truncate">{actor.name}</h4>
+                    <p className="text-[10px] text-gray-400 truncate">{actor.character || actor.role || 'Cast'}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ── 4. TRAILERS & CLIPS CAROUSEL ─────────────────────────────────── */}
+          {videosList.length > 0 && (
+            <section className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm sm:text-base font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
+                  <Video size={17} className="text-red-400" /> Trailers & Clips
+                </h2>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => scrollVideos('left')}
+                    className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition cursor-pointer"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollVideos('right')}
+                    className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition cursor-pointer"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <div ref={videosScrollRef} className="flex gap-4 overflow-x-auto pb-2 custom-scrollbar">
+                {videosList.map((vid) => (
+                  <div
+                    key={vid.id || vid.key}
+                    onClick={() => setActiveVideo(vid)}
+                    className="w-64 sm:w-72 aspect-video shrink-0 rounded-2xl overflow-hidden bg-black/60 border border-white/10 relative group cursor-pointer shadow-lg hover:border-red-500/40 transition"
+                  >
+                    <img
+                      src={`https://img.youtube.com/vi/${vid.key}/hqdefault.jpg`}
+                      alt={vid.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                    />
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition">
+                        <Play size={18} fill="currentColor" className="translate-x-0.5" />
+                      </div>
+                    </div>
+                    <div className="absolute bottom-2 left-2 right-2 px-2 py-1 rounded-lg bg-black/75 backdrop-blur-sm text-xs font-bold text-white truncate">
+                      {vid.name}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ── 5. MORE IMAGES & ARTWORK (IMAGE 2 EXACT GALLERY) ─────────────── */}
+          {galleryHasImages && (
+            <section className="space-y-4 pt-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <h2 className="text-sm sm:text-base font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
+                    <ImageIcon size={17} className="text-neonCyan" /> More Images & Artwork
+                  </h2>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  {[
+                    { id: 'all', label: 'Images', count: randomMixedImages.length },
+                    { id: 'backdrops', label: 'Backdrops', count: (anime?.images?.backdrops || anime?.images?.banners || onlineData?.images?.backdrops || onlineData?.images?.banners || []).length },
+                    { id: 'posters', label: 'Posters', count: (anime?.images?.posters || anime?.images?.covers || onlineData?.images?.posters || onlineData?.images?.covers || []).length },
+                    { id: 'logos', label: 'Logos', count: (anime?.images?.logos || onlineData?.images?.logos || []).length },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setImageTab(tab.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${
+                        imageTab === tab.id
+                          ? 'bg-gradient-to-r from-neonCyan to-purple-600 text-white shadow-lg shadow-purple-500/20'
+                          : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10'
+                      }`}
+                    >
+                      <span>{tab.label}</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                        imageTab === tab.id ? 'bg-black/30 text-white' : 'bg-white/10 text-gray-300'
+                      }`}>
+                        {tab.count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Grid / Masonry Layout */}
+              {imageTab === 'all' ? (
+                <div className="columns-2 sm:columns-3 md:columns-4 lg:columns-5 gap-3 [column-fill:_balance]">
+                  {displayedImages.map((img, idx) => (
+                    <div key={`${img.filePath || img.url}-${idx}`} className="mb-3 break-inside-avoid">
+                      <GalleryImageCard
+                        img={img}
+                        type={imageTab}
+                        title={anime?.title}
+                        onClick={() => setPreviewImage(img)}
+                        onOpenArtworkModal={(targetImg) => setArtworkTargetImage(targetImg)}
+                        isCurrentPoster={posterUrl === img.url}
+                        isCurrentBackdrop={backdrop === img.url}
+                        isCurrentLogo={animeLogo === img.url}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                  {displayedImages.map((img, idx) => (
+                    <GalleryImageCard
+                      key={`${img.filePath || img.url}-${idx}`}
+                      img={img}
+                      type={imageTab}
+                      title={anime?.title}
+                      onClick={() => setPreviewImage(img)}
+                      onOpenArtworkModal={(targetImg) => setArtworkTargetImage(targetImg)}
+                      isCurrentPoster={posterUrl === img.url}
+                      isCurrentBackdrop={backdrop === img.url}
+                      isCurrentLogo={animeLogo === img.url}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
           )}
 
         </div>
 
-        {/* Right column: Current play status & guide */}
-        <div className="space-y-6">
+        {/* Right column: Current play status & guide (Mobile: order-last so it sits at the bottom) */}
+        <div className="lg:col-span-1 space-y-6 order-last lg:order-none">
           {/* Active Playback Tracker */}
           {activePlayback ? (
             <div className="glass-panel p-6 rounded-2xl border border-neonCyan/30 shadow-neon-border relative overflow-hidden">
@@ -4044,6 +5428,485 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
           </div>
         )}
       </AnimatePresence>
+
+      {/* ── EPISODE INFO MODAL FOR ONLINE / NON-LOCAL EPISODES (IMAGE 5) ────── */}
+      <AnimatePresence>
+        {selectedOnlineEpModal && (
+          <div
+            className="fixed inset-0 z-[80] flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md select-none"
+            onClick={() => setSelectedOnlineEpModal(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 15 }}
+              transition={{ duration: 0.2 }}
+              className="relative w-full max-w-2xl bg-[#0a0e1a] border border-white/15 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Top Banner with Backdrop / Still */}
+              <div className="relative w-full aspect-[16/9] max-h-72 bg-black overflow-hidden shrink-0">
+                <img
+                  src={
+                    selectedOnlineEpModal.stillUrl ||
+                    (selectedOnlineEpModal.still_path ? `https://image.tmdb.org/t/p/w780${selectedOnlineEpModal.still_path}` : null) ||
+                    backdrop ||
+                    posterUrl
+                  }
+                  alt={selectedOnlineEpModal.name || 'Episode Banner'}
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#0a0e1a] via-[#0a0e1a]/40 to-black/60" />
+
+                {/* Top-left: Series Logo or Title */}
+                <div className="absolute top-4 left-4 z-10 max-w-[200px]">
+                  {selectedOnlineEpModal.showLogo ? (
+                    <img
+                      src={toFanartBigPreview(selectedOnlineEpModal.showLogo)}
+                      alt="Series Logo"
+                      className="max-h-12 w-auto object-contain filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]"
+                    />
+                  ) : (
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-white/90 drop-shadow">
+                      {selectedOnlineEpModal.seriesTitle || anime?.title}
+                    </span>
+                  )}
+                </div>
+
+                {/* Top-right: Round Close Button */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedOnlineEpModal(null)}
+                  className="absolute top-4 right-4 z-20 w-8 h-8 rounded-full bg-black/70 hover:bg-black text-gray-300 hover:text-white border border-white/20 flex items-center justify-center transition cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+
+                {/* Season & Episode Badge overlay */}
+                <div className="absolute bottom-4 left-5 z-10 flex items-center gap-2">
+                  <span className="px-3 py-1 rounded-xl bg-gradient-to-r from-neonCyan to-purple-600 text-white font-black text-xs shadow-lg uppercase tracking-wider">
+                    S{selectedOnlineEpModal.seasonNumber} E{selectedOnlineEpModal.episodeNumber}
+                  </span>
+                  {selectedOnlineEpModal.voteAverage > 0 && (
+                    <span className="px-2.5 py-1 rounded-xl bg-black/75 border border-white/15 text-amber-400 font-bold text-xs flex items-center gap-1 shadow backdrop-blur-sm">
+                      <Star size={11} fill="currentColor" />
+                      {formatRatingDisplay(selectedOnlineEpModal.voteAverage)}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 overflow-y-auto space-y-4 flex-1 custom-scrollbar">
+                <div>
+                  <h2 className="text-lg sm:text-xl font-black text-white">
+                    {selectedOnlineEpModal.name || selectedOnlineEpModal.title || `Episode ${selectedOnlineEpModal.episodeNumber}`}
+                  </h2>
+                  <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-gray-400 font-medium">
+                    {selectedOnlineEpModal.airDate && (
+                      <span className="flex items-center gap-1">
+                        <Calendar size={12} className="text-neonCyan" />
+                        {formatAirDate(selectedOnlineEpModal.airDate)}
+                      </span>
+                    )}
+                    {selectedOnlineEpModal.runtime > 0 && (
+                      <>
+                        <span>•</span>
+                        <span className="flex items-center gap-1">
+                          <Clock size={12} className="text-purple-400" />
+                          {formatDuration(selectedOnlineEpModal.runtime)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Overview / Storyline */}
+                <div className="space-y-1.5">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-300">
+                    Storyline
+                  </h4>
+                  <p className="text-xs sm:text-sm text-gray-300 leading-relaxed bg-white/[0.02] p-3.5 rounded-2xl border border-white/5">
+                    {selectedOnlineEpModal.overview || 'No detailed overview description is available for this episode yet.'}
+                  </p>
+                </div>
+
+                {/* Non-local warning & Rescan trigger */}
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                      <AlertTriangle size={14} /> Episode Not Scanned
+                    </span>
+                    <p className="text-[11px] text-gray-400">
+                      This episode file is not yet detected in your local scanned folder. Place the video file in the anime directory and rescan to play.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedOnlineEpModal(null);
+                      handleRescan();
+                    }}
+                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5 shrink-0 shadow-lg"
+                  >
+                    <RefreshCw size={12} /> Rescan Folder
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="px-6 py-3.5 border-t border-white/10 bg-white/[0.02] flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSelectedOnlineEpModal(null)}
+                  className="px-5 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs cursor-pointer transition"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── YOUTUBE TRAILER MODAL ───────────────────────────────────────────── */}
+      {activeVideo && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-3 sm:p-6 bg-black/90 backdrop-blur-md">
+          <div className="relative w-full max-w-4xl aspect-video rounded-3xl overflow-hidden bg-black border border-white/15 shadow-2xl flex flex-col">
+            <button
+              onClick={() => setActiveVideo(null)}
+              className="absolute top-3 right-3 z-20 p-2 rounded-full bg-black/80 hover:bg-black text-white border border-white/20 transition cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+            <iframe
+              src={`https://www.youtube-nocookie.com/embed/${activeVideo.key}?autoplay=1`}
+              title={activeVideo.name}
+              className="w-full h-full"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE ACTIONS DRAWER / MODAL (HAMBURGER ON MOBILE) ─────────────── */}
+      <AnimatePresence>
+        {showMobileActionModal && (
+          <div
+            className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-md"
+            onClick={() => setShowMobileActionModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 100 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 100 }}
+              transition={{ duration: 0.2 }}
+              className="relative w-full max-w-md bg-[#0d121f] border border-white/15 rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <Menu size={18} className="text-neonCyan" />
+                  <h3 className="text-sm font-bold text-white">Anime Options</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMobileActionModal(false)}
+                  className="p-1 rounded-xl text-gray-400 hover:text-white"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileActionModal(false);
+                    setShowEditModal(true);
+                  }}
+                  className="w-full p-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center gap-3 text-left text-xs font-bold text-white transition cursor-pointer"
+                >
+                  <Edit3 size={16} className="text-neonCyan" />
+                  <span>Edit Anime Details</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileActionModal(false);
+                    handleToggleCompleted();
+                  }}
+                  className="w-full p-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center gap-3 text-left text-xs font-bold text-white transition cursor-pointer"
+                >
+                  <CheckSquare size={16} className="text-emerald-400" />
+                  <span>
+                    {effectiveProgressPercent >= 100 || anime?.progressPercent === 100
+                      ? 'Mark as Unwatched'
+                      : 'Mark All Completed'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileActionModal(false);
+                    handleRescan();
+                  }}
+                  className="w-full p-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center gap-3 text-left text-xs font-bold text-white transition cursor-pointer"
+                >
+                  <RefreshCw size={16} className="text-purple-400" />
+                  <span>Rescan Local Folder</span>
+                </button>
+
+                {!(anime?.isYouTube || anime?.folderPath?.startsWith('http')) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowMobileActionModal(false);
+                      openFileManagerModal();
+                    }}
+                    className="w-full p-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center gap-3 text-left text-xs font-bold text-white transition cursor-pointer"
+                  >
+                    <FolderPlus size={16} className="text-cyan-400" />
+                    <span>Manage Folder Files</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileActionModal(false);
+                    setShowDeleteFolderConfirm(true);
+                  }}
+                  className="w-full p-3 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 flex items-center gap-3 text-left text-xs font-bold text-rose-400 transition cursor-pointer"
+                >
+                  <Trash2 size={16} />
+                  <span>Delete Anime from Library</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── EDIT ANIME DETAILS MODAL ────────────────────────────────────────── */}
+      {showEditModal && (
+        <EditAnimeModal
+          isOpen={showEditModal}
+          anime={anime}
+          onClose={() => setShowEditModal(false)}
+          onSaveAnime={handleSaveAnimeEdit}
+        />
+      )}
+
+      {/* ── SET ARTWORK SMALL MODAL (POSTER, BACKDROP & LOGO - IMAGE 2) ──────── */}
+      <AnimatePresence>
+        {artworkTargetImage && (
+          <div
+            className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md select-none"
+            onClick={() => !artworkSaving && setArtworkTargetImage(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.18 }}
+              className="relative w-full max-w-sm bg-[#0e131f] border border-white/15 rounded-3xl p-5 shadow-2xl space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-purple-500/15 text-neonCyan border border-purple-500/20">
+                    <Sparkles size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Manage Artwork</h3>
+                    <p className="text-[10px] text-gray-400 capitalize">
+                      {artworkTargetImage.isPoster ? 'Poster Artwork' : artworkTargetImage.isLogo ? 'Logo Artwork' : 'Backdrop Artwork'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setArtworkTargetImage(null)}
+                  disabled={artworkSaving}
+                  className="p-1.5 rounded-full bg-white/5 hover:bg-white/15 text-gray-400 hover:text-white transition cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Artwork Preview Thumbnail */}
+              <div className="relative rounded-2xl overflow-hidden bg-black/60 border border-white/10 flex items-center justify-center p-2">
+                <img
+                  src={artworkTargetImage.url}
+                  alt="Artwork Preview"
+                  className={`max-h-48 rounded-xl object-contain ${
+                    artworkTargetImage.isPoster ? 'aspect-[2/3] max-w-[130px]' : artworkTargetImage.isLogo ? 'max-w-[200px] py-2' : 'w-full aspect-[16/9] object-cover'
+                  }`}
+                />
+                {artworkTargetImage.width && (
+                  <span className="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded-md bg-black/80 border border-white/15 text-[10px] font-mono text-gray-300">
+                    {artworkTargetImage.width} × {artworkTargetImage.height} px
+                  </span>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-2 pt-1">
+                {artworkTargetImage.isBackdrop && (
+                  <button
+                    type="button"
+                    disabled={artworkSaving || backdrop === artworkTargetImage.url}
+                    onClick={() => handleSetBackdrop(artworkTargetImage.url)}
+                    className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-lg ${
+                      backdrop === artworkTargetImage.url
+                        ? 'bg-purple-500/15 border border-purple-500/30 text-neonCyan cursor-default'
+                        : 'bg-gradient-to-r from-neonCyan to-purple-600 hover:brightness-110 text-white active:scale-98'
+                    }`}
+                  >
+                    {artworkSaving ? (
+                      <Loader2 size={15} className="animate-spin text-white" />
+                    ) : backdrop === artworkTargetImage.url ? (
+                      <>
+                        <Check size={14} /> Current Backdrop
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={14} /> Set as Anime Backdrop
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {artworkTargetImage.isPoster && (
+                  <button
+                    type="button"
+                    disabled={artworkSaving || posterUrl === artworkTargetImage.url}
+                    onClick={() => handleSetPoster(artworkTargetImage.url)}
+                    className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-lg ${
+                      posterUrl === artworkTargetImage.url
+                        ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 cursor-default'
+                        : 'bg-gradient-to-r from-neonCyan to-purple-600 hover:brightness-110 text-white active:scale-98'
+                    }`}
+                  >
+                    {artworkSaving ? (
+                      <Loader2 size={15} className="animate-spin text-white" />
+                    ) : posterUrl === artworkTargetImage.url ? (
+                      <>
+                        <Check size={14} /> Current Poster
+                      </>
+                    ) : (
+                      <>
+                        <Film size={14} /> Set as Anime Poster
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {artworkTargetImage.isLogo && (
+                  <button
+                    type="button"
+                    disabled={artworkSaving || animeLogo === artworkTargetImage.url}
+                    onClick={() => handleSetLogo(artworkTargetImage.url)}
+                    className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-lg ${
+                      animeLogo === artworkTargetImage.url
+                        ? 'bg-purple-500/15 border border-purple-500/30 text-purple-300 cursor-default'
+                        : 'bg-gradient-to-r from-purple-500 to-indigo-600 hover:brightness-110 text-white active:scale-98'
+                    }`}
+                  >
+                    {artworkSaving ? (
+                      <Loader2 size={15} className="animate-spin text-white" />
+                    ) : animeLogo === artworkTargetImage.url ? (
+                      <>
+                        <Check size={14} /> Current Logo
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={14} /> Set as Anime Logo
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {/* Secondary flexible options */}
+                {artworkTargetImage.isBackdrop && posterUrl !== artworkTargetImage.url && (
+                  <button
+                    type="button"
+                    disabled={artworkSaving}
+                    onClick={() => handleSetPoster(artworkTargetImage.url)}
+                    className="w-full py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition"
+                  >
+                    <Film size={13} /> Also Set as Poster
+                  </button>
+                )}
+
+                {artworkTargetImage.isPoster && backdrop !== artworkTargetImage.url && (
+                  <button
+                    type="button"
+                    disabled={artworkSaving}
+                    onClick={() => handleSetBackdrop(artworkTargetImage.url)}
+                    className="w-full py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition"
+                  >
+                    <Sparkles size={13} /> Also Set as Backdrop
+                  </button>
+                )}
+
+                {/* Download option */}
+                <button
+                  type="button"
+                  onClick={() => handleDownloadImage(artworkTargetImage.url)}
+                  className="w-full py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition"
+                >
+                  <Download size={13} /> Download Image
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── LIGHTBOX IMAGE PREVIEW MODAL ─────────────────────────────────────── */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div className="relative max-w-5xl max-h-[90vh] flex flex-col items-center">
+            <button
+              onClick={() => setPreviewImage(null)}
+              className="absolute -top-12 right-0 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+            >
+              <X size={20} />
+            </button>
+            <img
+              src={previewImage.url}
+              alt="Artwork Preview"
+              className="max-h-[82vh] max-w-full rounded-2xl object-contain shadow-2xl border border-white/15"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <div className="mt-3 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => handleDownloadImage(previewImage.url)}
+                className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold flex items-center gap-2 cursor-pointer shadow"
+              >
+                <Download size={14} /> Download
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TOAST NOTIFICATION ──────────────────────────────────────────────── */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-[100] px-5 py-3 rounded-2xl bg-[#0f172a] border border-neonCyan/40 text-white text-xs font-bold shadow-2xl flex items-center gap-2 animate-bounce">
+          <CheckCircle2 size={16} className="text-neonCyan" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
 
     </div>
   );

@@ -296,168 +296,201 @@ export default function WebseriesLibrary() {
 
   return (
     <div className="min-h-screen bg-[#07090f] text-white flex flex-col selection:bg-amber-500 selection:text-black">
-      {/* ── TOP HEADER PANEL ────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-40 bg-[#07090f]/90 backdrop-blur-xl border-b border-white/10 px-4 md:px-8 py-3.5 transition-all">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          {/* Back & Title */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => router.push('/')}
-              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer"
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
-                <Tv size={18} />
-              </div>
-              <div>
-                <h1 className="text-base sm:text-lg font-black text-white tracking-wide flex items-center gap-2">
-                  <span>Web-series Library</span>
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-gray-300">
-                    {filteredAndSorted.length}
-                  </span>
-                </h1>
-                <p className="text-[10px] text-gray-400 font-mono hidden sm:block">
-                  Browse and manage your TV and webseries library
-                </p>
-              </div>
-            </div>
+      {/* ── Sticky Navigation Header ────────────────────────────────────────── */}
+      <header className="sticky top-0 z-30 px-4 md:px-8 py-3.5 flex items-center justify-between bg-[#07090f]/80 backdrop-blur-md border-b border-white/5">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => router.push('/')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 hover:text-white text-xs font-semibold transition cursor-pointer"
+          >
+            <ChevronLeft size={16} />
+            <span>Home</span>
+          </button>
+
+          <div className="flex items-center gap-2">
+            <h1 className="text-base sm:text-lg font-extrabold tracking-wide text-white">
+              Web-series Library
+            </h1>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowAddModal(true)}
+          className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-black text-xs font-extrabold flex items-center gap-1.5 shadow-lg shadow-amber-500/20 transition cursor-pointer active:scale-95"
+        >
+          <Plus size={15} />
+          <span>Add</span>
+        </button>
+      </header>
+
+      {/* ── Search & Controls Bar ───────────────────────────────────────────── */}
+      <div className="max-w-7xl w-full mx-auto px-4 md:px-8 pt-6 pb-4 space-y-4">
+        <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+          {/* Search Input */}
+          <div className="relative flex-1 max-w-xl">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
+            <input
+              type="text"
+              placeholder="Search webseries title, genre, or local folder..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-10 pr-9 py-2.5 text-xs rounded-2xl bg-white/[0.04] border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/[0.06] transition"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
 
-          {/* Search bar & Action Buttons */}
-          <div className="flex items-center gap-2.5 flex-1 max-w-xl justify-end">
-            <div className="relative flex-1 max-w-xs">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
-              <input
-                type="text"
-                placeholder="Search webseries..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-8 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-amber-400 transition"
-              />
-              {search && (
-                <button
-                  onClick={() => setSearch('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                >
-                  <X size={13} />
-                </button>
-              )}
-            </div>
-
+          {/* Action Buttons: Filter & Sort */}
+          <div className="flex items-center gap-2.5 self-end md:self-auto w-full md:w-auto justify-between md:justify-end">
             {/* Filter Toggle */}
             <button
+              type="button"
               onClick={() => setShowFilterPanel(!showFilterPanel)}
-              className={`p-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-bold border transition cursor-pointer ${
                 showFilterPanel || hasActiveFilters
-                  ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-                  : 'bg-white/5 border-white/10 text-gray-300 hover:text-white'
+                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.2)]'
+                  : 'bg-white/5 border-white/10 text-gray-300 hover:text-white hover:bg-white/10'
               }`}
-              title="Toggle Filters"
             >
-              <Filter size={15} />
-              <span className="hidden sm:inline">Filters</span>
+              <Filter size={14} className={hasActiveFilters ? 'text-amber-400' : 'text-gray-400'} />
+              <span>Filters</span>
+              {(selectedGenres.length + (selectedStatus !== 'all' ? 1 : 0)) > 0 && (
+                <span className="w-5 h-5 rounded-full bg-amber-500 text-black text-[10px] font-black flex items-center justify-center">
+                  {selectedGenres.length + (selectedStatus !== 'all' ? 1 : 0)}
+                </span>
+              )}
             </button>
 
-            {/* Sort Menu */}
-            <div className="relative hidden sm:block">
+            {/* Sort Dropdown */}
+            <div className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-white/5 border border-white/10 text-xs">
+              <ArrowUpDown size={14} className="text-amber-400 shrink-0" />
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
-                className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs font-bold text-gray-200 focus:outline-none focus:border-amber-400 cursor-pointer"
+                className="bg-transparent text-xs text-gray-200 font-semibold focus:outline-none cursor-pointer"
               >
                 {SORT_OPTIONS.map((opt) => (
-                  <option key={opt.id} value={opt.id} className="bg-gray-900 text-white">
+                  <option key={opt.id} value={opt.id} className="bg-[#111827] text-white">
                     {opt.label}
                   </option>
                 ))}
               </select>
             </div>
-
-            {/* Add Webseries Primary Button */}
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-lg active:scale-95 transition cursor-pointer shrink-0"
-            >
-              <Plus size={15} />
-              <span className="hidden sm:inline">Add Web-series</span>
-            </button>
           </div>
         </div>
 
-        {/* ── EXPANDABLE FILTER PANEL ──────────────────────────────────────── */}
+        {/* ── Active Filter Pills Bar ────────────────────────────────────────── */}
+        {(hasActiveFilters || search) && (
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <span className="text-[11px] text-gray-500 font-bold uppercase tracking-wider">
+              Active:
+            </span>
+
+            {search && (
+              <span className="px-2.5 py-1 rounded-xl bg-white/10 text-white text-[11px] font-semibold flex items-center gap-1.5 border border-white/10">
+                <span>"{search}"</span>
+                <button type="button" onClick={() => setSearch('')} className="hover:text-amber-400">
+                  <X size={12} />
+                </button>
+              </span>
+            )}
+
+            {selectedStatus !== 'all' && (
+              <span className="px-2.5 py-1 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px] font-semibold flex items-center gap-1.5">
+                <span>Status: {STATUS_FILTERS.find(s => s.id === selectedStatus)?.label}</span>
+                <button type="button" onClick={() => setSelectedStatus('all')} className="hover:text-white">
+                  <X size={12} />
+                </button>
+              </span>
+            )}
+
+            {selectedGenres.map(g => (
+              <span key={g} className="px-2.5 py-1 rounded-xl bg-white/5 border border-white/10 text-gray-200 text-[11px] font-semibold flex items-center gap-1.5">
+                <span>{g}</span>
+                <button type="button" onClick={() => setSelectedGenres(prev => prev.filter(x => x !== g))} className="hover:text-amber-400">
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+
+            <button
+              type="button"
+              onClick={resetAllFilters}
+              className="text-[11px] text-rose-400 hover:text-rose-300 font-bold ml-1 transition cursor-pointer"
+            >
+              Clear All
+            </button>
+          </div>
+        )}
+
+        {/* ── Filter Expansion Panel (When Open) ───────────────────────────── */}
         <AnimatePresence>
           {showFilterPanel && (
             <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden border-t border-white/10 mt-3 pt-3"
+              className="overflow-hidden p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3"
             >
-              <div className="max-w-7xl mx-auto space-y-3 pb-1">
-                {/* Status Filters */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] font-bold text-gray-400 mr-2 uppercase tracking-wider">
-                    Status:
-                  </span>
-                  {STATUS_FILTERS.map((sf) => (
+              {/* Status Filters */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-bold text-gray-400 mr-2 uppercase tracking-wider">
+                  Status:
+                </span>
+                {STATUS_FILTERS.map((sf) => (
+                  <button
+                    key={sf.id}
+                    onClick={() => setSelectedStatus(sf.id)}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                      selectedStatus === sf.id
+                        ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                        : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    {sf.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Genre Filter Pills */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <span className="text-[11px] font-bold text-gray-400 mr-2 uppercase tracking-wider">
+                  Genres:
+                </span>
+                {ALL_GENRES.map((g) => {
+                  const isChecked = selectedGenres.includes(g);
+                  return (
                     <button
-                      key={sf.id}
-                      onClick={() => setSelectedStatus(sf.id)}
-                      className={`px-3 py-1 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                        selectedStatus === sf.id
+                      key={g}
+                      onClick={() => {
+                        setSelectedGenres(prev =>
+                          isChecked ? prev.filter(x => x !== g) : [...prev, g]
+                        );
+                      }}
+                      className={`px-2.5 py-0.5 rounded-lg text-[11px] font-semibold transition border cursor-pointer ${
+                        isChecked
                           ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-                          : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
+                          : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'
                       }`}
                     >
-                      {sf.label}
+                      {g}
                     </button>
-                  ))}
-
-                  {/* Reset Filters */}
-                  {hasActiveFilters && (
-                    <button
-                      onClick={resetAllFilters}
-                      className="ml-auto text-xs text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <RotateCcw size={13} />
-                      <span>Reset Filters</span>
-                    </button>
-                  )}
-                </div>
-
-                {/* Genre Filter Pills */}
-                <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                  <span className="text-[11px] font-bold text-gray-400 mr-2 uppercase tracking-wider">
-                    Genres:
-                  </span>
-                  {ALL_GENRES.map((g) => {
-                    const isChecked = selectedGenres.includes(g);
-                    return (
-                      <button
-                        key={g}
-                        onClick={() => {
-                          setSelectedGenres(prev =>
-                            isChecked ? prev.filter(x => x !== g) : [...prev, g]
-                          );
-                        }}
-                        className={`px-2.5 py-0.5 rounded-lg text-[11px] font-semibold transition border cursor-pointer ${
-                          isChecked
-                            ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-                            : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'
-                        }`}
-                      >
-                        {g}
-                      </button>
-                    );
-                  })}
-                </div>
+                  );
+                })}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
-      </header>
+      </div>
 
       {/* ── MAIN CONTENT GRID ──────────────────────────────────────────────── */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 md:px-8 py-6 space-y-6">

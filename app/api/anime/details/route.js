@@ -190,6 +190,8 @@ export async function GET(request) {
         rating,
         overview,
         genres,
+        cast: tmdbData?.cast || [],
+        videos: tmdbData?.videos || [],
         coverUrl: defaultPoster,
         posterUrl: defaultPoster,
         bannerUrl: defaultBanner,
@@ -310,15 +312,39 @@ async function fetchTmdbMedia(query, apiKey) {
     const tvShow = tvData.results?.[0];
 
     if (tvShow) {
-      const imgRes = await fetch(
-        `https://api.themoviedb.org/3/tv/${tvShow.id}/images?api_key=${apiKey}&include_image_language=en,ja,null`,
-        { signal: AbortSignal.timeout(5000) }
+      const fullRes = await fetch(
+        `https://api.themoviedb.org/3/tv/${tvShow.id}?api_key=${apiKey}&include_image_language=en,ja,null&append_to_response=images,credits,videos`,
+        { signal: AbortSignal.timeout(6000) }
       );
-      if (imgRes.ok) {
-        const imgData = await imgRes.json();
+      if (fullRes.ok) {
+        const fullData = await fullRes.json();
+        const imgData = fullData.images || {};
+        const cast = Array.isArray(fullData.credits?.cast)
+          ? fullData.credits.cast.slice(0, 25).map((c) => ({
+              id: c.id,
+              name: c.name,
+              character: c.character || 'Cast',
+              profileUrl: c.profile_path ? `https://image.tmdb.org/t/p/w185${c.profile_path}` : null,
+            }))
+          : [];
+        const videos = Array.isArray(fullData.videos?.results)
+          ? fullData.videos.results
+              .filter((v) => v.site === 'YouTube')
+              .slice(0, 10)
+              .map((v) => ({
+                id: v.id,
+                key: v.key,
+                name: v.name,
+                site: v.site,
+                type: v.type,
+              }))
+          : [];
+
         return {
           tmdbId: tvShow.id,
           type: 'tv',
+          cast,
+          videos,
           logos: Array.isArray(imgData.logos)
             ? imgData.logos.slice(0, 15).map((img) => ({
               url: `https://image.tmdb.org/t/p/w500${img.file_path}`,
@@ -353,15 +379,39 @@ async function fetchTmdbMedia(query, apiKey) {
     const movie = movieData.results?.[0];
 
     if (movie) {
-      const imgRes = await fetch(
-        `https://api.themoviedb.org/3/movie/${movie.id}/images?api_key=${apiKey}&include_image_language=en,ja,null`,
-        { signal: AbortSignal.timeout(5000) }
+      const fullRes = await fetch(
+        `https://api.themoviedb.org/3/movie/${movie.id}?api_key=${apiKey}&include_image_language=en,ja,null&append_to_response=images,credits,videos`,
+        { signal: AbortSignal.timeout(6000) }
       );
-      if (imgRes.ok) {
-        const imgData = await imgRes.json();
+      if (fullRes.ok) {
+        const fullData = await fullRes.json();
+        const imgData = fullData.images || {};
+        const cast = Array.isArray(fullData.credits?.cast)
+          ? fullData.credits.cast.slice(0, 25).map((c) => ({
+              id: c.id,
+              name: c.name,
+              character: c.character || 'Cast',
+              profileUrl: c.profile_path ? `https://image.tmdb.org/t/p/w185${c.profile_path}` : null,
+            }))
+          : [];
+        const videos = Array.isArray(fullData.videos?.results)
+          ? fullData.videos.results
+              .filter((v) => v.site === 'YouTube')
+              .slice(0, 10)
+              .map((v) => ({
+                id: v.id,
+                key: v.key,
+                name: v.name,
+                site: v.site,
+                type: v.type,
+              }))
+          : [];
+
         return {
           tmdbId: movie.id,
           type: 'movie',
+          cast,
+          videos,
           logos: Array.isArray(imgData.logos)
             ? imgData.logos.slice(0, 15).map((img) => ({
               url: `https://image.tmdb.org/t/p/w500${img.file_path}`,

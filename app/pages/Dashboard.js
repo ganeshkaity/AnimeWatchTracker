@@ -4631,6 +4631,13 @@ export default function Dashboard({ onSelectAnime }) {
                       <span className="flex items-center gap-2"><Sparkles size={15} className="text-amber-400" /> All Movies (Library)</span>
                       <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">See All</span>
                     </Link>
+                    <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('webseries'); }} className="hover:text-cyan-400 p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition text-left cursor-pointer w-full">
+                      <span className="flex items-center gap-2"><Tv size={15} className="text-cyan-400" /> Web-series Section</span>
+                    </button>
+                    <Link href="/webseries" onClick={() => setMobileMenuOpen(false)} className="hover:text-cyan-400 p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition">
+                      <span className="flex items-center gap-2"><Sparkles size={15} className="text-cyan-400" /> All Web-series (Library)</span>
+                      <span className="text-[10px] bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full font-bold">See All</span>
+                    </Link>
                     <button type="button" onClick={() => { setMobileMenuOpen(false); handleSectionJump('anime'); }} className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition text-left cursor-pointer w-full">
                       <Tv size={15} className="text-cyan-400" /> Anime Catalog
                     </button>
@@ -5075,7 +5082,7 @@ export default function Dashboard({ onSelectAnime }) {
             </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 md:gap-5">
             {/* 1. ANIME */}
             <button
               type="button"
@@ -5124,6 +5131,31 @@ export default function Dashboard({ onSelectAnime }) {
                 <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />
               </div>
               <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+
+            {/* 3. WEBSERIES */}
+            <button
+              type="button"
+              onClick={() => handleSectionJump('webseries')}
+              className="group relative flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] hover:from-cyan-500/20 hover:to-indigo-950/40 border border-white/10 hover:border-cyan-500/50 backdrop-blur-md shadow-lg hover:shadow-[0_8px_30px_rgba(6,182,212,0.25)] transition-all duration-300 hover:-translate-y-1 active:scale-[0.98] text-left cursor-pointer overflow-hidden"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/30 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300 flex-shrink-0">
+                  <Tv size={20} />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-sm sm:text-base font-extrabold text-white tracking-wide block group-hover:text-cyan-300 transition-colors">
+                    Web-series
+                  </span>
+                  <span className="text-[11px] text-gray-400 group-hover:text-cyan-200/80 font-medium block truncate">
+                    {webseriesList.length} Series
+                  </span>
+                </div>
+              </div>
+              <div className="w-7 h-7 rounded-full bg-white/5 group-hover:bg-cyan-500/30 flex items-center justify-center text-gray-400 group-hover:text-white transition-all flex-shrink-0">
+                <ChevronDown size={14} className="group-hover:translate-y-0.5 transition-transform" />
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
             </button>
 
             {/* 3. MANGA */}
