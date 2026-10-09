@@ -132,8 +132,12 @@ export const getTeaserOrTrailerVideo = (item) => {
   if (!item) return null;
   const videos = Array.isArray(item.videos) ? item.videos : [];
 
-  // 1. Explicit direct YouTube URL or ID set by user
-  const directYt = extractYouTubeId(item.youtubeId || item.youtubeUrl || item.trailerUrl || item.trailerKey || item.youtubeTrailer);
+  // 1. Explicit direct YouTube URL or ID set by user (including anime/AniList formats)
+  const directYt = extractYouTubeId(
+    item.youtubeId || item.youtubeUrl || item.trailerUrl || item.trailerKey || item.youtubeTrailer ||
+    (item.trailer && typeof item.trailer === 'object' && (!item.trailer.site || item.trailer.site?.toLowerCase() === 'youtube') ? (item.trailer.id || item.trailer.key || item.trailer.url) : null) ||
+    (typeof item.trailer === 'string' ? item.trailer : null)
+  );
   if (directYt) {
     return { id: directYt, type: 'TRAILER' };
   }
@@ -279,36 +283,45 @@ export default function MediaPreviewModal({
     item.bannerUrl ||
     item.posterUrl ||
     item.posterPath ||
+    item.coverUrl ||
+    (item.thumbnailBase64 || null) ||
+    (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : null) ||
     item.images?.backdrops?.[0]?.url ||
     item.images?.posters?.[0]?.url ||
-    (item.thumbnailBase64 || null);
+    null;
 
   const isCompleted = Boolean(
     item.watched ||
     item.completed ||
+    item.isWatched ||
     item.watchStatus === 'Completed' ||
     item.status === 'Completed' ||
-    (item.watchProgress && item.watchProgress >= 95)
+    (item.watchProgress && item.watchProgress >= 95) ||
+    (item.progressPercent && item.progressPercent >= 100)
   );
 
   const year = item.year || (item.releaseDate ? item.releaseDate.split('-')[0] : '');
   const ratingText = item.rating ? `★ ${parseFloat(item.rating).toFixed(1)}` : null;
   const runtimeStr = item.runtime
     ? `${Math.floor(item.runtime / 60)}h ${item.runtime % 60}m`
-    : item.episodeCount
-    ? `${item.episodeCount} Episodes`
+    : (item.episodeCount || item.episodesCount || item.totalEpisodes)
+    ? `${item.episodeCount || item.episodesCount || item.totalEpisodes} Episodes`
     : item.duration
     ? `${Math.round(item.duration / 60)}m`
+    : type === 'anime'
+    ? 'Anime'
     : item.contentType || null;
 
   const rawGenre = Array.isArray(item.genres)
     ? item.genres.filter(g => g !== 'All').slice(0, 2).join(' • ')
     : typeof item.genres === 'string'
-    ? item.genres.split(',').slice(0, 2).join(' • ')
+    ? item.genres.split(',').filter(g => g.trim() !== 'All').slice(0, 2).join(' • ')
     : type === 'movie'
     ? 'Movie'
     : type === 'webseries'
     ? 'Web-series'
+    : type === 'anime'
+    ? 'Anime'
     : 'Watchlist';
 
   // Full language name resolution (e.g., "hi" -> "Hindi")
@@ -459,7 +472,7 @@ export default function MediaPreviewModal({
               className="flex-1 py-2 px-3.5 rounded-xl bg-white hover:bg-gray-200 text-black font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
             >
               <Play size={13} fill="currentColor" />
-              <span>{item.currentTime ? 'Resume' : 'Watch Now'}</span>
+              <span>{(item.currentTime || item.lastWatchedEpisode || item.lastPlayedEpisode || ((item.progressPercent || 0) > 0 && (item.progressPercent || 0) < 100)) ? 'Resume' : 'Watch Now'}</span>
             </button>
 
             {/* Mark Complete / Incomplete button with check circle icon */}

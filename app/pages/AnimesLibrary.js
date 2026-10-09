@@ -6,17 +6,19 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Film, Search, Filter, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus,
   Star, CheckCircle2, X, Play, SlidersHorizontal, Trash2,
-  Sparkles, FolderOpen, ImagePlus, Check, Tv, Clock, Loader2
+  Sparkles, FolderOpen, ImagePlus, Check, Tv, Clock, Loader2,
+  MoreVertical, Edit3, Eye
 } from 'lucide-react';
 import { collection, getDocs, doc, deleteDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { useOffline } from '../context/OfflineContext';
 import {
-  getLocalAnimes, getLocalEpisodes, upsertLocalAnime, deleteLocalAnime,
+  getLocalAnimes, getLocalEpisodes, setLocalEpisodes, upsertLocalAnime, deleteLocalAnime,
   addToDirtyQueue, getUserId
 } from '../utils/localStore';
 import AnimeCoverSearch from '../components/AnimeCoverSearch';
+import MediaPreviewModal from '../components/MediaPreviewModal';
 import CachedImage from '../utils/imageCache';
 import { toFanartPreview, toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 
@@ -128,6 +130,72 @@ export default function AnimesLibrary() {
     }
   }, [visibleCount]);
 
+  // Card Hover Preview Modal & Mobile Action Sheet States
+  const [activePreview, setActivePreview] = useState(null); // { item, type, rect }
+  const [activeMobileMenu, setActiveMobileMenu] = useState(null); // { type, id, item }
+  const hoverTimeoutRef = useRef(null);
+  const closeTimeoutRef = useRef(null);
+
+  const handleCardMouseEnter = (item, type, e) => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) return;
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+    if (activePreview?.item?.id === item.id) return;
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    // Fast switch (80ms) if already previewing another card, else 500ms initial hover
+    const delay = activePreview ? 80 : 500;
+    hoverTimeoutRef.current = setTimeout(() => {
+      setActivePreview({ item, type, rect });
+    }, delay);
+  };
+
+  const handleCardMouseLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    closeTimeoutRef.current = setTimeout(() => {
+      setActivePreview(null);
+    }, 140);
+  };
+
+  const handleModalMouseEnter = () => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+  };
+
+  const handleModalMouseLeave = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+    setActivePreview(null);
+  };
+
+  useEffect(() => {
+    const handleDismissOnScroll = () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+        hoverTimeoutRef.current = null;
+      }
+      if (activePreview) {
+        setActivePreview(null);
+      }
+    };
+    window.addEventListener('scroll', handleDismissOnScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleDismissOnScroll);
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+      if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+    };
+  }, [activePreview]);
+
   // Search & Filter State
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('recent'); // default: recently watched
@@ -215,6 +283,52 @@ export default function AnimesLibrary() {
         dedupeKey: `DELETE_ANIME_${animeItem.id}`,
         payload: { id: animeItem.id, userId: targetUserId }
       });
+    }
+  };
+
+  // Toggle Anime Completed / Incomplete
+  const handleToggleAnimeComplete = async (animeItem) => {
+    if (!animeItem) return;
+    const currentPct = getAnimeProgressPercent(animeItem);
+    const shouldMarkComplete = currentPct < 100;
+
+    const eps = getLocalEpisodes(animeItem.id) || [];
+    if (eps.length > 0) {
+      const updatedEps = eps.map((e) => ({
+        ...e,
+        isWatched: shouldMarkComplete,
+        watchedSeconds: shouldMarkComplete ? (e.durationSeconds || 1440) : 0,
+        lastPositionSeconds: shouldMarkComplete ? (e.durationSeconds || 1440) : 0,
+        updatedAt: new Date().toISOString()
+      }));
+      setLocalEpisodes(animeItem.id, updatedEps);
+    }
+
+    const updatedAnime = {
+      ...animeItem,
+      progressPercent: shouldMarkComplete ? 100 : 0,
+      watchStatus: shouldMarkComplete ? 'Completed' : 'Watching',
+      completed: shouldMarkComplete,
+      isWatched: shouldMarkComplete,
+      updatedAt: new Date().toISOString()
+    };
+
+    upsertLocalAnime(updatedAnime);
+    setAnimes((prev) => prev.map((a) => (a.id === animeItem.id ? updatedAnime : a)));
+
+    const targetUserId = animeItem.userId || currentUser?.uid || getUserId();
+    if (db && targetUserId && !isOffline) {
+      try {
+        await setDoc(doc(db, 'users', targetUserId, 'anime', animeItem.id), {
+          progressPercent: shouldMarkComplete ? 100 : 0,
+          watchStatus: shouldMarkComplete ? 'Completed' : 'Watching',
+          completed: shouldMarkComplete,
+          isWatched: shouldMarkComplete,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (err) {
+        console.warn('Failed to sync anime status to firestore:', err);
+      }
     }
   };
 
@@ -789,6 +903,8 @@ export default function AnimesLibrary() {
               <div
                 key={anime.id}
                 onClick={() => router.push(`/${anime.id}`)}
+                onMouseEnter={(e) => handleCardMouseEnter(anime, 'anime', e)}
+                onMouseLeave={handleCardMouseLeave}
                 className="group relative h-72 glass-card rounded-2xl flex flex-col justify-between overflow-hidden cursor-pointer"
               >
                 {/* Poster Image */}
@@ -860,6 +976,20 @@ export default function AnimesLibrary() {
                       ) : null;
                     })()}
                   </div>
+
+                  {/* Mobile 3-Dot Options Button */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setActiveMobileMenu({ type: 'anime', id: anime.id, item: anime });
+                    }}
+                    className="md:hidden absolute bottom-2 right-2 z-20 p-1.5 rounded-lg bg-black/80 hover:bg-black text-gray-200 border border-white/20 shadow-lg backdrop-blur-md active:scale-90 transition cursor-pointer"
+                    title="Options"
+                  >
+                    <MoreVertical size={13} />
+                  </button>
                 </div>
 
                 {/* Card Details */}
@@ -1591,6 +1721,170 @@ export default function AnimesLibrary() {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Desktop Card Hover Preview Modal with YouTube Teaser/Trailer Autoplay */}
+      <MediaPreviewModal
+        isOpen={Boolean(activePreview)}
+        item={activePreview?.item}
+        type="anime"
+        cardRect={activePreview?.rect}
+        onClose={() => setActivePreview(null)}
+        onMouseEnter={handleModalMouseEnter}
+        onMouseLeave={handleModalMouseLeave}
+        onOpenDetails={(item) => {
+          setActivePreview(null);
+          router.push(`/${item.id}`);
+        }}
+        onAskComplete={(item) => {
+          handleToggleAnimeComplete(item);
+        }}
+        onEdit={(item) => {
+          setActivePreview(null);
+          handleOpenEditModal(item);
+        }}
+        onDelete={(item) => {
+          setActivePreview(null);
+          handleDeleteAnime(item);
+        }}
+      />
+
+      {/* Mobile 3-Dot Options Bottom Sheet / Action Sheet */}
+      <AnimatePresence>
+        {activeMobileMenu && (
+          <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm"
+            onClick={() => setActiveMobileMenu(null)}
+          >
+            <motion.div
+              initial={{ y: '100%', opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: '100%', opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl bg-[#111622] border-t sm:border border-white/20 p-5 shadow-2xl space-y-3 text-white pb-8 sm:pb-5"
+            >
+              {/* Header */}
+              <div className="flex items-center gap-3 border-b border-white/10 pb-3">
+                {activeMobileMenu.item?.posterUrl || activeMobileMenu.item?.coverUrl || activeMobileMenu.item?.thumbnailBase64 || activeMobileMenu.item?.thumbnailPath ? (
+                  <img
+                    src={
+                      activeMobileMenu.item.posterUrl ||
+                      activeMobileMenu.item.coverUrl ||
+                      activeMobileMenu.item.thumbnailBase64 ||
+                      (activeMobileMenu.item.thumbnailPath ? `/api/image?path=${encodeURIComponent(activeMobileMenu.item.thumbnailPath)}` : '')
+                    }
+                    alt={activeMobileMenu.item.title}
+                    className="w-10 h-14 object-cover rounded-lg shadow"
+                  />
+                ) : (
+                  <div className="w-10 h-14 bg-white/10 rounded-lg flex items-center justify-center">
+                    <Film size={18} className="text-[#a855f7]" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-sm text-white truncate">
+                    {activeMobileMenu.item?.title}
+                  </h4>
+                  <p className="text-xs text-gray-400">
+                    {activeMobileMenu.item?.totalEpisodes ? `${activeMobileMenu.item.totalEpisodes} Ep` : activeMobileMenu.item?.year || ''} • Anime
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveMobileMenu(null)}
+                  className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-gray-300 cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-1 pt-1">
+                {/* Play / Open Details */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMobileMenu.item;
+                    setActiveMobileMenu(null);
+                    router.push(`/${target.id}`);
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl bg-[#7c5cff]/20 hover:bg-[#7c5cff]/30 text-[#a855f7] flex items-center gap-3 text-sm font-bold transition active:scale-98 cursor-pointer"
+                >
+                  <Play size={18} fill="currentColor" />
+                  <span>Open Anime</span>
+                </button>
+
+                {/* Complete / Incomplete */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMobileMenu.item;
+                    setActiveMobileMenu(null);
+                    handleToggleAnimeComplete(target);
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl hover:bg-white/10 flex items-center gap-3 text-sm font-semibold text-white transition active:scale-98 cursor-pointer"
+                >
+                  <CheckCircle2
+                    size={18}
+                    className={
+                      getAnimeProgressPercent(activeMobileMenu.item) === 100
+                        ? 'text-emerald-400'
+                        : 'text-gray-400'
+                    }
+                  />
+                  <span>
+                    {getAnimeProgressPercent(activeMobileMenu.item) === 100
+                      ? 'Mark Incomplete'
+                      : 'Mark as Completed'}
+                  </span>
+                </button>
+
+                {/* Edit */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMobileMenu.item;
+                    setActiveMobileMenu(null);
+                    handleOpenEditModal(target);
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl hover:bg-white/10 flex items-center gap-3 text-sm font-semibold text-white transition active:scale-98 cursor-pointer"
+                >
+                  <Edit3 size={18} className="text-[#a855f7]" />
+                  <span>Edit Details</span>
+                </button>
+
+                {/* Stop Tracking / Delete */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    const target = activeMobileMenu.item;
+                    setActiveMobileMenu(null);
+                    handleDeleteAnime(target, e);
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl hover:bg-rose-500/20 text-rose-300 flex items-center gap-3 text-sm font-semibold transition active:scale-98 cursor-pointer"
+                >
+                  <Trash2 size={18} className="text-rose-400" />
+                  <span>Stop Tracking</span>
+                </button>
+
+                {/* View Details */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMobileMenu.item;
+                    setActiveMobileMenu(null);
+                    router.push(`/${target.id}`);
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl hover:bg-white/10 flex items-center gap-3 text-sm font-semibold text-gray-300 transition active:scale-98 cursor-pointer"
+                >
+                  <Eye size={18} className="text-indigo-400" />
+                  <span>View Full Details</span>
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

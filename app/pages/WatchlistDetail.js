@@ -180,6 +180,20 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
     }
   }, [seasons, activeSeasonNumber]);
 
+  // Auto-fetch seasons & episode details on mount for anime & web-series if not loaded yet
+  const autoFetchedSeasonsRef = useRef(false);
+  useEffect(() => {
+    if (
+      item &&
+      !autoFetchedSeasonsRef.current &&
+      (item.contentType === 'web-series' || item.contentType === 'tv' || item.contentType === 'anime') &&
+      (!item.seasons || item.seasons.length === 0)
+    ) {
+      autoFetchedSeasonsRef.current = true;
+      handleFetchSeasonsAndEpisodes();
+    }
+  }, [item?.id, item?.contentType, item?.seasons]);
+
   // Fetch or refresh seasons & episode details from TMDB
   const handleFetchSeasonsAndEpisodes = async () => {
     if (!item) return;
@@ -188,9 +202,19 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
 
     try {
       const params = new URLSearchParams();
-      if (item.tmdbId) params.set('tmdbId', String(item.tmdbId));
+      if (item.tmdbId && !String(item.tmdbId).startsWith('watchlist-') && !String(item.tmdbId).startsWith('anilist-')) {
+        params.set('tmdbId', String(item.tmdbId));
+      }
       if (item.id) params.set('id', String(item.id));
-      if (item.title) params.set('q', item.title);
+      if (item.anilistId || item.aniListId) {
+        params.set('anilistId', String(item.anilistId || item.aniListId));
+      }
+      const q = item.title || item.englishTitle || item.originalTitle || item.name || '';
+      if (q) params.set('q', q);
+      if (item.englishTitle) params.set('englishTitle', item.englishTitle);
+      if (item.originalTitle) params.set('originalTitle', item.originalTitle);
+      if (item.romajiTitle) params.set('romajiTitle', item.romajiTitle);
+      if (item.contentType) params.set('type', item.contentType);
 
       const res = await fetch(`/api/watchlist/seasons?${params.toString()}`);
       const data = await res.json();
@@ -199,7 +223,7 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
         const totalEps = data.episodesCount || data.seasons.reduce((acc, s) => acc + (s.episodes?.length || s.episodeCount || 0), 0);
         const updatedItem = {
           ...item,
-          tmdbId: item.tmdbId || data.tmdbId,
+          tmdbId: data.tmdbId || item.tmdbId,
           seasonsCount: data.seasonsCount || data.seasons.length,
           episodesCount: totalEps,
           seasons: data.seasons,
@@ -711,7 +735,7 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
         </section>
 
         {/* 1.5. SEASONS & EPISODES SECTION */}
-        {(item.contentType === 'web-series' || item.contentType === 'tv' || seasons.length > 0) && (
+        {(item.contentType === 'web-series' || item.contentType === 'tv' || item.contentType === 'anime' || seasons.length > 0) && (
           <section className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2.5">

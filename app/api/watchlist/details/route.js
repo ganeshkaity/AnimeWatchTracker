@@ -627,6 +627,8 @@ export async function GET(request) {
       anilistId: aniData?.id || null,
       contentType: type,
       title: primaryTitle,
+      englishTitle: aniData?.titleEnglish || tmdbData?.title || '',
+      romajiTitle: aniData?.titleRomaji || '',
       originalTitle,
       overview,
       year,

@@ -236,7 +236,7 @@ export default function AddWatchlistModal({
     const tmdbId = selectedItem?.tmdbId || '';
     const q = title.trim() || selectedItem?.title || searchQuery.trim();
     if (!tmdbId && !q) {
-      alert('Please enter or select a web series title first.');
+      alert('Please enter or select a title first.');
       return;
     }
 
@@ -352,9 +352,9 @@ export default function AddWatchlistModal({
         cast,
         images,
         videos,
-        seasonsCount: contentType === 'web-series' ? (seasonsCount || seasons.length || 0) : 0,
-        episodesCount: contentType === 'web-series' ? (episodesCount || seasons.reduce((acc, s) => acc + (s.episodes?.length || s.episodeCount || 0), 0)) : 0,
-        seasons: contentType === 'web-series' ? seasons : [],
+        seasonsCount: (contentType === 'web-series' || contentType === 'anime') ? (seasonsCount || seasons.length || 0) : 0,
+        episodesCount: (contentType === 'web-series' || contentType === 'anime') ? (episodesCount || seasons.reduce((acc, s) => acc + (s.episodes?.length || s.episodeCount || 0), 0)) : 0,
+        seasons: (contentType === 'web-series' || contentType === 'anime') ? seasons : [],
         streamProviders,
         status: 'Plan to Watch', // Plan to Watch | Watching | Completed
         addedAt: new Date().toISOString(),
@@ -670,8 +670,8 @@ export default function AddWatchlistModal({
               />
             </div>
 
-            {/* Web-Series Seasons & Episodes Section */}
-            {contentType === 'web-series' && (
+            {/* Web-Series & Anime Seasons & Episodes Section */}
+            {(contentType === 'web-series' || contentType === 'anime') && (
               <div className="p-4 rounded-2xl bg-indigo-500/[0.07] border border-indigo-500/20 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">

@@ -1056,6 +1056,18 @@ export default function Dashboard({ onSelectAnime }) {
     );
   }, [webseriesList, search]);
 
+  const autocompleteWatchlistMatches = useMemo(() => {
+    if (!search || !search.trim()) return [];
+    const q = search.trim().toLowerCase();
+    return (watchlist || []).filter(item =>
+      (item?.title || '').toLowerCase().includes(q) ||
+      (item?.originalTitle || '').toLowerCase().includes(q) ||
+      (item?.englishTitle || '').toLowerCase().includes(q) ||
+      (item?.romajiTitle || '').toLowerCase().includes(q) ||
+      (item?.name || '').toLowerCase().includes(q)
+    );
+  }, [watchlist, search]);
+
   // Auto Hero Slider Timer (Advances every 30 seconds)
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1854,20 +1866,69 @@ export default function Dashboard({ onSelectAnime }) {
 
   // Delete Anime
   const handleDeleteAnime = async (anime, e) => {
-    e.stopPropagation();
-    e.preventDefault();
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     if (!confirm('Are you sure you want to stop tracking this anime? Progress and notes will be deleted.')) return;
     try {
       const animeId = anime.id;
-      const targetUserId = anime.userId || currentUser.uid;
+      const targetUserId = anime.userId || currentUser?.uid || getUserId();
       deleteLocalAnime(animeId);
-      if (!isOffline && db) {
+      setAnimes(prev => prev.filter(a => a.id !== animeId));
+      if (!isOffline && db && targetUserId) {
         await deleteDoc(doc(db, 'users', targetUserId, 'anime', animeId));
       } else {
         addToDirtyQueue({ type: 'DELETE_ANIME', dedupeKey: `DELETE_ANIME_${animeId}`, payload: { id: animeId, userId: targetUserId } });
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // Toggle Anime Completed / Incomplete
+  const handleToggleAnimeComplete = async (animeItem) => {
+    if (!animeItem) return;
+    const currentPct = getAnimeProgressPercent(animeItem);
+    const shouldMarkComplete = currentPct < 100;
+
+    const eps = getLocalEpisodes(animeItem.id) || [];
+    if (eps.length > 0) {
+      const updatedEps = eps.map(e => ({
+        ...e,
+        isWatched: shouldMarkComplete,
+        watchedSeconds: shouldMarkComplete ? (e.durationSeconds || 1440) : 0,
+        lastPositionSeconds: shouldMarkComplete ? (e.durationSeconds || 1440) : 0,
+        updatedAt: new Date().toISOString()
+      }));
+      setLocalEpisodes(animeItem.id, updatedEps);
+    }
+
+    const updatedAnime = {
+      ...animeItem,
+      progressPercent: shouldMarkComplete ? 100 : 0,
+      watchStatus: shouldMarkComplete ? 'Completed' : 'Watching',
+      completed: shouldMarkComplete,
+      isWatched: shouldMarkComplete,
+      updatedAt: new Date().toISOString()
+    };
+
+    upsertLocalAnime(updatedAnime);
+    setAnimes(prev => prev.map(a => a.id === animeItem.id ? updatedAnime : a));
+
+    const targetUserId = animeItem.userId || currentUser?.uid || getUserId();
+    if (targetUserId && db && !isOffline) {
+      try {
+        await setDoc(doc(db, 'users', targetUserId, 'anime', animeItem.id), {
+          progressPercent: shouldMarkComplete ? 100 : 0,
+          watchStatus: shouldMarkComplete ? 'Completed' : 'Watching',
+          completed: shouldMarkComplete,
+          isWatched: shouldMarkComplete,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (err) {
+        console.warn('Failed to sync anime status to firestore:', err);
+      }
     }
   };
 
@@ -3240,8 +3301,10 @@ export default function Dashboard({ onSelectAnime }) {
   };
 
   const handleOpenEditModal = (anime, e) => {
-    e.stopPropagation();
-    e.preventDefault();
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     setEditingAnime(anime);
     const initialTitle = anime.title || '';
     setEditTitle(initialTitle);
@@ -3860,12 +3923,52 @@ export default function Dashboard({ onSelectAnime }) {
             {/* Search Recommendations Dropdown */}
             {search.trim().length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-2 bg-[#111827]/95 backdrop-blur-md border border-white/10 rounded-2xl shadow-2xl z-50 max-h-96 overflow-y-auto no-scrollbar">
-                {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 && autocompleteMovieMatches.length === 0 && autocompleteWebseriesMatches.length === 0 ? (
+                {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 && autocompleteMovieMatches.length === 0 && autocompleteWebseriesMatches.length === 0 && autocompleteWatchlistMatches.length === 0 ? (
                   <div className="p-4 text-center text-xs text-gray-400">
-                    No anime, manga, audio story, movie or webseries matches found
+                    No anime, manga, audio story, movie, webseries, or watchlist matches found
                   </div>
                 ) : (
                   <div className="p-2 space-y-1">
+                    {autocompleteWatchlistMatches.slice(0, 4).map((item) => {
+                      const coverImg = item.posterUrl || (item.images?.posters?.[0]?.url || item.backdropUrl || null);
+                      return (
+                        <div
+                          key={`search-watchlist-${item.id}`}
+                          onClick={() => {
+                            router.push(`/watchlist/${item.id}`);
+                            setSearch('');
+                          }}
+                          className="flex items-center gap-3 p-2 rounded-xl hover:bg-amber-950/40 border border-amber-500/20 transition cursor-pointer"
+                        >
+                          <div className="w-9 h-12 rounded-lg overflow-hidden bg-amber-950/60 flex-shrink-0 relative flex items-center justify-center">
+                            {coverImg ? (
+                              <img src={coverImg} alt={item.title} className="w-full h-full object-cover" />
+                            ) : (
+                              <Bookmark size={16} className="text-amber-400" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-amber-400 to-yellow-500 text-[8px] font-extrabold text-black uppercase flex items-center gap-0.5 shadow-sm">
+                                <Bookmark size={8} /> Watchlist
+                              </span>
+                              {item.contentType && (
+                                <span className="px-1.5 py-0.5 rounded bg-white/10 text-[8px] font-bold text-gray-300 uppercase">
+                                  {item.contentType}
+                                </span>
+                              )}
+                              <h4 className="font-bold text-xs text-white truncate">{item.title}</h4>
+                            </div>
+                            <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                              {item.year ? `${item.year} • ` : ''}
+                              {item.status || 'Plan to Watch'}
+                              {item.rating ? ` • ★ ${parseFloat(item.rating).toFixed(1)}` : ''}
+                              {item.episodesCount ? ` • ${item.episodesCount} Ep` : ''}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
                     {autocompleteWebseriesMatches.slice(0, 3).map((ws) => (
                       <div
                         key={`search-webseries-${ws.id}`}
@@ -4488,10 +4591,74 @@ export default function Dashboard({ onSelectAnime }) {
                     {/* Live Autocomplete Matches */}
                     {search.trim().length > 0 && (
                       <div className="absolute top-full left-0 right-0 mt-2 bg-[#0f172a]/95 border border-white/15 rounded-xl shadow-2xl z-50 max-h-64 overflow-y-auto no-scrollbar">
-                        {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 && autocompleteMovieMatches.length === 0 ? (
+                        {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 && autocompleteMovieMatches.length === 0 && autocompleteWebseriesMatches.length === 0 && autocompleteWatchlistMatches.length === 0 ? (
                           <div className="p-3 text-center text-xs text-gray-400">No matches found</div>
                         ) : (
                           <div className="p-1 space-y-1">
+                            {autocompleteWatchlistMatches.slice(0, 3).map((item) => {
+                              const coverImg = item.posterUrl || (item.images?.posters?.[0]?.url || item.backdropUrl || null);
+                              return (
+                                <div
+                                  key={`side-search-watchlist-${item.id}`}
+                                  onClick={() => {
+                                    router.push(`/watchlist/${item.id}`);
+                                    setSearch('');
+                                    setMobileMenuOpen(false);
+                                  }}
+                                  className="flex items-center gap-2 p-2 rounded-lg hover:bg-amber-950/40 border border-amber-500/20 transition cursor-pointer"
+                                >
+                                  <div className="w-8 h-10 rounded overflow-hidden bg-amber-950/60 flex-shrink-0 relative flex items-center justify-center">
+                                    {coverImg ? (
+                                      <img src={coverImg} alt={item.title} className="w-full h-full object-cover" />
+                                    ) : (
+                                      <Bookmark size={14} className="text-amber-400" />
+                                    )}
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1">
+                                      <span className="px-1 py-0.2 rounded bg-gradient-to-r from-amber-400 to-yellow-500 text-[7px] font-black text-black uppercase flex items-center gap-0.5">
+                                        <Bookmark size={7} /> WL
+                                      </span>
+                                      {item.contentType && (
+                                        <span className="px-1 py-0.2 rounded bg-white/10 text-[7px] font-bold text-gray-300 uppercase">
+                                          {item.contentType}
+                                        </span>
+                                      )}
+                                      <h4 className="font-bold text-xs text-white truncate">{item.title}</h4>
+                                    </div>
+                                    <p className="text-[9px] text-gray-400 truncate mt-0.5">
+                                      {item.year ? `${item.year} • ` : ''}
+                                      {item.status || 'Watchlist'}
+                                    </p>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {autocompleteWebseriesMatches.slice(0, 3).map((ws) => (
+                              <div
+                                key={`side-search-webseries-${ws.id}`}
+                                onClick={() => {
+                                  router.push(`/webseries/${ws.id}`);
+                                  setSearch('');
+                                  setMobileMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2 p-2 rounded-lg hover:bg-cyan-950/40 border border-cyan-500/20 transition cursor-pointer"
+                              >
+                                <div className="w-8 h-10 rounded overflow-hidden bg-cyan-950/60 flex-shrink-0 relative flex items-center justify-center">
+                                  {ws.posterUrl || ws.posterPath ? (
+                                    <img src={ws.posterUrl || ws.posterPath} alt={ws.title} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <Tv size={14} className="text-cyan-400" />
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1">
+                                    <span className="px-1 py-0.2 rounded bg-gradient-to-r from-cyan-500 to-blue-600 text-[7px] font-bold text-white uppercase">Series</span>
+                                    <h4 className="font-bold text-xs text-white truncate">{ws.title}</h4>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
                             {autocompleteMovieMatches.slice(0, 3).map((mov) => (
                               <div
                                 key={`side-search-movie-${mov.id}`}
@@ -5860,6 +6027,8 @@ export default function Dashboard({ onSelectAnime }) {
                 <div
                   key={anime.id}
                   onClick={() => onSelectAnime(anime.id)}
+                  onMouseEnter={(e) => handleCardMouseEnter(anime, 'anime', e)}
+                  onMouseLeave={handleCardMouseLeave}
                   className="group relative flex-none w-52 sm:w-56 md:w-60 h-72 glass-card rounded-2xl flex flex-col justify-between overflow-hidden cursor-pointer"
                 >
                   {/* Poster Image */}
@@ -5921,6 +6090,20 @@ export default function Dashboard({ onSelectAnime }) {
                         ) : null;
                       })()}
                     </div>
+
+                    {/* Mobile 3-Dot Options Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setActiveMobileMenu({ type: 'anime', id: anime.id, item: anime });
+                      }}
+                      className="md:hidden absolute bottom-2 right-2 z-20 p-1.5 rounded-lg bg-black/80 hover:bg-black text-gray-200 border border-white/20 shadow-lg backdrop-blur-md active:scale-90 transition cursor-pointer"
+                      title="Options"
+                    >
+                      <MoreVertical size={13} />
+                    </button>
                   </div>
 
                   {/* Card Details */}
@@ -9850,6 +10033,8 @@ export default function Dashboard({ onSelectAnime }) {
             router.push(`/movies/${item.id}`);
           } else if (activePreview?.type === 'webseries') {
             router.push(`/webseries/${item.id}`);
+          } else if (activePreview?.type === 'anime') {
+            onSelectAnime(item.id);
           } else {
             router.push(`/watchlist/${item.id}`);
           }
@@ -9859,6 +10044,8 @@ export default function Dashboard({ onSelectAnime }) {
             setMovieCompleteConfirm(item);
           } else if (activePreview?.type === 'webseries') {
             setWebseriesCompleteConfirm(item);
+          } else if (activePreview?.type === 'anime') {
+            handleToggleAnimeComplete(item);
           } else {
             setWatchlistCompleteConfirm(item);
           }
@@ -9869,6 +10056,8 @@ export default function Dashboard({ onSelectAnime }) {
             setMovieEditing(item);
           } else if (activePreview?.type === 'webseries') {
             setWebseriesEditing(item);
+          } else if (activePreview?.type === 'anime') {
+            handleOpenEditModal(item);
           } else {
             setEditingWatchlistItem(item);
           }
@@ -9879,6 +10068,8 @@ export default function Dashboard({ onSelectAnime }) {
             handleDeleteMovie(item);
           } else if (activePreview?.type === 'webseries') {
             handleDeleteWebseries(item);
+          } else if (activePreview?.type === 'anime') {
+            handleDeleteAnime(item);
           } else {
             handleDeleteWatchlist(item);
           }
@@ -9943,9 +10134,15 @@ export default function Dashboard({ onSelectAnime }) {
             >
               {/* Header */}
               <div className="flex items-center gap-3 border-b border-white/10 pb-3">
-                {activeMobileMenu.item?.posterUrl || activeMobileMenu.item?.posterPath ? (
+                {activeMobileMenu.item?.posterUrl || activeMobileMenu.item?.posterPath || activeMobileMenu.item?.coverUrl || activeMobileMenu.item?.thumbnailBase64 || activeMobileMenu.item?.thumbnailPath ? (
                   <img
-                    src={activeMobileMenu.item.posterUrl || activeMobileMenu.item.posterPath}
+                    src={
+                      activeMobileMenu.item.posterUrl ||
+                      activeMobileMenu.item.posterPath ||
+                      activeMobileMenu.item.coverUrl ||
+                      activeMobileMenu.item.thumbnailBase64 ||
+                      (activeMobileMenu.item.thumbnailPath ? `/api/image?path=${encodeURIComponent(activeMobileMenu.item.thumbnailPath)}` : '')
+                    }
                     alt={activeMobileMenu.item.title}
                     className="w-10 h-14 object-cover rounded-lg shadow"
                   />
@@ -9959,7 +10156,15 @@ export default function Dashboard({ onSelectAnime }) {
                     {activeMobileMenu.item?.title}
                   </h4>
                   <p className="text-xs text-gray-400">
-                    {activeMobileMenu.item?.year || ''} • {activeMobileMenu.type === 'movie' ? 'Movie' : activeMobileMenu.type === 'webseries' ? 'Web-series' : 'Watchlist'}
+                    {activeMobileMenu.item?.totalEpisodes ? `${activeMobileMenu.item.totalEpisodes} Ep` : activeMobileMenu.item?.year || ''} • {
+                      activeMobileMenu.type === 'movie'
+                        ? 'Movie'
+                        : activeMobileMenu.type === 'webseries'
+                        ? 'Web-series'
+                        : activeMobileMenu.type === 'anime'
+                        ? 'Anime'
+                        : 'Watchlist'
+                    }
                   </p>
                 </div>
                 <button
@@ -9973,6 +10178,29 @@ export default function Dashboard({ onSelectAnime }) {
 
               {/* Action Buttons */}
               <div className="space-y-1 pt-1">
+                {/* Play / Open Details */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMobileMenu.item;
+                    const mType = activeMobileMenu.type;
+                    setActiveMobileMenu(null);
+                    if (mType === 'movie') {
+                      router.push(`/movies/${target.id}`);
+                    } else if (mType === 'webseries') {
+                      router.push(`/webseries/${target.id}`);
+                    } else if (mType === 'anime') {
+                      onSelectAnime(target.id);
+                    } else {
+                      router.push(`/watchlist/${target.id}`);
+                    }
+                  }}
+                  className="w-full text-left px-3.5 py-3 rounded-2xl bg-[#7c5cff]/20 hover:bg-[#7c5cff]/30 text-[#a855f7] flex items-center gap-3 text-sm font-bold transition active:scale-98 cursor-pointer"
+                >
+                  <Play size={18} fill="currentColor" />
+                  <span>{activeMobileMenu.type === 'anime' ? 'Open Anime' : activeMobileMenu.type === 'movie' ? 'Play Movie' : 'Play Series'}</span>
+                </button>
+
                 {/* Complete / Incomplete */}
                 <button
                   type="button"
@@ -9984,6 +10212,8 @@ export default function Dashboard({ onSelectAnime }) {
                       setMovieCompleteConfirm(target);
                     } else if (mType === 'webseries') {
                       setWebseriesCompleteConfirm(target);
+                    } else if (mType === 'anime') {
+                      handleToggleAnimeComplete(target);
                     } else {
                       setWatchlistCompleteConfirm(target);
                     }
@@ -10016,6 +10246,8 @@ export default function Dashboard({ onSelectAnime }) {
                       setMovieEditing(target);
                     } else if (mType === 'webseries') {
                       setWebseriesEditing(target);
+                    } else if (mType === 'anime') {
+                      handleOpenEditModal(target);
                     } else {
                       setEditingWatchlistItem(target);
                     }
@@ -10053,6 +10285,8 @@ export default function Dashboard({ onSelectAnime }) {
                       handleDeleteMovie(target, e);
                     } else if (mType === 'webseries') {
                       handleDeleteWebseries(target, e);
+                    } else if (mType === 'anime') {
+                      handleDeleteAnime(target, e);
                     } else {
                       handleDeleteWatchlist(target, e);
                     }
@@ -10074,6 +10308,8 @@ export default function Dashboard({ onSelectAnime }) {
                       router.push(`/movies/${target.id}`);
                     } else if (mType === 'webseries') {
                       router.push(`/webseries/${target.id}`);
+                    } else if (mType === 'anime') {
+                      onSelectAnime(target.id);
                     } else {
                       router.push(`/watchlist/${target.id}`);
                     }
