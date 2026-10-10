@@ -121,6 +121,14 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
   });
   const [loading, setLoading] = useState(!item);
 
+  // Dynamic Document Title
+  useEffect(() => {
+    const title = item?.title || item?.name;
+    if (title) {
+      document.title = `${title} - Ganeshspace`;
+    }
+  }, [item?.title, item?.name]);
+
   // Modals
   const [showEditModal, setShowEditModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);

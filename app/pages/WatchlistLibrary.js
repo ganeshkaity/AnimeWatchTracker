@@ -82,6 +82,11 @@ export default function WatchlistLibrary() {
     return true;
   });
 
+  // Dynamic Document Title
+  useEffect(() => {
+    document.title = "Watchlist - Ganeshspace";
+  }, []);
+
   // Filter & Search states
   const [search, setSearch] = useState('');
   const [selectedType, setSelectedType] = useState('all');
@@ -567,9 +572,9 @@ export default function WatchlistLibrary() {
       {/* ── Main Media Grid ─────────────────────────────────────────────────── */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 md:px-8 pb-16">
         {loading ? (
-          <div className="grid grid-cols-2 min-[460px]:grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3 sm:gap-3.5 md:gap-4 pt-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-5 pt-2">
             {Array.from({ length: 16 }).map((_, idx) => (
-              <div key={idx} className="glass-card rounded-2xl overflow-hidden aspect-[2/3] bg-white/[0.04] shimmer" />
+              <div key={idx} className="aspect-[2/3] rounded-2xl bg-white/5 animate-pulse" />
             ))}
           </div>
         ) : filteredAndSorted.length === 0 ? (
@@ -610,20 +615,11 @@ export default function WatchlistLibrary() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-2 min-[460px]:grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3 sm:gap-3.5 md:gap-4 pt-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-5 pt-2">
             {displayedItems.map((item) => {
               const coverImg = item.posterUrl || (item.images?.posters?.[0]?.url || null);
               const isCompleted = item.status === 'Completed';
-
-              // Extract top streaming provider pills
-              const streamBadges = [];
-              if (item.streamProviders?.needPlan?.length > 0) {
-                streamBadges.push(item.streamProviders.needPlan[0].name);
-              } else if (item.streamProviders?.free?.length > 0) {
-                streamBadges.push(item.streamProviders.free[0].name);
-              } else if (item.streamProviders?.rent?.length > 0) {
-                streamBadges.push(`Rent: ${item.streamProviders.rent[0].name}`);
-              }
+              const pct = item.progressPercent || item.watchProgress || 0;
 
               return (
                 <div
@@ -631,10 +627,9 @@ export default function WatchlistLibrary() {
                   onClick={() => router.push(`/watchlist/${item.id}`)}
                   onMouseEnter={(e) => handleCardMouseEnter(item, 'watchlist', e)}
                   onMouseLeave={handleCardMouseLeave}
-                  className="glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-2xl relative"
+                  className="group relative rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-amber-400/50 hover:shadow-2xl hover:shadow-black/70 transition-all duration-300 cursor-pointer flex flex-col"
                 >
-                  {/* Poster Area */}
-                  <div className="relative aspect-[2/3] w-full overflow-hidden bg-[#181c24] flex items-center justify-center">
+                  <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
                     {coverImg ? (
                       <CachedImage
                         src={coverImg}
@@ -642,66 +637,73 @@ export default function WatchlistLibrary() {
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
                     ) : (
-                      <div className="w-full h-full bg-gradient-to-br from-purple-900/50 to-black flex flex-col items-center justify-center p-3 text-center">
-                        <Bookmark size={28} className="text-amber-400 mb-1" />
-                        <span className="text-[10px] font-bold text-white/90 line-clamp-2">{item.title}</span>
+                      <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-1.5 p-3">
+                        <Bookmark size={36} />
+                        <span className="text-[10px] font-bold text-white/90 line-clamp-2 text-center">{item.title}</span>
                       </div>
                     )}
 
-                    {/* Gradient Overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-black/30 pointer-events-none" />
-
                     {/* Top Badges */}
-                    <div className="absolute top-2 left-2 flex items-center gap-1">
-                      <span className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-300 text-[9px] font-extrabold uppercase tracking-wider border border-white/10">
-                        {item.contentType || 'Media'}
-                      </span>
-                    </div>
-
-                    <div className="absolute top-2 right-2">
+                    <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
                       {item.rating > 0 ? (
-                        <span className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-bold flex items-center gap-0.5 border border-white/10">
-                          <Star size={9} className="fill-amber-400" />
-                          {item.rating}
-                        </span>
+                        <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
+                          <Star size={10} className="fill-amber-400" />
+                          <span>{parseFloat(item.rating).toFixed(1)}</span>
+                        </div>
+                      ) : <span />}
+
+                      {isCompleted ? (
+                        <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
+                          <Check size={9} /> DONE
+                        </div>
+                      ) : pct > 0 ? (
+                        <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
+                          {Math.round(pct)}%
+                        </div>
+                      ) : item.contentType ? (
+                        <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-300 text-[9px] font-extrabold uppercase tracking-wider border border-white/10 shadow">
+                          {item.contentType}
+                        </div>
                       ) : null}
                     </div>
 
                     {/* Mobile 3-Dot Options Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        setActiveMobileMenu({ type: 'watchlist', id: item.id, item });
-                      }}
-                      className="md:hidden absolute bottom-2 right-2 z-20 p-1.5 rounded-lg bg-black/80 hover:bg-black text-gray-200 border border-white/20 shadow-lg backdrop-blur-md active:scale-90 transition cursor-pointer"
-                      title="Options"
-                    >
-                      <MoreVertical size={13} />
-                    </button>
-                  </div>
+                    <div className="md:hidden absolute top-2 right-2 z-20">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMobileMenu({ type: 'watchlist', id: item.id, item });
+                        }}
+                        className="p-1.5 rounded-lg bg-black/80 text-white border border-white/20 shadow-lg"
+                      >
+                        <MoreVertical size={13} />
+                      </button>
+                    </div>
 
-                  {/* Card Bottom Details */}
-                  <div className="p-3 bg-[#0d1117] flex-1 flex flex-col justify-between">
-                    <div>
-                      <h4 className="font-bold text-xs text-white truncate group-hover:text-amber-300 transition-colors" title={item.title}>
+                    {/* Bottom Gradient Overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
+
+                    {/* Bottom Info inside Card */}
+                    <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 space-y-0.5 pointer-events-none">
+                      <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-amber-300 transition" title={item.title}>
                         {item.title}
-                      </h4>
-
-                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1">
-                        <span>{item.year || item.contentType}</span>
-                        <span className={isCompleted ? "text-emerald-400 font-bold flex items-center gap-0.5" : "text-amber-400 font-semibold"}>
-                          {item.status || 'Plan to Watch'}
+                      </h3>
+                      <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
+                        <span>{item.year || item.contentType || 'Watchlist'}</span>
+                        <span className={isCompleted ? "text-emerald-400 font-bold" : "text-amber-400 font-semibold"}>
+                          {isCompleted ? 'Done' : (item.status || 'Plan to Watch')}
                         </span>
                       </div>
                     </div>
 
-                    {/* Stream Pill */}
-                    {streamBadges.length > 0 && (
-                      <div className="mt-2 pt-1.5 border-t border-white/5 flex items-center gap-1 text-[9px] text-cyan-300 truncate">
-                        <Globe size={10} className="shrink-0 text-cyan-400" />
-                        <span className="truncate">{streamBadges[0]}</span>
+                    {/* Watch progress bar at the very bottom inside the poster card */}
+                    {pct > 0 && (
+                      <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-300"
+                          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                        />
                       </div>
                     )}
                   </div>

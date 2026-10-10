@@ -92,6 +92,11 @@ export default function MoviesLibrary() {
     return true;
   });
 
+  // Dynamic Document Title
+  useEffect(() => {
+    document.title = "Movie Library - Ganeshspace";
+  }, []);
+
   // Progressive loading & screen-filling card count state with session persistence
   const [visibleCount, setVisibleCount] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -587,29 +592,12 @@ export default function MoviesLibrary() {
       {/* ── Movie Grid Content ──────────────────────────────────────────────── */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 md:px-8 pb-16">
         {loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 pt-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-5 pt-2">
             {Array.from({ length: skeletonCount }).map((_, idx) => (
               <div
                 key={`movie-skel-${idx}`}
-                className="glass-card rounded-2xl overflow-hidden flex flex-col justify-between border border-white/5 bg-[#0d1117]"
-              >
-                {/* Poster skeleton */}
-                <div className="relative aspect-[2/3] w-full bg-white/[0.04] shimmer overflow-hidden">
-                  <div className="absolute top-2 left-2 w-10 h-4 rounded-md bg-white/10" />
-                  <div className="absolute top-2 right-2 w-10 h-4 rounded-md bg-white/10" />
-                </div>
-                {/* Card Bottom Details skeleton */}
-                <div className="p-3 bg-[#0d1117] flex-1 flex flex-col justify-between space-y-2">
-                  <div>
-                    <div className="h-3.5 w-4/5 rounded bg-white/10 shimmer" />
-                    <div className="flex justify-between items-center mt-2.5">
-                      <div className="h-2.5 w-1/3 rounded bg-white/5 shimmer" />
-                      <div className="h-2.5 w-10 rounded bg-white/5 shimmer" />
-                    </div>
-                  </div>
-                  <div className="w-full h-1 bg-white/10 rounded-full mt-2 shimmer" />
-                </div>
-              </div>
+                className="aspect-[2/3] rounded-2xl bg-white/5 animate-pulse"
+              />
             ))}
           </div>
         ) : filteredAndSortedMovies.length === 0 ? (
@@ -650,7 +638,7 @@ export default function MoviesLibrary() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-2 min-[460px]:grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3 sm:gap-3.5 md:gap-4 pt-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-5 pt-2">
             {displayedMovies.map((movie) => {
               const isWatched = Boolean(movie.watched || movie.completed || movie.watchStatus === 'Completed' || (movie.watchProgress && movie.watchProgress >= 95));
               const pct = movie.watchProgress || (movie.duration ? Math.min(100, Math.round(((movie.currentTime || 0) / movie.duration) * 100)) : 0);
@@ -664,10 +652,9 @@ export default function MoviesLibrary() {
                   onClick={() => router.push(`/movies/${movie.id}`)}
                   onMouseEnter={(e) => handleCardMouseEnter(movie, 'movie', e)}
                   onMouseLeave={handleCardMouseLeave}
-                  className="glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-2xl relative"
+                  className="group relative rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-amber-400/50 hover:shadow-2xl hover:shadow-black/70 transition-all duration-300 cursor-pointer flex flex-col"
                 >
-                  {/* Poster Area */}
-                  <div className="relative aspect-[2/3] w-full overflow-hidden bg-[#181c24] flex items-center justify-center">
+                  <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
                     {coverImg ? (
                       <CachedImage
                         src={coverImg}
@@ -675,78 +662,66 @@ export default function MoviesLibrary() {
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
                     ) : (
-                      <div className="w-full h-full bg-gradient-to-br from-amber-700/60 to-rose-950 flex flex-col items-center justify-center p-3 text-center">
-                        <Film size={28} className="text-amber-300/80 mb-1" />
-                        <span className="text-[10px] font-bold text-white/90 line-clamp-2">{movie.title}</span>
+                      <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-1.5 p-3">
+                        <Film size={36} />
+                        <span className="text-[10px] font-bold text-white/90 line-clamp-2 text-center">{movie.title}</span>
                       </div>
                     )}
 
-                    {/* Gradient Overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 pointer-events-none" />
-
                     {/* Top Badges */}
-                    <div className="absolute top-2 left-2 flex items-center gap-1">
+                    <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
                       {movie.rating ? (
-                        <span className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-300 text-[10px] font-bold flex items-center gap-0.5 border border-white/10">
-                          <Star size={10} className="fill-amber-400 text-amber-400" />
-                          {movie.rating}
-                        </span>
+                        <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
+                          <Star size={10} className="fill-amber-400" />
+                          <span>{parseFloat(movie.rating).toFixed(1)}</span>
+                        </div>
+                      ) : <span />}
+
+                      {isWatched ? (
+                        <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
+                          <Check size={9} /> DONE
+                        </div>
+                      ) : pct > 0 ? (
+                        <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
+                          {Math.round(pct)}%
+                        </div>
                       ) : null}
                     </div>
 
-                    <div className="absolute top-2 right-2">
-                      {Boolean(movie.isYouTube || movie.youtubeUrl || movie.youtubeId || movie.localFilePath?.includes('youtube')) ? (
-                        <div className="p-1 bg-black/60 rounded-lg shadow-lg border border-red-500/40 backdrop-blur-md flex items-center justify-center">
-                          <YoutubeLogo size={15} />
-                        </div>
-                      ) : (
-                        <span className="px-1.5 py-0.5 rounded-md bg-amber-500 text-black text-[9px] font-extrabold uppercase tracking-wider">
-                          TMDB
-                        </span>
-                      )}
+                    {/* Mobile 3-Dot Options Button */}
+                    <div className="md:hidden absolute top-2 right-2 z-20">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMobileMenu({ type: 'movie', id: movie.id, item: movie });
+                        }}
+                        className="p-1.5 rounded-lg bg-black/80 text-white border border-white/20 shadow-lg"
+                      >
+                        <MoreVertical size={13} />
+                      </button>
                     </div>
 
-                    {/* Mobile 3-Dot Options Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        setActiveMobileMenu({ type: 'movie', id: movie.id, item: movie });
-                      }}
-                      className="md:hidden absolute bottom-2 right-2 z-20 p-1.5 rounded-lg bg-black/80 hover:bg-black text-gray-200 border border-white/20 shadow-lg backdrop-blur-md active:scale-90 transition cursor-pointer"
-                      title="Options"
-                    >
-                      <MoreVertical size={13} />
-                    </button>
-                  </div>
+                    {/* Bottom Gradient Overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
 
-                  {/* Card Bottom Details */}
-                  <div className="p-3 bg-[#0d1117] flex-1 flex flex-col justify-between">
-                    <div>
-                      <h4 className="font-bold text-xs text-white truncate group-hover:text-amber-300 transition-colors" title={movie.title}>
+                    {/* Bottom Info inside Card */}
+                    <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 space-y-0.5 pointer-events-none">
+                      <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-amber-300 transition" title={movie.title}>
                         {movie.title}
-                      </h4>
-
-                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1">
-                        <span>{movieYear || runtimeStr || 'Movie'}</span>
-                        <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-0.5" : pct > 0 ? "text-amber-400 font-semibold" : "text-gray-500"}>
-                          {isWatched ? (
-                            <>
-                              <CheckCircle2 size={10} /> Watched
-                            </>
-                          ) : (
-                            pct > 0 ? `${pct}%` : 'Unwatched'
-                          )}
-                        </span>
+                      </h3>
+                      <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
+                        <span>{movieYear || 'Movie'}</span>
+                        <span>{runtimeStr || 'Feature'}</span>
                       </div>
                     </div>
 
-                    {pct > 0 && !isWatched && (
-                      <div className="w-full h-1 bg-white/10 rounded-full mt-2 overflow-hidden">
+                    {/* Watch progress bar at the very bottom inside the poster card */}
+                    {pct > 0 && (
+                      <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 overflow-hidden">
                         <div
-                          className="h-full bg-gradient-to-r from-amber-500 to-rose-600 transition-all duration-300"
-                          style={{ width: `${pct}%` }}
+                          className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-300"
+                          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
                         />
                       </div>
                     )}

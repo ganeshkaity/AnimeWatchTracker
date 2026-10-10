@@ -105,6 +105,14 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
   const [sortAscending, setSortAscending] = useState(true);
   const [chapterStatusFilter, setChapterStatusFilter] = useState('incomplete'); // 'incomplete' | 'completed' | 'all'
   const [loading, setLoading] = useState(true);
+
+  // Dynamic Document Title
+  useEffect(() => {
+    const title = manga?.title || manga?.name;
+    if (title) {
+      document.title = `${title} - Ganeshspace`;
+    }
+  }, [manga?.title, manga?.name]);
   const [search, setSearch] = useState('');
   const [selectedSubfolder, setSelectedSubfolder] = useState('ALL');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);

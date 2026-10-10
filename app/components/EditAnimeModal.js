@@ -35,6 +35,13 @@ export default function EditAnimeModal({
   const [genres, setGenres] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
+  // Online Search & Refetch State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [fillEmptyOnly, setFillEmptyOnly] = useState(true);
+
   useEffect(() => {
     if (anime) {
       setTitle(anime.title || '');
@@ -101,6 +108,52 @@ export default function EditAnimeModal({
     );
   };
 
+  const handleSearchOnline = async (e) => {
+    if (e) e.preventDefault();
+    const q = searchQuery.trim() || title.trim();
+    if (!q) {
+      setSearchError('Please enter an anime title to search');
+      return;
+    }
+    setSearching(true);
+    setSearchError('');
+    try {
+      const res = await fetch(`/api/anime/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.results)) {
+        setSearchResults(data.results);
+        if (data.results.length === 0) {
+          setSearchError('No anime found matching your query.');
+        }
+      } else {
+        setSearchError(data.error || 'Failed to search anime.');
+      }
+    } catch (err) {
+      console.error('[EditAnimeModal] search error:', err);
+      setSearchError('Error searching anime: ' + err.message);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleSelectSearchResult = (item) => {
+    if (!fillEmptyOnly || !title) setTitle(item.title || '');
+    if (!fillEmptyOnly || !romajiTitle) setRomajiTitle(item.romajiTitle || item.title || '');
+    if (!fillEmptyOnly || !englishTitle) setEnglishTitle(item.englishTitle || '');
+    if (!fillEmptyOnly || !year) setYear(item.year ? String(item.year) : '');
+    if (!fillEmptyOnly || !rating) setRating(item.rating ? String(item.rating) : '');
+    if (!fillEmptyOnly || !overview) setOverview(item.overview || '');
+    if (!fillEmptyOnly || !coverUrl) setCoverUrl(item.posterUrl || '');
+    if (!fillEmptyOnly || !bannerUrl) setBannerUrl(item.backdropUrl || '');
+    if (!fillEmptyOnly || genres.length === 0) {
+      if (Array.isArray(item.genres) && item.genres.length > 0) {
+        setGenres(item.genres);
+      }
+    }
+    if (!fillEmptyOnly || !status) setStatus(item.status || 'Ongoing');
+    setSearchResults([]);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md overflow-y-auto">
       <div className="relative w-full max-w-3xl bg-[#0b0f19] border border-white/10 rounded-3xl shadow-2xl overflow-hidden my-auto flex flex-col max-h-[92vh]">
@@ -130,6 +183,120 @@ export default function EditAnimeModal({
 
         {/* Form Body */}
         <div className="overflow-y-auto p-6 space-y-5 flex-1 custom-scrollbar">
+          {/* Online Refetch & Search Bar */}
+          <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Sparkles size={16} className="text-neonCyan" />
+                <span className="text-xs font-bold text-white uppercase tracking-wider">
+                  Refetch / Auto-Fill from Online Database
+                </span>
+              </div>
+              <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={fillEmptyOnly}
+                  onChange={(e) => setFillEmptyOnly(e.target.checked)}
+                  className="rounded border-white/20 bg-white/5 text-neonCyan focus:ring-0 h-3.5 w-3.5"
+                />
+                <span>Fill empty fields only</span>
+              </label>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={14} />
+                <input
+                  type="text"
+                  placeholder={`Search anime (e.g. ${title || 'Bleach'})...`}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSearchOnline();
+                    }
+                  }}
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-black/50 border border-white/15 text-xs text-white focus:outline-none focus:border-neonCyan"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleSearchOnline}
+                disabled={searching}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-neonCyan to-purple-600 hover:brightness-110 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 shrink-0 shadow-lg"
+              >
+                {searching ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Searching...</span>
+                  </>
+                ) : (
+                  <>
+                    <Search size={13} />
+                    <span>Search</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {searchError && (
+              <p className="text-[11px] text-rose-400 flex items-center gap-1">
+                <AlertTriangle size={12} /> {searchError}
+              </p>
+            )}
+
+            {/* Search Results Dropdown List */}
+            {searchResults.length > 0 && (
+              <div className="space-y-2 pt-1 max-h-56 overflow-y-auto custom-scrollbar border-t border-white/10">
+                <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1">
+                  <span>Click an anime to set details in {fillEmptyOnly ? 'empty inputs' : 'all inputs'}:</span>
+                  <button
+                    type="button"
+                    onClick={() => setSearchResults([])}
+                    className="text-gray-400 hover:text-white text-[10px] cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {searchResults.map((resItem) => (
+                    <div
+                      key={resItem.id}
+                      onClick={() => handleSelectSearchResult(resItem)}
+                      className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-neonCyan/40 flex items-start gap-2.5 transition cursor-pointer group"
+                    >
+                      {resItem.posterUrl ? (
+                        <img
+                          src={resItem.posterUrl}
+                          alt={resItem.title}
+                          className="w-10 h-14 object-cover rounded-lg shrink-0 border border-white/10"
+                        />
+                      ) : (
+                        <div className="w-10 h-14 rounded-lg bg-black/40 flex items-center justify-center shrink-0">
+                          <Tv size={14} className="text-gray-500" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <h4 className="text-xs font-bold text-white group-hover:text-neonCyan transition truncate">
+                          {resItem.title}
+                        </h4>
+                        <p className="text-[10px] text-gray-400 truncate">
+                          {resItem.englishTitle || resItem.romajiTitle || ''}
+                        </p>
+                        <div className="flex items-center gap-2 pt-1 text-[10px] text-gray-400">
+                          {resItem.year && <span>{resItem.year}</span>}
+                          {resItem.episodes && <span>• {resItem.episodes} eps</span>}
+                          {resItem.rating && <span className="text-amber-400 font-bold">★ {resItem.rating}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           <form id="edit-anime-form" onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>

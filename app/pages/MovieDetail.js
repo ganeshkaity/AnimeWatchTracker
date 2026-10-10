@@ -151,6 +151,14 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
   const { currentUser, updateDefaultPlayer } = useAuth();
   const [movie, setMovie] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Dynamic Document Title
+  useEffect(() => {
+    const title = movie?.title || movie?.name;
+    if (title) {
+      document.title = `${title} - Ganeshspace`;
+    }
+  }, [movie?.title, movie?.name]);
   const [fileVerified, setFileVerified] = useState(null);
   const [verifyingFile, setVerifyingFile] = useState(false);
 

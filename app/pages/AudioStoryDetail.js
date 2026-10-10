@@ -36,6 +36,14 @@ export default function AudioStoryDetail({ storyId, onBack, onPlayTrack }) {
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Dynamic Document Title
+  useEffect(() => {
+    const title = story?.title || story?.name;
+    if (title) {
+      document.title = `${title} - Ganeshspace`;
+    }
+  }, [story?.title, story?.name]);
+
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOrder, setSortOrder] = useState('asc'); // asc | desc

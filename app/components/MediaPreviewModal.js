@@ -306,10 +306,18 @@ export default function MediaPreviewModal({
     ? `${Math.floor(item.runtime / 60)}h ${item.runtime % 60}m`
     : (item.episodeCount || item.episodesCount || item.totalEpisodes)
     ? `${item.episodeCount || item.episodesCount || item.totalEpisodes} Episodes`
+    : (item.totalChapters || item.chapterCount || item.completedChapters)
+    ? `${item.totalChapters || item.chapterCount || item.completedChapters} Chapters`
+    : (item.totalTracks || item.trackCount || item.completedTracks)
+    ? `${item.totalTracks || item.trackCount || item.completedTracks} Tracks`
     : item.duration
     ? `${Math.round(item.duration / 60)}m`
     : type === 'anime'
     ? 'Anime'
+    : type === 'manga'
+    ? 'Manga'
+    : type === 'audioStory'
+    ? 'Audio'
     : item.contentType || null;
 
   const rawGenre = Array.isArray(item.genres)
@@ -322,6 +330,10 @@ export default function MediaPreviewModal({
     ? 'Web-series'
     : type === 'anime'
     ? 'Anime'
+    : type === 'manga'
+    ? 'Manga'
+    : type === 'audioStory'
+    ? 'Audio Story'
     : 'Watchlist';
 
   // Full language name resolution (e.g., "hi" -> "Hindi")

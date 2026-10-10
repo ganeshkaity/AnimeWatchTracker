@@ -61,6 +61,11 @@ export default function WebseriesLibrary() {
     return true;
   });
 
+  // Dynamic Document Title
+  useEffect(() => {
+    document.title = "Web Series - Ganeshspace";
+  }, []);
+
   // Filter & Search states
   const [search, setSearch] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('all');
@@ -139,14 +144,16 @@ export default function WebseriesLibrary() {
       snap.forEach((d) => items.push({ id: d.id, ...d.data() }));
 
       const localNow = getLocalWebseries() || [];
-      if (items.length > 0) {
-        setWebseriesList(items);
-        setLocalWebseries(items);
-      } else if (localNow.length > 0) {
-        setWebseriesList(localNow);
-        localNow.forEach((s) => {
-          setDoc(doc(db, 'users', uid, 'webseries', s.id), s, { merge: true }).catch(console.warn);
-        });
+      const merged = [...items];
+      localNow.forEach((locItem) => {
+        if (!merged.some((m) => m.id === locItem.id || (locItem.tmdbId && m.tmdbId === locItem.tmdbId))) {
+          merged.unshift(locItem);
+        }
+      });
+
+      if (merged.length > 0) {
+        setWebseriesList(merged);
+        setLocalWebseries(merged);
       } else {
         setWebseriesList([]);
         setLocalWebseries([]);
@@ -160,6 +167,16 @@ export default function WebseriesLibrary() {
 
     return () => unsubscribe();
   }, [currentUser]);
+
+  useEffect(() => {
+    const handleStoreUpdate = () => {
+      const local = getLocalWebseries() || [];
+      setWebseriesList(local);
+      setLoading(false);
+    };
+    window.addEventListener('webseries_store_updated', handleStoreUpdate);
+    return () => window.removeEventListener('webseries_store_updated', handleStoreUpdate);
+  }, []);
 
   // Add Item Handler
   const handleAddWebseries = async (newDoc, episodes) => {
@@ -527,9 +544,12 @@ export default function WebseriesLibrary() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5">
               {displayedItems.map((item) => {
-                const isCompleted = item.completed || item.watchStatus === 'Completed';
+                const isCompleted = Boolean(item.completed || item.watchStatus === 'Completed' || (item.progressPercent && item.progressPercent >= 100));
+                const pct = isCompleted ? 100 : (Number(item.progressPercent) || 0);
+                const seriesYear = item.year || (item.releaseDate ? item.releaseDate.split('-')[0] : '');
+                const epCountDisplay = item.episodeCount ? `${item.episodeCount} eps` : (Array.isArray(item.seasons) ? `${item.seasons.length} Seasons` : 'TV');
 
                 return (
                   <div
@@ -558,15 +578,19 @@ export default function WebseriesLibrary() {
                         {item.rating > 0 ? (
                           <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
                             <Star size={10} className="fill-amber-400" />
-                            {item.rating}
+                            <span>{parseFloat(item.rating).toFixed(1)}</span>
                           </div>
                         ) : <span />}
 
-                        {isCompleted && (
+                        {isCompleted ? (
                           <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
-                            <Check size={9} /> Done
+                            <Check size={9} /> DONE
                           </div>
-                        )}
+                        ) : pct > 0 ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
+                            {Math.round(pct)}%
+                          </div>
+                        ) : null}
                       </div>
 
                       {/* Mobile 3-dot menu trigger button */}
@@ -584,18 +608,28 @@ export default function WebseriesLibrary() {
                       </div>
 
                       {/* Bottom Gradient Overlay */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
 
                       {/* Bottom Info inside Card */}
-                      <div className="absolute bottom-2 left-2 right-2 z-10 space-y-0.5">
+                      <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 space-y-0.5 pointer-events-none">
                         <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-amber-300 transition">
                           {item.title}
                         </h3>
                         <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
-                          <span>{item.year || 'Series'}</span>
-                          <span>{item.episodeCount ? `${item.episodeCount} eps` : 'TV'}</span>
+                          <span>{item.lastWatchedEpisode ? `EP ${item.lastWatchedEpisode}` : (seriesYear || 'Series')}</span>
+                          <span>{epCountDisplay}</span>
                         </div>
                       </div>
+
+                      {/* Watch progress bar at the very bottom inside the poster card */}
+                      {pct > 0 && (
+                        <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-300"
+                            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

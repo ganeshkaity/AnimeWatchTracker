@@ -12,10 +12,23 @@ import { doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import {
-  upsertLocalMovie, upsertLocalAnime, upsertLocalManga,
-  upsertLocalAudioStory, setLocalEpisodes, deleteLocalWatchlist,
+  upsertLocalMovie, upsertLocalAnime, upsertLocalWebseries, upsertLocalManga,
+  upsertLocalAudioStory, setLocalEpisodes, setLocalWebseriesEpisodes, deleteLocalWatchlist,
   getUserId
 } from '../utils/localStore';
+
+const slugify = (text) => {
+  if (!text) return '';
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w\-]+/g, '')
+    .replace(/\-\-+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
+};
 
 export default function TransferWatchlistModal({
   isOpen,
@@ -42,9 +55,17 @@ export default function TransferWatchlistModal({
 
   const isMovie = item.contentType === 'movie';
   const isAnime = item.contentType === 'anime';
-  const isSeries = item.contentType === 'web-series';
+  const isSeries = ['web-series', 'webseries', 'series', 'tv'].includes(item.contentType);
   const isMangaFamily = ['manga', 'manhwa', 'manwah', 'webtoon'].includes(item.contentType);
-  const isAudioStory = item.contentType === 'audio-stories';
+  const isAudioStory = item.contentType === 'audio-stories' || item.contentType === 'audio-story';
+
+  const targetSlug = slugify(item.title || item.originalTitle || '') || (
+    isMovie ? `movie-${Date.now()}` :
+    isSeries ? `series-${Date.now()}` :
+    isAnime ? `anime-${Date.now()}` :
+    isMangaFamily ? `manga-${Date.now()}` :
+    `audio-${Date.now()}`
+  );
 
   // ── 1. Browse PC for File or Folder ───────────────────────────────────────
   const handleBrowse = async () => {
@@ -118,7 +139,7 @@ export default function TransferWatchlistModal({
 
       if (isMovie) {
         // Transfer to Movies Library
-        const movieId = `movie-${item.tmdbId || Date.now()}`;
+        const movieId = targetSlug;
         const movieData = {
           id: movieId,
           tmdbId: item.tmdbId || null,
@@ -154,9 +175,78 @@ export default function TransferWatchlistModal({
         }
 
         setTargetUrl(`/movies/${movieId}`);
-      } else if (isAnime || isSeries) {
+      } else if (isSeries) {
+        // Transfer to Webseries Library
+        const seriesId = targetSlug;
+        const episodesList = scannedItems.length > 0 ? scannedItems.map(ep => ({
+          ...ep,
+          seasonNumber: ep.seasonNumber || 1,
+          seriesId,
+        })) : [
+          {
+            id: 'ep-1',
+            episodeNumber: 1,
+            seasonNumber: 1,
+            title: 'Episode 1',
+            filePath: path.trim(),
+            fileName: fileName || 'Episode 1',
+            isWatched: false,
+            seriesId,
+          }
+        ];
+
+        const seriesData = {
+          id: seriesId,
+          title: item.title,
+          originalTitle: item.originalTitle || '',
+          contentType: 'web-series',
+          type: 'webseries',
+          isWebseries: true,
+          tmdbId: item.tmdbId || null,
+          folderPath: path.trim(),
+          year: item.year ? String(item.year) : '',
+          releaseDate: item.releaseDate || '',
+          overview: item.overview || '',
+          description: item.overview || '',
+          posterUrl: item.posterUrl || '',
+          backdropUrl: item.backdropUrl || '',
+          logoUrl: item.logoUrl || '',
+          genres: Array.isArray(item.genres) && item.genres.length > 0 ? item.genres : ['Drama'],
+          rating: item.rating ? parseFloat(item.rating) : 0,
+          voteCount: item.voteCount || 0,
+          cast: item.cast || [],
+          crew: item.crew || [],
+          images: item.images || { posters: [], backdrops: [], logos: [] },
+          videos: item.videos || [],
+          seasons: item.seasons || [],
+          episodeCount: episodesList.length,
+          totalEpisodes: episodesList.length,
+          progressPercent: 0,
+          watchStatus: 'Plan to Watch',
+          status: 'Plan to Watch',
+          addedAt: timestamp,
+          updatedAt: timestamp,
+        };
+
+        // Save local
+        upsertLocalWebseries(seriesData);
+        setLocalWebseriesEpisodes(seriesId, episodesList);
+
+        // Save Firestore
+        if (db && userId) {
+          await setDoc(doc(db, 'users', userId, 'webseries', seriesId), seriesData, { merge: true });
+          const batch = writeBatch(db);
+          episodesList.forEach((ep) => {
+            const epRef = doc(db, 'users', userId, 'webseries', seriesId, 'episodes', ep.id || `ep-${ep.episodeNumber}`);
+            batch.set(epRef, ep, { merge: true });
+          });
+          await batch.commit();
+        }
+
+        setTargetUrl(`/webseries/${seriesId}`);
+      } else if (isAnime) {
         // Transfer to Anime Library
-        const animeId = `anime-${item.tmdbId || item.anilistId || Date.now()}`;
+        const animeId = targetSlug;
         const episodesList = scannedItems.length > 0 ? scannedItems : [
           {
             id: 'ep-1',
@@ -204,7 +294,7 @@ export default function TransferWatchlistModal({
         setTargetUrl(`/anime/${animeId}`);
       } else if (isMangaFamily) {
         // Transfer to Manga Library
-        const mangaId = `manga-${Date.now()}`;
+        const mangaId = targetSlug;
         const mangaData = {
           id: mangaId,
           title: item.title,
@@ -230,7 +320,7 @@ export default function TransferWatchlistModal({
         setTargetUrl(`/manga/${mangaId}`);
       } else if (isAudioStory) {
         // Transfer to Audio Story Library
-        const storyId = `audio-${Date.now()}`;
+        const storyId = targetSlug;
         const storyData = {
           id: storyId,
           title: item.title,
@@ -313,7 +403,7 @@ export default function TransferWatchlistModal({
               <div>
                 <h4 className="text-base font-black text-white">Transfer Completed!</h4>
                 <p className="text-xs text-gray-400 mt-1 max-w-xs mx-auto">
-                  <span className="text-white font-bold">{item.title}</span> has been transferred to your active library and removed from watchlist.
+                  <span className="text-white font-bold">{item.title}</span> has been transferred to your active library with slug <span className="text-purple-300 font-mono font-semibold">"{targetSlug}"</span> and removed from watchlist.
                 </p>
               </div>
               <div className="flex justify-center gap-3 pt-2">
@@ -360,9 +450,18 @@ export default function TransferWatchlistModal({
                     {item.year && <span className="text-gray-400 text-[10px]">{item.year}</span>}
                   </div>
                   <h4 className="font-bold text-white text-xs sm:text-sm truncate">{item.title}</h4>
-                  <p className="text-[10px] text-gray-400 truncate mt-0.5">
-                    Target: {isMovie ? 'Movies Library' : isAnime || isSeries ? 'Anime / Series Library' : isMangaFamily ? 'Manga Library' : 'Audio Story Library'}
-                  </p>
+                  <div className="flex items-center gap-2 flex-wrap mt-1">
+                    <p className="text-[10px] text-gray-400 truncate">
+                      Target: <span className="text-gray-200 font-semibold">{isMovie ? 'Movies Library' : isSeries ? 'Web-series Library' : isAnime ? 'Anime Library' : isMangaFamily ? 'Manga Library' : 'Audio Story Library'}</span>
+                    </p>
+                    <span className="text-gray-600">•</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-gray-400 font-medium">Slug:</span>
+                      <span className="px-2 py-0.5 rounded-md bg-purple-500/15 border border-purple-500/30 text-purple-300 font-mono text-[10px] font-semibold">
+                        {targetSlug}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -388,7 +487,7 @@ export default function TransferWatchlistModal({
                       setPath(e.target.value);
                       setVerified(null);
                     }}
-                    placeholder={isMovie ? 'C:\\Movies\\Inception.mp4' : 'C:\\Anime\\Attack on Titan'}
+                    placeholder={isMovie ? 'C:\\Movies\\Inception.mp4' : isSeries ? 'C:\\Webseries\\Breaking Bad' : 'C:\\Anime\\Attack on Titan'}
                     className="flex-1 px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white font-mono text-xs focus:outline-none focus:border-emerald-500/50"
                   />
                   <button

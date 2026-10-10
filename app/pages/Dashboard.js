@@ -102,7 +102,7 @@ const resolveHeroImg = (urlOrPath) => {
   return `/api/image?path=${encodeURIComponent(urlOrPath)}`;
 };
 
-const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], moviesList = []) => {
+const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], moviesList = [], webseriesList = []) => {
   const formattedAnimes = (animesList || []).map(anime => {
     let genres = [];
     if (Array.isArray(anime.genres)) {
@@ -130,6 +130,7 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       isManga: false,
       isAudio: false,
       isMovie: false,
+      isWebseries: false,
       title: (anime?.title || 'UNTITLED ANIME').toString().toUpperCase(),
       japaneseTitle: anime.japaneseTitle || 'LOCAL LIBRARY',
       logoUrl: anime.logoUrl || null,
@@ -179,6 +180,7 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       isManga: true,
       isAudio: false,
       isMovie: false,
+      isWebseries: false,
       title: (manga?.title || 'UNTITLED MANGA').toString().toUpperCase(),
       japaneseTitle: manga.japaneseTitle || 'LOCAL MANGA',
       logoUrl: manga.logoUrl || null,
@@ -223,6 +225,7 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       isManga: false,
       isAudio: true,
       isMovie: false,
+      isWebseries: false,
       title: (story?.title || 'UNTITLED AUDIO STORY').toString().toUpperCase(),
       japaneseTitle: story.japaneseTitle || 'LOCAL AUDIO STORY',
       logoUrl: story.logoUrl || null,
@@ -264,6 +267,7 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
       isManga: false,
       isAudio: false,
       isMovie: true,
+      isWebseries: false,
       title: (movie?.title || 'UNTITLED MOVIE').toString().toUpperCase(),
       logoUrl: movie.logoUrl || null,
       poster: moviePoster,
@@ -285,13 +289,72 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
     };
   });
 
-  if (formattedAnimes.length === 0 && formattedMangas.length === 0 && formattedMovies.length === 0) {
+  const formattedWebseries = (webseriesList || []).map(series => {
+    let genres = [];
+    if (Array.isArray(series.genres)) {
+      genres = [...series.genres];
+    } else if (typeof series.genres === 'string' && series.genres.trim()) {
+      genres = series.genres.split(',').map(g => g.trim());
+    }
+    const validGenres = genres.filter(g => GENRES_LIST.includes(g) && g !== 'All');
+
+    const totalSeasons = series.totalSeasons ? Number(series.totalSeasons) : (Array.isArray(series.seasons) ? series.seasons.length : 1);
+    const totalEpisodes = series.totalEpisodes ? Number(series.totalEpisodes) : (series.episodeCount || 0);
+    const scannedCount = series.episodeCount || (Array.isArray(series.episodes) ? series.episodes.length : 0);
+    let epDisplay = totalEpisodes > 0 ? `${totalEpisodes} EP` : (scannedCount > 0 ? `${scannedCount} EP` : 'TV Series');
+    if (scannedCount > 0 && totalEpisodes > 0 && scannedCount !== totalEpisodes) {
+      epDisplay = `${scannedCount}/${totalEpisodes} EP`;
+    }
+
+    const pct = Number(series.progressPercent || 0);
+    const isCompleted = Boolean(series.watched || series.isWatched || series.watchStatus === 'Completed' || pct >= 100);
+    const inProgress = !isCompleted && (
+      (pct > 0 && pct < 100) ||
+      series.watchStatus === 'Watching' ||
+      Boolean(series.lastWatchedAt) ||
+      Boolean(series.lastWatchedEpisode)
+    );
+
+    const seriesPoster = series.posterUrl || series.coverUrl || series.posterPath || resolveHeroImg(series.thumbnailBase64) || resolveHeroImg(series.thumbnailPath) || null;
+    const seriesBanner = series.backdropUrl || series.bannerUrl || seriesPoster || 'https://images.unsplash.com/photo-1522869635100-9f4c5e86aa37?q=80&w=1600&auto=format&fit=crop';
+
+    return {
+      id: series.id,
+      mediaType: 'webseries',
+      isManga: false,
+      isAudio: false,
+      isMovie: false,
+      isWebseries: true,
+      title: (series?.title || 'UNTITLED SERIES').toString().toUpperCase(),
+      japaneseTitle: series.originalTitle || series.title || 'WEB SERIES',
+      logoUrl: series.logoUrl || null,
+      poster: seriesPoster,
+      banner: seriesBanner,
+      rating: series.rating ? parseFloat(series.rating).toFixed(1) : getDeterministicRating(series.id, 8.8),
+      episodes: epDisplay,
+      totalSeasons: totalSeasons,
+      totalEpisodes: totalEpisodes || scannedCount,
+      year: series.year || (series.releaseDate ? series.releaseDate.split('-')[0] : '2026'),
+      quality: '4K Ultra HD',
+      language: (series.language || 'English').toUpperCase(),
+      studio: (series.productionCountries && series.productionCountries[0]) || 'Web Series',
+      genres: validGenres.length > 0 ? validGenres : ['Web Series', 'Drama'],
+      description: series.overview || series.description || `Local tracked web series: ${series.folderPath || ''}`,
+      progressPercent: pct,
+      inProgress,
+      lastActivity: new Date(series.lastWatchedAt || series.lastOpenedAt || series.updatedAt || series.addedAt || series.createdAt || 0).getTime(),
+      createdAt: new Date(series.addedAt || series.createdAt || 0).getTime(),
+    };
+  });
+
+  if (formattedAnimes.length === 0 && formattedMangas.length === 0 && formattedMovies.length === 0 && formattedWebseries.length === 0) {
     return [{
       id: 'placeholder',
       mediaType: 'anime',
       isManga: false,
       isAudio: false,
       isMovie: false,
+      isWebseries: false,
       title: 'WELCOME TO WATCHANIME',
       japaneseTitle: 'トラッカーへようこそ',
       banner: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop',
@@ -307,7 +370,7 @@ const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList = [], 
   }
 
   // Group watching or reading (in-progress) and recently added items (up to 12 total, maximum 6-6 division, excluding audio stories from hero banner slider)
-  const allItems = [...formattedAnimes, ...formattedMangas, ...formattedMovies];
+  const allItems = [...formattedAnimes, ...formattedMangas, ...formattedMovies, ...formattedWebseries];
 
   const MAX_TOTAL = 12;
   const MAX_DIVISION = 6;
@@ -358,6 +421,11 @@ export default function Dashboard({ onSelectAnime }) {
   const [movies, setMovies] = useState([]);
   const [watchlist, setWatchlist] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Dynamic Document Title
+  useEffect(() => {
+    document.title = "Ganeshspace - Anime, Movies & Web Series";
+  }, []);
   const [loadingMovies, setLoadingMovies] = useState(true);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('recent'); // recent, alpha, progress
@@ -367,10 +435,10 @@ export default function Dashboard({ onSelectAnime }) {
 
   useEffect(() => {
     const handleWindowScroll = () => {
-      // Trigger after scrolling 15% of the hero banner (10-20% range)
+      // Trigger glassy effect after scrolling 50% of the hero banner section
       const heroElement = document.getElementById('hero');
       const bannerHeight = heroElement ? heroElement.offsetHeight : window.innerHeight;
-      const threshold = bannerHeight * 0.15;
+      const threshold = bannerHeight * 0.2;
       setIsScrolled(window.scrollY > threshold);
     };
     window.addEventListener('scroll', handleWindowScroll, { passive: true });
@@ -430,14 +498,36 @@ export default function Dashboard({ onSelectAnime }) {
   const [movieEditing, setMovieEditing] = useState(null);
   const [movieCompleteConfirm, setMovieCompleteConfirm] = useState(null);
   const movieScrollRef = useRef(null);
+  const continueScrollRef = useRef(null);
 
   // Webseries Modal & Action States
-  const [webseriesList, setWebseriesList] = useState([]);
-  const [loadingWebseries, setLoadingWebseries] = useState(true);
+  const [webseriesList, setWebseriesList] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return getLocalWebseries() || [];
+    }
+    return [];
+  });
+  const [loadingWebseries, setLoadingWebseries] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const local = getLocalWebseries();
+      return !(local && local.length > 0);
+    }
+    return false;
+  });
   const [showAddWebseriesModal, setShowAddWebseriesModal] = useState(false);
   const [webseriesEditing, setWebseriesEditing] = useState(null);
   const [webseriesCompleteConfirm, setWebseriesCompleteConfirm] = useState(null);
   const webseriesScrollRef = useRef(null);
+
+  useEffect(() => {
+    const handleWebseriesUpdate = () => {
+      const local = getLocalWebseries() || [];
+      setWebseriesList(local);
+      setLoadingWebseries(false);
+    };
+    window.addEventListener('webseries_store_updated', handleWebseriesUpdate);
+    return () => window.removeEventListener('webseries_store_updated', handleWebseriesUpdate);
+  }, []);
 
   // Watchlist Modal & Action States
   const [showAddWatchlistModal, setShowAddWatchlistModal] = useState(false);
@@ -969,8 +1059,8 @@ export default function Dashboard({ onSelectAnime }) {
     return combined;
   }, [topRatedAnime, animes]);
 
-  // Get dynamic lists from database animes, mangas, audio stories and movies
-  const heroSlides = useMemo(() => getHeroSlides(animes, mangas, audioStories, movies), [animes, mangas, audioStories, movies]);
+  // Get dynamic lists from database animes, mangas, audio stories, movies and web series
+  const heroSlides = useMemo(() => getHeroSlides(animes, mangas, audioStories, movies, webseriesList), [animes, mangas, audioStories, movies, webseriesList]);
 
   const recentlyUpdated = useMemo(() => {
     const formattedAnime = (animes || []).map(anime => {
@@ -985,6 +1075,8 @@ export default function Dashboard({ onSelectAnime }) {
         quality: anime.quality || 'HD',
         isYouTube: !!(anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://')),
         updatedAt: anime.updatedAt || anime.createdAt || 0,
+        pct: getAnimeProgressPercent(anime),
+        item: anime,
       };
     });
 
@@ -1003,6 +1095,8 @@ export default function Dashboard({ onSelectAnime }) {
         quality: 'MANGA',
         isYouTube: false,
         updatedAt: manga.updatedAt || manga.lastReadAt || manga.createdAt || 0,
+        pct: Number(manga.progressPercent || 0),
+        item: manga,
       };
     });
 
@@ -1295,16 +1389,17 @@ export default function Dashboard({ onSelectAnime }) {
         list.push({ id: d.id, userId: targetUserId, ...sData, watched: isWatched, isWatched });
       });
       const local = getLocalWebseries() || [];
-      if (list.length > 0) {
-        setWebseriesList(list);
-        setLocalWebseries(list);
+      const merged = [...list];
+      local.forEach((locItem) => {
+        if (!merged.some((m) => m.id === locItem.id || (locItem.tmdbId && m.tmdbId === locItem.tmdbId))) {
+          merged.unshift(locItem);
+        }
+      });
+
+      if (merged.length > 0) {
+        setWebseriesList(merged);
+        setLocalWebseries(merged);
         setLoadingWebseries(false);
-      } else if (local.length > 0) {
-        setWebseriesList(local);
-        setLoadingWebseries(false);
-        local.forEach((item) => {
-          setDoc(doc(db, 'users', targetUserId, 'webseries', item.id), item, { merge: true }).catch(console.warn);
-        });
       } else {
         setWebseriesList([]);
         setLocalWebseries([]);
@@ -2320,8 +2415,10 @@ export default function Dashboard({ onSelectAnime }) {
   };
 
   const handleDeleteManga = async (mangaItem, e) => {
-    e.stopPropagation();
-    e.preventDefault();
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     if (!confirm('Are you sure you want to stop tracking this manga?')) return;
     try {
       const mangaId = mangaItem.id;
@@ -2659,8 +2756,10 @@ export default function Dashboard({ onSelectAnime }) {
   };
 
   const handleDeleteAudioStory = async (storyItem, e) => {
-    e.stopPropagation();
-    e.preventDefault();
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     if (!confirm('Are you sure you want to stop tracking this audio story?')) return;
     try {
       const storyId = storyItem.id;
@@ -3093,6 +3192,16 @@ export default function Dashboard({ onSelectAnime }) {
       const { scrollLeft, clientWidth } = movieScrollRef.current;
       const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.7 : scrollLeft + clientWidth * 0.7;
       movieScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  const scrollContinue = (direction) => {
+    if (activePreview) setActivePreview(null);
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    if (continueScrollRef.current) {
+      const { scrollLeft, clientWidth } = continueScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.7 : scrollLeft + clientWidth * 0.7;
+      continueScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
     }
   };
 
@@ -3636,7 +3745,7 @@ export default function Dashboard({ onSelectAnime }) {
         const pct = Number(w.progressPercent || 0);
         const isCompleted = Boolean(w.watched || w.isWatched || w.watchStatus === 'Completed' || pct >= 100);
         if (isCompleted) return false;
-        return (pct > 0 && pct < 100) || w.watchStatus === 'Watching';
+        return (pct > 0 && pct < 100) || w.watchStatus === 'Watching' || Boolean(w.lastWatchedAt) || Boolean(w.lastWatchedEpisode);
       })
       .map(w => {
         const pct = Number(w.progressPercent || 0);
@@ -3644,13 +3753,13 @@ export default function Dashboard({ onSelectAnime }) {
           ...w,
           mediaType: 'webseries',
           progressPct: pct,
-          lastActivity: new Date(w.lastWatchedAt || w.lastOpenedAt || w.updatedAt || w.addedAt || 0).getTime(),
+          lastActivity: new Date(w.lastWatchedAt || w.lastOpenedAt || w.updatedAt || w.addedAt || w.createdAt || 0).getTime(),
         };
       });
 
     return [...activeAnimes, ...activeMangas, ...activeAudioStories, ...activeMovies, ...activeWebseries]
       .sort((a, b) => b.lastActivity - a.lastActivity)
-      .slice(0, 6);
+      .slice(0, 25);
   }, [animes, mangas, audioStories, movies, webseriesList]);
 
   // ── Manga List (Filtered by search & sorted new to old) ──────────────────────
@@ -5020,13 +5129,19 @@ export default function Dashboard({ onSelectAnime }) {
             {/* Background Image: Crisp vertical cover poster on mobile devices; crisp sharp wide banner on desktop for all media types (anime, manga, movies) */}
             {/* Mobile Devices: Show poster cover as background */}
             <div
-              className="md:hidden absolute inset-0 z-0 bg-cover bg-center filter blur-none scale-100 brightness-105 saturate-[1.1] transition-all duration-700"
-              style={{ backgroundImage: `url(${toFanartFull(currentHero.poster || currentHero.banner)})` }}
+              className="md:hidden absolute inset-0 z-0 bg-cover bg-top filter blur-none scale-100 brightness-105 saturate-[1.1] transition-all duration-700"
+              style={{
+                backgroundImage: `url(${toFanartFull(currentHero.poster || currentHero.banner)})`,
+                backgroundPosition: 'center top',
+              }}
             />
-            {/* Desktop Devices: Show crisp wide banner without extra blur */}
+            {/* Desktop Devices: Show crisp wide banner with top alignment on widescreen */}
             <div
-              className="hidden md:block absolute inset-0 z-0 bg-cover bg-center filter blur-none scale-100 brightness-105 saturate-[1.1] transition-all duration-700"
-              style={{ backgroundImage: `url(${toFanartFull(currentHero.banner)})` }}
+              className="hidden md:block absolute inset-0 z-0 bg-cover bg-top filter blur-none scale-100 brightness-105 saturate-[1.1] transition-all duration-700"
+              style={{
+                backgroundImage: `url(${toFanartFull(currentHero.banner)})`,
+                backgroundPosition: 'center top',
+              }}
             />
 
             {/* Top Dark Vignette (Prime Video Style - deep dark gradient behind fixed navbar) */}
@@ -5082,6 +5197,11 @@ export default function Dashboard({ onSelectAnime }) {
                         <Headphones size={10} />| Audio Story
                       </span>
                     )}
+                    {currentHero.isWebseries && (
+                      <span className="px-2.5 py-0.5 text-emerald-200 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm">
+                        <Tv size={10} />| Web Series
+                      </span>
+                    )}
                     {currentHero.genres && currentHero.genres.slice(0, 2).map((genre, idx) => (
                       <span
                         key={idx}
@@ -5103,6 +5223,11 @@ export default function Dashboard({ onSelectAnime }) {
                     <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-amber-300">
                       <Film size={13} className="text-amber-400" />
                       <span>{currentHero.episodes}</span>
+                    </span>
+                  ) : currentHero.isWebseries ? (
+                    <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-emerald-300">
+                      <Tv size={13} className="text-emerald-400" />
+                      <span>{currentHero.totalSeasons ? (currentHero.totalSeasons > 1 ? `${currentHero.totalSeasons} Seasons` : 'Season 1') : 'TV'}</span>
                     </span>
                   ) : currentHero.isManga ? (
                     <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-purple-300">
@@ -5143,6 +5268,14 @@ export default function Dashboard({ onSelectAnime }) {
                       <Play size={14} fill="currentColor" />
                       <span>Watch Movie</span>
                     </button>
+                  ) : currentHero.isWebseries ? (
+                    <button
+                      onClick={() => router.push(`/webseries/${currentHero.id}`)}
+                      className="px-5 py-2.5 md:px-6 md:py-2.5 rounded-full font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-emerald-500 to-teal-600 hover:brightness-110 text-white font-extrabold flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/30 transition-all duration-300"
+                    >
+                      <Play size={14} fill="currentColor" />
+                      <span>Watch Series</span>
+                    </button>
                   ) : currentHero.isAudio ? (
                     <button
                       onClick={() => router.push(`/audio-story/${currentHero.id}`)}
@@ -5176,6 +5309,8 @@ export default function Dashboard({ onSelectAnime }) {
                     onClick={() => {
                       if (currentHero.isMovie) {
                         router.push(`/movies/${currentHero.id}`);
+                      } else if (currentHero.isWebseries) {
+                        router.push(`/webseries/${currentHero.id}`);
                       } else if (currentHero.isAudio) {
                         router.push(`/audio-story/${currentHero.id}`);
                       } else if (currentHero.isManga) {
@@ -5233,7 +5368,7 @@ export default function Dashboard({ onSelectAnime }) {
       />
 
       {/* MAIN BODY LAYOUT */}
-      <main className="relative flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-14">
+      <main className="relative flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 py-6 space-y-7 md:space-y-8">
 
         {/* 3. MEDIA FORMAT QUICK NAVIGATION (ANIME, MOVIES, MANGA, AUDIOS) */}
         <section id="media-categories" className="space-y-3">
@@ -5403,9 +5538,9 @@ export default function Dashboard({ onSelectAnime }) {
         </section>
 
 
-        {/* 4. CONTINUE WATCHING, READING & LISTENING (USER'S ACTIVE TRACKED ANIME, MANGA & AUDIO) */}
+        {/* 4. CONTINUE WATCHING, READING & LISTENING (USER'S ACTIVE TRACKED ANIME, MANGA, AUDIO, MOVIE & WEBSERIES) */}
         {continueWatchingList.length > 0 && (
-          <section id="continue-watching" className="space-y-4">
+          <section id="continue-watching" className="space-y-4 scroll-mt-24">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-[#7c5cff]/10 border border-[#7c5cff]/20 text-[#7c5cff]">
@@ -5417,298 +5552,181 @@ export default function Dashboard({ onSelectAnime }) {
                   </h2>
                 </div>
               </div>
+
+              {/* Chevron Navigation Keys */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => scrollContinue('left')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                  title="Scroll left"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollContinue('right')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                  title="Scroll right"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {continueWatchingList.slice(0, 6).map((item) => {
+            {/* Horizontal Slider (X-Axis Scrollable without Scrollbar) */}
+            <div
+              ref={continueScrollRef}
+              className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+            >
+              {continueWatchingList.map((item) => {
+                let coverImg = null;
+                let itemRating = item.rating || item.score || item.vote_average || null;
+                let pct = 0;
+                let isCompleted = false;
+                let subLeft = '';
+                let subRight = '';
+                let badgeMediaType = '';
+                let fallbackIcon = <Play size={36} />;
+
                 if (item.mediaType === 'movie') {
-                  const movPct = item.progressPct || (item.duration ? Math.min(100, Math.round(((item.currentTime || 0) / item.duration) * 100)) : 0);
-                  const formatTime = (secs) => {
-                    if (!secs || isNaN(secs)) return '00:00';
-                    const h = Math.floor(secs / 3600);
-                    const m = Math.floor((secs % 3600) / 60);
-                    const s = Math.floor(secs % 60);
-                    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-                    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-                  };
-
-                  return (
-                    <div
-                      key={`continue-movie-${item.id}`}
-                      onClick={() => router.push(`/movies/${item.id}`)}
-                      className="glass-card p-4 rounded-2xl flex gap-4 items-center group cursor-pointer border border-amber-500/20 hover:border-amber-500/50 hover:bg-amber-950/20 transition-all duration-300"
-                    >
-                      <div className="relative w-20 h-24 rounded-xl overflow-hidden bg-[#181c24] flex-shrink-0">
-                        {item.posterUrl || item.posterPath ? (
-                          <CachedImage src={item.posterUrl || item.posterPath} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                        ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-amber-700 to-rose-900 flex items-center justify-center font-bold text-white/40 text-xl">
-                            <Film size={24} className="text-amber-300/60" />
-                          </div>
-                        )}
-                        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                          <div className="p-2 rounded-full bg-amber-500 text-black opacity-0 group-hover:opacity-100 transition-opacity shadow-lg shadow-amber-500/50">
-                            <Play size={14} fill="currentColor" />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex-1 min-w-0 space-y-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-amber-500 to-rose-600 text-black font-extrabold text-[8px] uppercase tracking-wider shrink-0">
-                            Movie
-                          </span>
-                          <h3 className="font-bold text-sm text-white truncate group-hover:text-amber-300 transition-colors">
-                            {item.title}
-                          </h3>
-                        </div>
-                        <p className="text-[10px] text-gray-400 truncate">
-                          {item.currentTime ? `Resume from ${formatTime(item.currentTime)}` : (item.year ? `${item.year}` : 'Local Movie')}
-                        </p>
-
-                        <div>
-                          <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
-                            <span className="truncate">
-                              {item.duration ? `${formatTime(item.currentTime || 0)} / ${formatTime(item.duration)}` : 'In Progress'}
-                            </span>
-                            <span className="font-bold text-amber-400 shrink-0 ml-1">{movPct}%</span>
-                          </div>
-                          <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-amber-500 to-rose-600 rounded-full transition-all duration-500"
-                              style={{ width: `${movPct}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          setMovieCompleteConfirm(item);
-                        }}
-                        className="p-2 rounded-xl bg-white/5 hover:bg-emerald-600/30 border border-white/10 hover:border-emerald-500/40 text-gray-400 hover:text-emerald-300 transition cursor-pointer self-center shrink-0"
-                        title={item.completed ? "Mark Movie Incomplete" : "Mark Movie Complete"}
-                      >
-                        <CheckCircle2 size={15} />
-                      </button>
-                    </div>
-                  );
+                  coverImg = item.posterUrl || item.posterPath || (item.thumbnailBase64 || null);
+                  pct = item.progressPct || (item.duration ? Math.min(100, Math.round(((item.currentTime || 0) / item.duration) * 100)) : 0);
+                  isCompleted = Boolean(item.watched || item.completed || item.watchStatus === 'Completed' || pct >= 95);
+                  subLeft = item.year || (item.releaseDate ? item.releaseDate.split('-')[0] : 'Movie');
+                  subRight = item.runtime
+                    ? `${Math.floor(item.runtime / 60)}h ${item.runtime % 60}m`
+                    : item.duration
+                    ? `${Math.floor(item.duration / 3600) > 0 ? Math.floor(item.duration / 3600) + 'h ' : ''}${Math.floor((item.duration % 3600) / 60)}m`
+                    : 'Feature';
+                  badgeMediaType = 'Movie';
+                  fallbackIcon = <Film size={36} />;
+                } else if (item.mediaType === 'webseries') {
+                  coverImg = item.posterUrl || item.posterPath || item.coverUrl || (item.thumbnailBase64 || null);
+                  pct = item.progressPct || item.progressPercent || 0;
+                  isCompleted = Boolean(item.watched || item.isWatched || item.watchStatus === 'Completed' || pct >= 100);
+                  subLeft = item.lastWatchedEpisode ? `EP ${item.lastWatchedEpisode}` : (item.year || 'Series');
+                  subRight = item.totalEpisodes ? `${item.totalEpisodes} Ep` : (item.episodeCount ? `${item.episodeCount} Ep` : 'Series');
+                  badgeMediaType = 'Series';
+                  fallbackIcon = <Tv size={36} />;
+                } else if (item.mediaType === 'anime') {
+                  coverImg = item.posterUrl || item.posterPath || item.coverUrl || item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : null);
+                  pct = getAnimeProgressPercent(item);
+                  isCompleted = Boolean(item.watched || item.isWatched || item.watchStatus === 'Completed' || pct >= 100);
+                  subLeft = item.lastWatchedEpisode ? `EP ${item.lastWatchedEpisode}` : (item.year || 'Anime');
+                  subRight = item.totalEpisodes ? `${item.totalEpisodes} Ep` : (item.episodeCount ? `${item.episodeCount} Ep` : 'Anime');
+                  badgeMediaType = 'Anime';
+                  fallbackIcon = <Play size={36} />;
+                } else if (item.mediaType === 'manga') {
+                  coverImg = item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : (item.coverUrl || item.posterUrl || null));
+                  pct = item.progressPct || item.progressPercent || 0;
+                  isCompleted = Boolean(item.isWatched || item.isCompleted || pct >= 100);
+                  subLeft = item.lastWatchedChapter ? `CH ${item.lastWatchedChapter}` : (item.completedChapters ? `CH ${item.completedChapters}` : (item.year || 'Manga'));
+                  subRight = item.totalChapters ? `${item.totalChapters} Ch` : (item.chapterCount ? `${item.chapterCount} Ch` : 'Manga');
+                  badgeMediaType = 'Manga';
+                  fallbackIcon = <BookOpen size={36} />;
+                } else if (item.mediaType === 'audioStory') {
+                  coverImg = item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : (item.coverUrl || item.posterUrl || null));
+                  pct = item.progressPct || item.progressPercent || 0;
+                  isCompleted = Boolean(item.isWatched || item.isCompleted || pct >= 100);
+                  subLeft = item.lastWatchedTrack || (item.completedTracks ? `Tr ${item.completedTracks}` : 'Audio');
+                  subRight = item.totalTracks ? `${item.totalTracks} Tr` : (item.trackCount ? `${item.trackCount} Tr` : 'Audio');
+                  badgeMediaType = 'Audio';
+                  fallbackIcon = <Headphones size={36} />;
                 }
 
-                if (item.mediaType === 'audioStory') {
-                  const aPct = item.progressPct || 0;
-                  return (
-                    <div
-                      key={`continue-audio-${item.id}`}
-                      onClick={() => router.push(`/audio-story/${item.id}`)}
-                      className="glass-card p-4 rounded-2xl flex gap-4 items-center group cursor-pointer border border-cyan-500/20 hover:border-cyan-500/50 hover:bg-cyan-950/20 transition-all duration-300"
-                    >
-                      <div className="relative w-20 h-24 rounded-xl overflow-hidden bg-[#181c24] flex-shrink-0">
-                        {item.thumbnailBase64 ? (
-                          <CachedImage src={item.thumbnailBase64} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                        ) : item.thumbnailPath ? (
-                          <CachedImage src={`/api/image?path=${encodeURIComponent(item.thumbnailPath)}`} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                        ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-cyan-700 to-indigo-900 flex items-center justify-center font-bold text-white/40 text-xl">
-                            <Headphones size={24} className="text-cyan-300/60" />
-                          </div>
-                        )}
-                        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                          <div className="p-2 rounded-full bg-cyan-600 text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-lg shadow-cyan-600/50">
-                            <Headphones size={14} />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex-1 min-w-0 space-y-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-extrabold text-[8px] uppercase tracking-wider shrink-0">
-                            Audio
-                          </span>
-                          <h3 className="font-bold text-sm text-white truncate group-hover:text-cyan-300 transition-colors">
-                            {item.title}
-                          </h3>
-                        </div>
-                        <p className="text-[10px] text-gray-400 truncate">
-                          Last played: {item.lastWatchedTrack || (item.completedTracks ? `Track ${item.completedTracks}` : 'In progress')}
-                        </p>
-
-                        <div>
-                          <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
-                            <span className="truncate">
-                              {item.completedTracks || 0}/{item.totalTracks || item.trackCount || '?'} Tracks
-                            </span>
-                            <span className="font-bold text-cyan-400 shrink-0 ml-1">{aPct}%</span>
-                          </div>
-                          <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-500"
-                              style={{ width: `${aPct}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          setAudioStoryCompleteConfirm(item);
-                        }}
-                        className="p-2 rounded-xl bg-white/5 hover:bg-emerald-600/30 border border-white/10 hover:border-emerald-500/40 text-gray-400 hover:text-emerald-300 transition cursor-pointer self-center shrink-0"
-                        title="Mark Audio Story Complete"
-                      >
-                        <CheckCircle2 size={15} />
-                      </button>
-                    </div>
-                  );
-                }
-
-                if (item.mediaType === 'manga') {
-                  const mPct = item.progressPct || 0;
-                  return (
-                    <div
-                      key={`continue-manga-${item.id}`}
-                      onClick={() => router.push(`/manga/${item.id}`)}
-                      className="glass-card p-4 rounded-2xl flex gap-4 items-center group cursor-pointer border border-purple-500/20 hover:border-purple-500/50 hover:bg-purple-950/20 transition-all duration-300"
-                    >
-                      <div className="relative w-20 h-24 rounded-xl overflow-hidden bg-[#181c24] flex-shrink-0">
-                        {item.thumbnailBase64 ? (
-                          <CachedImage src={item.thumbnailBase64} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                        ) : item.thumbnailPath ? (
-                          <CachedImage src={`/api/image?path=${encodeURIComponent(item.thumbnailPath)}`} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                        ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-purple-700 to-indigo-900 flex items-center justify-center font-bold text-white/40 text-xl">
-                            <BookOpen size={24} className="text-purple-300/60" />
-                          </div>
-                        )}
-                        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                          <div className="p-2 rounded-full bg-purple-600 text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-lg shadow-purple-600/50">
-                            <BookOpen size={14} />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex-1 min-w-0 space-y-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-1.5 py-0.5 rounded bg-purple-600 text-white font-extrabold text-[8px] uppercase tracking-wider shrink-0">
-                            Manga
-                          </span>
-                          <h3 className="font-bold text-sm text-white truncate group-hover:text-purple-300 transition-colors">
-                            {item.title}
-                          </h3>
-                        </div>
-                        <p className="text-[10px] text-gray-400 truncate">
-                          Last read: {item.lastWatchedChapter || (item.completedChapters ? `Chapter ${item.completedChapters}` : 'In progress')}
-                        </p>
-
-                        <div>
-                          <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
-                            <span className="truncate">
-                              {item.completedChapters || 0}/{item.totalChapters || item.chapterCount || '?'} Chapters
-                            </span>
-                            <span className="font-bold text-purple-400 shrink-0 ml-1">{mPct}%</span>
-                          </div>
-                          <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-purple-500 to-indigo-500 rounded-full transition-all duration-500"
-                              style={{ width: `${mPct}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          setMangaCompleteConfirm(item);
-                        }}
-                        className="p-2 rounded-xl bg-white/5 hover:bg-emerald-600/30 border border-white/10 hover:border-emerald-500/40 text-gray-400 hover:text-emerald-300 transition cursor-pointer self-center shrink-0"
-                        title="Mark Manga Complete"
-                      >
-                        <CheckCircle2 size={15} />
-                      </button>
-                    </div>
-                  );
-                }
-
-                // Anime Card
-                const anime = item;
-                const pct = getAnimeProgressPercent(anime);
                 return (
                   <div
-                    key={`continue-anime-${anime.id}`}
-                    onClick={() => onSelectAnime(anime.id)}
-                    className="glass-card p-4 rounded-2xl flex gap-4 items-center group cursor-pointer"
+                    key={`continue-${item.mediaType}-${item.id}`}
+                    onClick={() => {
+                      if (item.mediaType === 'movie') {
+                        router.push(`/movies/${item.id}`);
+                      } else if (item.mediaType === 'webseries') {
+                        router.push(`/webseries/${item.id}`);
+                      } else if (item.mediaType === 'anime') {
+                        onSelectAnime(item.id);
+                      } else if (item.mediaType === 'manga') {
+                        router.push(`/manga/${item.id}`);
+                      } else if (item.mediaType === 'audioStory') {
+                        router.push(`/audio-story/${item.id}`);
+                      }
+                    }}
+                    onMouseEnter={(e) => handleCardMouseEnter(item, item.mediaType, e)}
+                    onMouseLeave={handleCardMouseLeave}
+                    className="group relative flex-none w-44 sm:w-48 md:w-52 rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-amber-400/50 hover:shadow-2xl hover:shadow-black/70 transition-all duration-300 cursor-pointer flex flex-col"
                   >
-                    <div className="relative w-20 h-24 rounded-xl overflow-hidden bg-[#181c24] flex-shrink-0">
-                      {anime.thumbnailBase64 ? (
-                        <CachedImage src={anime.thumbnailBase64} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                      ) : anime.thumbnailPath ? (
-                        <CachedImage src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} alt={anime.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                    <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
+                      {coverImg ? (
+                        <CachedImage
+                          src={coverImg}
+                          alt={item.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        />
                       ) : (
-                        <div className={`w-full h-full bg-gradient-to-br ${anime.coverGradient || 'from-violet-600 to-indigo-700'} flex items-center justify-center font-bold text-white/40 text-xl`}>
-                          {getInitials(anime.title)}
+                        <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-1.5 p-3">
+                          {fallbackIcon}
+                          <span className="text-[10px] font-bold text-white/90 line-clamp-2 text-center">{item.title}</span>
                         </div>
                       )}
-                      <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                        <div className="p-2 rounded-full bg-[#7c5cff] text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Play size={14} fill="white" />
+
+                      {/* Top Badges */}
+                      <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
+                        {itemRating ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
+                            <Star size={10} className="fill-amber-400" />
+                            <span>{parseFloat(itemRating).toFixed(1)}</span>
+                          </div>
+                        ) : (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[9px] font-extrabold uppercase tracking-wider text-gray-300 border border-white/10 shadow">
+                            {badgeMediaType}
+                          </div>
+                        )}
+
+                        {isCompleted ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
+                            <Check size={9} /> DONE
+                          </div>
+                        ) : (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
+                            {Math.round(pct)}%
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Mobile 3-dot menu trigger button */}
+                      <div className="md:hidden absolute top-2 right-2 z-20">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMobileMenu(activeMobileMenu?.id === item.id ? null : { type: item.mediaType, id: item.id, item });
+                          }}
+                          className="p-1.5 rounded-lg bg-black/80 text-white border border-white/20 shadow-lg"
+                        >
+                          <MoreVertical size={13} />
+                        </button>
+                      </div>
+
+                      {/* Bottom Gradient Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
+
+                      {/* Bottom Info inside Card */}
+                      <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 space-y-0.5 pointer-events-none">
+                        <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-amber-300 transition">
+                          {item.title}
+                        </h3>
+                        <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
+                          <span>{subLeft}</span>
+                          <span>{subRight}</span>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex-1 min-w-0 space-y-2">
-                      <div className="flex items-center gap-1.5">
-                        <span className="px-1.5 py-0.5 rounded bg-[#7c5cff]/20 text-[#c084fc] font-extrabold text-[8px] uppercase tracking-wider shrink-0">
-                          Anime
-                        </span>
-                        <h3 className="font-bold text-sm text-white truncate group-hover:text-[#7c5cff] transition-colors">
-                          {anime.title}
-                        </h3>
-                      </div>
-                      <p className="text-[10px] text-gray-400 truncate">
-                        Last watched: {anime.lastWatchedEpisode ? `EP ${anime.lastWatchedEpisode}` : 'In progress'}
-                      </p>
-
-                      <div>
-                        {(() => {
-                          return (
-                            <>
-                              <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
-                                <div className="flex items-center gap-1.5 truncate max-w-[70%]">
-                                  {Boolean(anime.totalSeasons) && (
-                                    <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-extrabold text-[9px] shrink-0">
-                                      S{anime.totalSeasons}
-                                    </span>
-                                  )}
-                                  <span className="truncate">
-                                    {anime.totalEpisodes ? (
-                                      anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
-                                        ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
-                                        : `${anime.totalEpisodes} Ep`
-                                    ) : (
-                                      `${anime.episodeCount || 0} Ep`
-                                    )}
-                                  </span>
-                                </div>
-                                <span className="font-bold text-[#7c5cff] shrink-0 ml-1">{pct}%</span>
-                              </div>
-                              <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-gradient-to-r from-[#7c5cff] to-[#a855f7] rounded-full transition-all duration-500"
-                                  style={{ width: `${pct}%` }}
-                                />
-                              </div>
-                            </>
-                          );
-                        })()}
+                      {/* Watch progress bar at the very bottom inside the poster card */}
+                      <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-300"
+                          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -5829,82 +5847,76 @@ export default function Dashboard({ onSelectAnime }) {
                     onClick={() => router.push(`/movies/${movie.id}`)}
                     onMouseEnter={(e) => handleCardMouseEnter(movie, 'movie', e)}
                     onMouseLeave={handleCardMouseLeave}
-                    className="flex-none w-36 sm:w-40 md:w-44 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-xl relative self-start"
+                    className="group relative flex-none w-44 sm:w-48 md:w-52 rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-amber-400/50 hover:shadow-2xl hover:shadow-black/70 transition-all duration-300 cursor-pointer flex flex-col"
                   >
-                    <div className="relative aspect-[2/3] overflow-hidden bg-[#181c24] flex items-center justify-center z-10">
+                    <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
                       {coverImg ? (
                         <CachedImage
                           src={coverImg}
                           alt={movie.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />
                       ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-amber-400/80 bg-gradient-to-br from-amber-950/30 to-rose-950/20 gap-1.5">
-                          <Film size={32} />
-                          <span className="text-[9px] font-mono uppercase tracking-wider">Movie</span>
+                        <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-1.5 p-3">
+                          <Film size={36} />
+                          <span className="text-[10px] font-bold text-white/90 line-clamp-2 text-center">{movie.title}</span>
                         </div>
                       )}
 
-                      {/* Rating / Watched Badge */}
-                      <div className="absolute top-2 left-2 flex items-center gap-1">
-                        {isWatched ? (
-                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/90 backdrop-blur-md text-[9px] uppercase font-bold text-white flex items-center gap-1 shadow">
-                            <CheckCircle2 size={10} /> Watched
-                          </span>
-                        ) : movie.rating ? (
-                          <div className="px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-md text-amber-300 font-bold text-[9px] border border-white/10 flex items-center gap-1">
-                            <Star size={10} className="fill-amber-400 text-amber-400" />
+                      {/* Top Badges */}
+                      <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
+                        {movie.rating ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
+                            <Star size={10} className="fill-amber-400" />
                             <span>{parseFloat(movie.rating).toFixed(1)}</span>
+                          </div>
+                        ) : <span />}
+
+                        {isWatched ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
+                            <Check size={9} /> DONE
+                          </div>
+                        ) : pct > 0 ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
+                            {Math.round(pct)}%
                           </div>
                         ) : null}
                       </div>
 
-                      {Boolean(movie.isYouTube || movie.youtubeUrl || movie.youtubeId || movie.localFilePath?.includes('youtube')) ? (
-                        <div className="absolute top-2 right-2 p-1 bg-black/60 rounded-lg shadow-lg border border-red-500/40 backdrop-blur-md flex items-center justify-center">
-                          <YoutubeLogo size={14} />
-                        </div>
-                      ) : (
-                        <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-amber-500 text-black font-extrabold text-[8px] shadow">
-                          MOVIE
-                        </div>
-                      )}
-
-                      {/* Mobile 3-dot Options Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          setActiveMobileMenu({ type: 'movie', id: movie.id, item: movie });
-                        }}
-                        className="md:hidden absolute bottom-2 right-2 z-20 p-2 rounded-xl bg-black/85 hover:bg-black text-white border border-white/20 backdrop-blur-md shadow-lg active:scale-90 transition cursor-pointer"
-                        title="Options"
-                      >
-                        <MoreVertical size={14} />
-                      </button>
-                    </div>
-
-                    <div className="p-2.5 sm:p-3 bg-white/[0.03]">
-                      <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-amber-300 transition-colors">
-                        {movie.title}
-                      </h4>
-                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
-                        <span>{movieYear || (runtimeStr || 'Feature Film')}</span>
-                        <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-1" : "text-amber-400 font-semibold"}>
-                          {isWatched ? (
-                            <>
-                              <CheckCircle2 size={10} /> Completed
-                            </>
-                          ) : (
-                            pct > 0 ? `${pct}%` : 'Ready'
-                          )}
-                        </span>
+                      {/* Mobile 3-dot menu trigger button */}
+                      <div className="md:hidden absolute top-2 right-2 z-20">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMobileMenu(activeMobileMenu?.id === movie.id ? null : { type: 'movie', id: movie.id, item: movie });
+                          }}
+                          className="p-1.5 rounded-lg bg-black/80 text-white border border-white/20 shadow-lg"
+                        >
+                          <MoreVertical size={13} />
+                        </button>
                       </div>
-                      {pct > 0 && !isWatched && (
-                        <div className="w-full h-1 bg-white/10 rounded-full mt-2 overflow-hidden">
+
+                      {/* Bottom Gradient Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
+
+                      {/* Bottom Info inside Card */}
+                      <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 space-y-0.5 pointer-events-none">
+                        <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-amber-300 transition">
+                          {movie.title}
+                        </h3>
+                        <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
+                          <span>{movieYear || 'Movie'}</span>
+                          <span>{runtimeStr || 'Feature'}</span>
+                        </div>
+                      </div>
+
+                      {/* Watch progress bar at the very bottom inside the poster card */}
+                      {pct > 0 && (
+                        <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 overflow-hidden">
                           <div
-                            className="h-full bg-gradient-to-r from-amber-500 to-rose-600 transition-all duration-300"
-                            style={{ width: `${pct}%` }}
+                            className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-300"
+                            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
                           />
                         </div>
                       )}
@@ -5916,7 +5928,7 @@ export default function Dashboard({ onSelectAnime }) {
               {sortedMovies.length > 10 && (
                 <div
                   onClick={() => router.push('/movies')}
-                  className="flex-none w-36 sm:w-40 md:w-44 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-amber-950/10 hover:bg-amber-950/20 self-start"
+                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-amber-950/10 hover:bg-amber-950/20 self-start"
                 >
                   <div className="aspect-[2/3] flex flex-col items-center justify-center p-6 text-center space-y-3">
                     <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-300 flex items-center justify-center group-hover:scale-110 transition-transform">
@@ -5938,10 +5950,10 @@ export default function Dashboard({ onSelectAnime }) {
 
 
         {/* 9. TRACKED LOCAL LIBRARY (HORIZONTAL SCROLL - TOP 10 RECENT & SEE ALL) */}
-        <section id="anime" className="space-y-4 pt-4 scroll-mt-24">
+        <section id="anime" className="space-y-4 scroll-mt-24">
           <span id="catalog" className="sr-only" />
           {/* Header Controls Panel */}
-          <div className="flex items-center justify-between p-4 md:p-5">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="p-2 rounded-xl bg-[#7c5cff]/10 border border-[#7c5cff]/20 text-[#a855f7]">
                 <Film size={20} />
@@ -6023,151 +6035,126 @@ export default function Dashboard({ onSelectAnime }) {
               className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
             >
               {/* Anime Cards - 10 Most Recent (Recently Watched 1st, then Latest Added) */}
-              {topTrackedAnimes.map((anime) => (
-                <div
-                  key={anime.id}
-                  onClick={() => onSelectAnime(anime.id)}
-                  onMouseEnter={(e) => handleCardMouseEnter(anime, 'anime', e)}
-                  onMouseLeave={handleCardMouseLeave}
-                  className="group relative flex-none w-52 sm:w-56 md:w-60 h-72 glass-card rounded-2xl flex flex-col justify-between overflow-hidden cursor-pointer"
-                >
-                  {/* Poster Image */}
-                  <div className="h-44 relative overflow-hidden bg-[#181c24] flex items-center justify-center">
-                    {anime.thumbnailBase64 ? (
-                      <CachedImage src={anime.thumbnailBase64} alt={anime.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                    ) : anime.thumbnailPath ? (
-                      <CachedImage src={`/api/image?path=${encodeURIComponent(anime.thumbnailPath)}`} alt={anime.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                    ) : (
-                      <div className={`w-full h-full bg-gradient-to-tr ${anime.coverGradient || 'from-violet-600 to-indigo-700'} flex items-center justify-center`}>
-                        <span className="text-3xl font-black text-white/30 group-hover:scale-110 transition-transform">
-                          {getInitials(anime.title)}
-                        </span>
-                      </div>
-                    )}
+              {topTrackedAnimes.map((anime) => {
+                const pct = getAnimeProgressPercent(anime);
+                const isWatched = Boolean(anime.watched || anime.isWatched || anime.status === 'completed' || pct >= 100);
+                const coverImg = anime.posterUrl || anime.posterPath || anime.coverUrl || anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null);
+                const rating = getDeterministicRating(anime.id, anime.rating);
+                const subLeft = anime.lastWatchedEpisode ? `EP ${anime.lastWatchedEpisode}` : (anime.year || (anime.totalSeasons ? `S${anime.totalSeasons}` : 'Anime'));
+                const subRight = anime.totalEpisodes
+                  ? (anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
+                    ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
+                    : `${anime.totalEpisodes} Ep`)
+                  : (anime.episodeCount ? `${anime.episodeCount} Ep` : 'Anime');
 
-                    {/* Red YouTube Logo Badge if YouTube folder */}
-                    {!!(anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://')) && (
-                      <div className="absolute top-2.5 right-2.5 z-10 p-1 bg-black/60 rounded-xl flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md">
-                        <YoutubeLogo size={18} />
-                      </div>
-                    )}
+                return (
+                  <div
+                    key={`anime-${anime.id}`}
+                    onClick={() => onSelectAnime(anime.id)}
+                    onMouseEnter={(e) => handleCardMouseEnter(anime, 'anime', e)}
+                    onMouseLeave={handleCardMouseLeave}
+                    className="group relative flex-none w-44 sm:w-48 md:w-52 rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-amber-400/50 hover:shadow-2xl hover:shadow-black/70 transition-all duration-300 cursor-pointer flex flex-col"
+                  >
+                    <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
+                      {coverImg ? (
+                        <CachedImage
+                          src={coverImg}
+                          alt={anime.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-1.5 p-3">
+                          <Play size={36} />
+                          <span className="text-[10px] font-bold text-white/90 line-clamp-2 text-center">{anime.title}</span>
+                        </div>
+                      )}
 
-                    {/* Actions Hover Overlay */}
-                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2 transition-opacity duration-300">
-                      <button
-                        onClick={(e) => handleDeleteAnime(anime, e)}
-                        className="p-2 rounded-full bg-red-950/80 border border-red-500/30 text-red-400 hover:bg-red-600 hover:text-white transition cursor-pointer"
-                        title="Stop Tracking"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {/* Top Badges */}
+                      <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
+                        {rating ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
+                            <Star size={10} className="fill-amber-400" />
+                            <span>{parseFloat(rating).toFixed(1)}</span>
+                          </div>
+                        ) : <span />}
 
-                      <div className="p-3 rounded-full bg-[#7c5cff] text-white shadow-lg transform translate-y-2 group-hover:translate-y-0 transition-transform">
-                        <Play size={18} fill="white" />
-                      </div>
-
-                      <button
-                        onClick={(e) => handleOpenEditModal(anime, e)}
-                        className="p-2 rounded-full bg-purple-950/80 border border-purple-500/30 text-purple-400 hover:bg-purple-600 hover:text-white transition cursor-pointer"
-                        title="Edit Anime Info"
-                      >
-                        <SlidersHorizontal size={14} />
-                      </button>
-                    </div>
-
-                    {/* Status Badge */}
-                    <div className="absolute top-2.5 left-2.5">
-                      {(() => {
-                        const pct = getAnimeProgressPercent(anime);
-                        return pct === 100 ? (
-                          <span className="px-2 py-0.5 rounded bg-emerald-500/90 text-[9px] uppercase font-bold text-white flex items-center gap-1">
-                            <CheckCircle2 size={10} /> Completed
-                          </span>
+                        {isWatched ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
+                            <Check size={9} /> DONE
+                          </div>
                         ) : pct > 0 ? (
-                          <span className="px-2 py-0.5 rounded bg-[#7c5cff]/90 text-[9px] uppercase font-bold text-white">
-                            Watching
-                          </span>
-                        ) : null;
-                      })()}
-                    </div>
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
+                            {Math.round(pct)}%
+                          </div>
+                        ) : null}
+                      </div>
 
-                    {/* Mobile 3-Dot Options Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        setActiveMobileMenu({ type: 'anime', id: anime.id, item: anime });
-                      }}
-                      className="md:hidden absolute bottom-2 right-2 z-20 p-1.5 rounded-lg bg-black/80 hover:bg-black text-gray-200 border border-white/20 shadow-lg backdrop-blur-md active:scale-90 transition cursor-pointer"
-                      title="Options"
-                    >
-                      <MoreVertical size={13} />
-                    </button>
-                  </div>
+                      {/* Red YouTube Logo Badge if YouTube folder */}
+                      {!!(anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://')) && (
+                        <div className="absolute top-8 right-2 z-10 p-1 bg-black/60 rounded-xl flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md pointer-events-none">
+                          <YoutubeLogo size={16} />
+                        </div>
+                      )}
 
-                  {/* Card Details */}
-                  <div className="p-3.5 flex flex-col justify-between flex-1 bg-[#111827]/40">
-                    <div>
-                      <h3 className="font-bold text-xs text-white line-clamp-1 group-hover:text-[#7c5cff] transition-colors" title={anime.title}>
-                        {anime.title}
-                      </h3>
-                      <p className="text-[9px] text-gray-500 line-clamp-1 mt-0.5">
-                        {anime.folderPath}
-                      </p>
-                    </div>
+                      {/* Mobile 3-Dot Options Button */}
+                      <div className="md:hidden absolute top-2 right-2 z-20">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMobileMenu({ type: 'anime', id: anime.id, item: anime });
+                          }}
+                          className="p-1.5 rounded-lg bg-black/80 text-white border border-white/20 shadow-lg"
+                        >
+                          <MoreVertical size={13} />
+                        </button>
+                      </div>
 
-                    <div className="mt-2">
-                      {(() => {
-                        const pct = getAnimeProgressPercent(anime);
-                        return (
-                          <>
-                            <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
-                              <div className="flex items-center gap-1.5 truncate max-w-[70%]">
-                                {Boolean(anime.totalSeasons) && (
-                                  <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-extrabold text-[9px] shrink-0">
-                                    S{anime.totalSeasons}
-                                  </span>
-                                )}
-                                <span className="truncate" title={anime.totalEpisodes ? `${anime.totalEpisodes} Total Episodes (${anime.episodeCount || 0} local)` : `${anime.episodeCount || 0} Episodes`}>
-                                  {anime.totalEpisodes ? (
-                                    anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)
-                                      ? `${anime.episodeCount}/${anime.totalEpisodes} Ep`
-                                      : `${anime.totalEpisodes} Episodes`
-                                  ) : (
-                                    `${anime.episodeCount || 0} Episodes`
-                                  )}
-                                </span>
-                              </div>
-                              <span className="font-bold text-white shrink-0 ml-1">{pct}%</span>
-                            </div>
-                            <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all duration-500 ${pct === 100 ? 'bg-emerald-500' : 'bg-gradient-to-r from-[#7c5cff] to-[#a855f7]'}`}
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                          </>
-                        );
-                      })()}
+                      {/* Bottom Gradient Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
+
+                      {/* Bottom Info inside Card */}
+                      <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 space-y-0.5 pointer-events-none">
+                        <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-amber-300 transition" title={anime.title}>
+                          {anime.title}
+                        </h3>
+                        <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
+                          <span>{subLeft}</span>
+                          <span>{subRight}</span>
+                        </div>
+                      </div>
+
+                      {/* Watch progress bar at the very bottom inside the poster card */}
+                      {pct > 0 && (
+                        <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-300"
+                            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {/* See All Card at the end */}
               <div
                 onClick={() => router.push('/animes')}
-                className="flex-none w-52 sm:w-56 md:w-60 h-72 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-center items-center p-6 text-center border border-white/10 hover:border-[#7c5cff]/50 transition shadow-md hover:shadow-xl bg-[#7c5cff]/5 hover:bg-[#7c5cff]/10"
+                className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-[#7c5cff]/5 hover:bg-[#7c5cff]/10 self-start"
               >
-                <div className="w-12 h-12 rounded-2xl bg-[#7c5cff]/20 text-[#a855f7] flex items-center justify-center group-hover:scale-110 transition-transform mb-3">
-                  <Film size={24} />
+                <div className="aspect-[2/3] flex flex-col items-center justify-center p-6 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-[#7c5cff]/20 text-[#a855f7] flex items-center justify-center group-hover:scale-110 transition-transform mb-1">
+                    <Film size={24} />
+                  </div>
+                  <div>
+                    <span className="text-sm font-bold text-white block">See All Anime</span>
+                    <span className="text-xs text-purple-300/80 font-mono mt-0.5 block">{animes.length} Total Series</span>
+                  </div>
+                  <span className="px-3 py-1.5 rounded-xl bg-[#7c5cff] text-white text-xs font-extrabold flex items-center gap-1 group-hover:bg-[#6c4cf0] transition shadow-md shadow-[#7c5cff]/30">
+                    View All <ChevronRight size={14} />
+                  </span>
                 </div>
-                <span className="text-sm font-bold text-white block">See All Anime</span>
-                <span className="text-xs text-purple-300/80 font-mono mt-0.5 block">{animes.length} Total Series</span>
-                <span className="mt-4 px-3 py-1.5 rounded-xl bg-[#7c5cff] text-white text-xs font-extrabold flex items-center gap-1 group-hover:bg-[#6c4cf0] transition shadow-md shadow-[#7c5cff]/30">
-                  View All <ChevronRight size={14} />
-                </span>
               </div>
             </div>
           )}
@@ -6282,76 +6269,76 @@ export default function Dashboard({ onSelectAnime }) {
                     onClick={() => router.push(`/webseries/${series.id}`)}
                     onMouseEnter={(e) => handleCardMouseEnter(series, 'webseries', e)}
                     onMouseLeave={handleCardMouseLeave}
-                    className="flex-none w-36 sm:w-40 md:w-44 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col border border-white/10 hover:border-cyan-500/50 transition-all duration-300 shadow-md hover:shadow-xl relative self-start"
+                    className="group relative flex-none w-44 sm:w-48 md:w-52 rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-amber-400/50 hover:shadow-2xl hover:shadow-black/70 transition-all duration-300 cursor-pointer flex flex-col"
                   >
-                    <div className="relative aspect-[2/3] overflow-hidden bg-[#181c24] flex items-center justify-center z-10">
+                    <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
                       {coverImg ? (
                         <CachedImage
                           src={coverImg}
                           alt={series.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />
                       ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-cyan-400/80 bg-gradient-to-br from-cyan-950/30 to-blue-950/20 gap-1.5">
-                          <Tv size={32} />
-                          <span className="text-[9px] font-mono uppercase tracking-wider">Series</span>
+                        <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-1.5 p-3">
+                          <Tv size={36} />
+                          <span className="text-[10px] font-bold text-white/90 line-clamp-2 text-center">{series.title}</span>
                         </div>
                       )}
 
-                      {/* Rating / Watched Badge */}
-                      <div className="absolute top-2 left-2 flex items-center gap-1">
-                        {isWatched ? (
-                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/90 backdrop-blur-md text-[9px] uppercase font-bold text-white flex items-center gap-1 shadow">
-                            <CheckCircle2 size={10} /> Completed
-                          </span>
-                        ) : series.rating ? (
-                          <div className="px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-md text-amber-300 font-bold text-[9px] border border-white/10 flex items-center gap-1">
-                            <Star size={10} className="fill-amber-400 text-amber-400" />
+                      {/* Top Badges */}
+                      <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
+                        {series.rating ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
+                            <Star size={10} className="fill-amber-400" />
                             <span>{parseFloat(series.rating).toFixed(1)}</span>
+                          </div>
+                        ) : <span />}
+
+                        {isWatched ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
+                            <Check size={9} /> DONE
+                          </div>
+                        ) : pct > 0 ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
+                            {Math.round(pct)}%
                           </div>
                         ) : null}
                       </div>
 
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-cyan-500 text-black font-extrabold text-[8px] shadow">
-                        SERIES
+                      {/* Mobile 3-dot menu trigger button */}
+                      <div className="md:hidden absolute top-2 right-2 z-20">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMobileMenu(activeMobileMenu?.id === series.id ? null : { type: 'webseries', id: series.id, item: series });
+                          }}
+                          className="p-1.5 rounded-lg bg-black/80 text-white border border-white/20 shadow-lg"
+                        >
+                          <MoreVertical size={13} />
+                        </button>
                       </div>
 
-                      {/* Mobile 3-dot Options Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          setActiveMobileMenu({ type: 'webseries', id: series.id, item: series });
-                        }}
-                        className="md:hidden absolute bottom-2 right-2 z-20 p-2 rounded-xl bg-black/85 hover:bg-black text-white border border-white/20 backdrop-blur-md shadow-lg active:scale-90 transition cursor-pointer"
-                        title="Options"
-                      >
-                        <MoreVertical size={14} />
-                      </button>
-                    </div>
+                      {/* Bottom Gradient Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
 
-                    <div className="p-2.5 sm:p-3 bg-white/[0.03]">
-                      <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-cyan-300 transition-colors">
-                        {series.title}
-                      </h4>
-                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
-                        <span>{seriesYear || epCountDisplay}</span>
-                        <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-1" : "text-cyan-400 font-semibold"}>
-                          {isWatched ? (
-                            <>
-                              <CheckCircle2 size={10} /> Done
-                            </>
-                          ) : (
-                            pct > 0 ? `${pct}%` : epCountDisplay
-                          )}
-                        </span>
+                      {/* Bottom Info inside Card */}
+                      <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 space-y-0.5 pointer-events-none">
+                        <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-amber-300 transition">
+                          {series.title}
+                        </h3>
+                        <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
+                          <span>{series.lastWatchedEpisode ? `EP ${series.lastWatchedEpisode}` : (seriesYear || 'Series')}</span>
+                          <span>{epCountDisplay || 'TV'}</span>
+                        </div>
                       </div>
-                      {pct > 0 && !isWatched && (
-                        <div className="w-full h-1 bg-white/10 rounded-full mt-2 overflow-hidden">
+
+                      {/* Watch progress bar at the very bottom inside the poster card */}
+                      {pct > 0 && (
+                        <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 overflow-hidden">
                           <div
-                            className="h-full bg-gradient-to-r from-cyan-500 to-blue-600 transition-all duration-300"
-                            style={{ width: `${pct}%` }}
+                            className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-300"
+                            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
                           />
                         </div>
                       )}
@@ -6363,7 +6350,7 @@ export default function Dashboard({ onSelectAnime }) {
               {sortedWebseries.length > 10 && (
                 <div
                   onClick={() => router.push('/webseries')}
-                  className="flex-none w-36 sm:w-40 md:w-44 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-cyan-950/10 hover:bg-cyan-950/20 self-start"
+                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-cyan-950/10 hover:bg-cyan-950/20 self-start"
                 >
                   <div className="aspect-[2/3] flex flex-col items-center justify-center p-6 text-center space-y-3">
                     <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 text-cyan-300 flex items-center justify-center group-hover:scale-110 transition-transform">
@@ -6451,83 +6438,91 @@ export default function Dashboard({ onSelectAnime }) {
             >
               {sortedMangas.map((m) => {
                 const isWatched = Boolean(m.isWatched || m.progressPercent === 100 || m.status === 'completed');
-                const coverImg = m.thumbnailBase64 || (m.thumbnailPath ? `/api/image?path=${encodeURIComponent(m.thumbnailPath)}` : null);
+                const pct = Number(m.progressPercent || 0);
+                const coverImg = m.thumbnailBase64 || (m.thumbnailPath ? `/api/image?path=${encodeURIComponent(m.thumbnailPath)}` : (m.coverUrl || m.posterUrl || null));
+                const rating = getDeterministicRating(m.id, m.rating);
+                const subLeft = m.lastWatchedChapter ? `CH ${m.lastWatchedChapter}` : (m.completedChapters ? `CH ${m.completedChapters}` : (m.year || 'Manga'));
+                const subRight = m.totalChapters ? `${m.totalChapters} Ch` : (m.chapterCount ? `${m.chapterCount} Ch` : 'Manga');
+
                 return (
                   <div
                     key={`manga-${m.id}`}
                     onClick={() => router.push(`/manga/${m.id}`)}
-                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-purple-500/50 transition-all duration-300 shadow-md hover:shadow-xl"
+                    onMouseEnter={(e) => handleCardMouseEnter(m, 'manga', e)}
+                    onMouseLeave={handleCardMouseLeave}
+                    className="group relative flex-none w-44 sm:w-48 md:w-52 rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-purple-400/50 hover:shadow-2xl hover:shadow-black/70 transition-all duration-300 cursor-pointer flex flex-col"
                   >
-                    <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
+                    <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
                       {coverImg ? (
                         <CachedImage
                           src={coverImg}
                           alt={m.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />
                       ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-purple-400/80 bg-purple-950/20 gap-1.5">
-                          <BookOpen size={32} />
-                          <span className="text-[9px] font-mono uppercase tracking-wider">PDF Manga</span>
+                        <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-1.5 p-3">
+                          <BookOpen size={36} />
+                          <span className="text-[10px] font-bold text-white/90 line-clamp-2 text-center">{m.title}</span>
                         </div>
                       )}
 
-                      {/* Status / Chapter Badge */}
-                      <div className="absolute top-2 left-2 flex items-center gap-1">
-                        {isWatched ? (
-                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/90 backdrop-blur-md text-[9px] uppercase font-bold text-white flex items-center gap-1 shadow">
-                            <CheckCircle2 size={10} /> Completed
-                          </span>
-                        ) : (
-                          <div className="px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-md text-purple-300 font-bold text-[9px] border border-white/10">
-                            {m.chapterCount || m.totalChapters || 0} Ch
+                      {/* Top Badges */}
+                      <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
+                        {rating ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
+                            <Star size={10} className="fill-amber-400" />
+                            <span>{parseFloat(rating).toFixed(1)}</span>
                           </div>
-                        )}
+                        ) : <span />}
+
+                        {isWatched ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
+                            <Check size={9} /> DONE
+                          </div>
+                        ) : pct > 0 ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
+                            {Math.round(pct)}%
+                          </div>
+                        ) : null}
                       </div>
 
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-purple-600 text-white font-extrabold text-[8px] shadow">
-                        PDF
-                      </div>
-
-                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center p-3 gap-2">
-                        <div className="px-3 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg">
-                          <BookOpen size={14} />
-                          <span>Read</span>
-                        </div>
+                      {/* Mobile 3-Dot Options Button */}
+                      <div className="md:hidden absolute top-2 right-2 z-20">
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            e.preventDefault();
-                            setMangaCompleteConfirm(m);
+                            setActiveMobileMenu({ type: 'manga', id: m.id, item: m });
                           }}
-                          className={`p-2 rounded-xl border transition cursor-pointer ${isWatched
-                            ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
-                            : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
-                            }`}
-                          title={isWatched ? 'Mark Manga Unread' : 'Mark Manga Complete (Watched)'}
+                          className="p-1.5 rounded-lg bg-black/80 text-white border border-white/20 shadow-lg"
                         >
-                          <CheckCircle2 size={14} />
+                          <MoreVertical size={13} />
                         </button>
                       </div>
-                    </div>
 
-                    <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
-                      <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-purple-300 transition-colors">
-                        {m.title}
-                      </h4>
-                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
-                        <span>Local PDF</span>
-                        <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-1" : "text-purple-400 font-semibold"}>
-                          {isWatched ? (
-                            <>
-                              <CheckCircle2 size={10} /> Completed
-                            </>
-                          ) : (
-                            m.progressPercent ? `${m.progressPercent}%` : 'Ready'
-                          )}
-                        </span>
+                      {/* Bottom Gradient Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
+
+                      {/* Bottom Info inside Card */}
+                      <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 space-y-0.5 pointer-events-none">
+                        <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-amber-300 transition" title={m.title}>
+                          {m.title}
+                        </h3>
+                        <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
+                          <span>{subLeft}</span>
+                          <span>{subRight}</span>
+                        </div>
                       </div>
+
+                      {/* Watch progress bar at the very bottom inside the poster card */}
+                      {pct > 0 && (
+                        <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300"
+                            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -6602,83 +6597,91 @@ export default function Dashboard({ onSelectAnime }) {
             >
               {sortedAudioStories.map((s) => {
                 const isWatched = Boolean(s.isWatched || s.progressPercent === 100 || s.status === 'completed');
-                const coverImg = s.thumbnailBase64 || (s.thumbnailPath ? `/api/image?path=${encodeURIComponent(s.thumbnailPath)}` : null);
+                const pct = Number(s.progressPercent || 0);
+                const coverImg = s.thumbnailBase64 || (s.thumbnailPath ? `/api/image?path=${encodeURIComponent(s.thumbnailPath)}` : (s.coverUrl || s.posterUrl || null));
+                const rating = getDeterministicRating(s.id, s.rating);
+                const subLeft = s.lastWatchedTrack || (s.completedTracks ? `Tr ${s.completedTracks}` : (s.year || 'Audio'));
+                const subRight = s.totalTracks ? `${s.totalTracks} Tr` : (s.trackCount ? `${s.trackCount} Tr` : 'Audio');
+
                 return (
                   <div
                     key={`audio-${s.id}`}
                     onClick={() => router.push(`/audio-story/${s.id}`)}
-                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-cyan-500/50 transition-all duration-300 shadow-md hover:shadow-xl"
+                    onMouseEnter={(e) => handleCardMouseEnter(s, 'audioStory', e)}
+                    onMouseLeave={handleCardMouseLeave}
+                    className="group relative flex-none w-44 sm:w-48 md:w-52 rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-cyan-400/50 hover:shadow-2xl hover:shadow-black/70 transition-all duration-300 cursor-pointer flex flex-col"
                   >
-                    <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
+                    <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
                       {coverImg ? (
                         <CachedImage
                           src={coverImg}
                           alt={s.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />
                       ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-cyan-400/80 bg-gradient-to-br from-cyan-950/30 to-purple-950/20 gap-1.5">
+                        <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-1.5 p-3">
                           <Headphones size={36} />
-                          <span className="text-[9px] font-mono uppercase tracking-wider">Audio Story</span>
+                          <span className="text-[10px] font-bold text-white/90 line-clamp-2 text-center">{s.title}</span>
                         </div>
                       )}
 
-                      {/* Status / Track Badge */}
-                      <div className="absolute top-2 left-2 flex items-center gap-1">
-                        {isWatched ? (
-                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/90 backdrop-blur-md text-[9px] uppercase font-bold text-white flex items-center gap-1 shadow">
-                            <CheckCircle2 size={10} /> Listened
-                          </span>
-                        ) : (
-                          <div className="px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-md text-cyan-300 font-bold text-[9px] border border-white/10">
-                            {s.trackCount || s.totalTracks || 0} Tracks
+                      {/* Top Badges */}
+                      <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
+                        {rating ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
+                            <Star size={10} className="fill-amber-400" />
+                            <span>{parseFloat(rating).toFixed(1)}</span>
                           </div>
-                        )}
+                        ) : <span />}
+
+                        {isWatched ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
+                            <Check size={9} /> DONE
+                          </div>
+                        ) : pct > 0 ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
+                            {Math.round(pct)}%
+                          </div>
+                        ) : null}
                       </div>
 
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-cyan-500 text-black font-extrabold text-[8px] shadow">
-                        AUDIO
-                      </div>
-
-                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center p-3 gap-2">
-                        <div className="px-3 py-1.5 rounded-xl bg-cyan-500 text-black text-xs font-bold flex items-center gap-1.5 shadow-lg">
-                          <Play size={14} fill="currentColor" />
-                          <span>Listen</span>
-                        </div>
+                      {/* Mobile 3-Dot Options Button */}
+                      <div className="md:hidden absolute top-2 right-2 z-20">
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            e.preventDefault();
-                            setAudioStoryCompleteConfirm(s);
+                            setActiveMobileMenu({ type: 'audioStory', id: s.id, item: s });
                           }}
-                          className={`p-2 rounded-xl border transition cursor-pointer ${isWatched
-                            ? 'bg-emerald-500/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/50'
-                            : 'bg-white/10 border-white/20 text-gray-300 hover:bg-emerald-600 hover:text-white'
-                            }`}
-                          title={isWatched ? 'Mark Unlistened' : 'Mark Listened (Complete)'}
+                          className="p-1.5 rounded-lg bg-black/80 text-white border border-white/20 shadow-lg"
                         >
-                          <CheckCircle2 size={14} />
+                          <MoreVertical size={13} />
                         </button>
                       </div>
-                    </div>
 
-                    <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
-                      <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-cyan-300 transition-colors">
-                        {s.title}
-                      </h4>
-                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
-                        <span>Audio / Video</span>
-                        <span className={isWatched ? "text-emerald-400 font-bold flex items-center gap-1" : "text-cyan-400 font-semibold"}>
-                          {isWatched ? (
-                            <>
-                              <CheckCircle2 size={10} /> Completed
-                            </>
-                          ) : (
-                            s.progressPercent ? `${s.progressPercent}%` : 'Ready'
-                          )}
-                        </span>
+                      {/* Bottom Gradient Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
+
+                      {/* Bottom Info inside Card */}
+                      <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 space-y-0.5 pointer-events-none">
+                        <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-amber-300 transition" title={s.title}>
+                          {s.title}
+                        </h3>
+                        <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
+                          <span>{subLeft}</span>
+                          <span>{subRight}</span>
+                        </div>
                       </div>
+
+                      {/* Watch progress bar at the very bottom inside the poster card */}
+                      {pct > 0 && (
+                        <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-cyan-500 to-purple-500 transition-all duration-300"
+                            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -6760,20 +6763,19 @@ export default function Dashboard({ onSelectAnime }) {
             /* Horizontal Slider (X-Axis Scrollable) showing latest 10 items + See All button */
             <div
               ref={watchlistScrollRef}
-              onWheel={(e) => {
-                if (e.deltaY !== 0 && watchlistScrollRef.current) {
-                  watchlistScrollRef.current.scrollLeft += e.deltaY;
-                }
-              }}
               onMouseDown={handleWatchlistMouseDown}
               onMouseMove={handleWatchlistMouseMove}
               onMouseUp={handleWatchlistMouseUpOrLeave}
               onMouseLeave={handleWatchlistMouseUpOrLeave}
-              className="flex gap-4 overflow-x-auto py-2 scroll-smooth select-none cursor-grab active:cursor-grabbing custom-scrollbar"
+              className="flex gap-4 overflow-x-auto py-2 scroll-smooth select-none cursor-grab active:cursor-grabbing no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
             >
               {sortedWatchlist.slice(0, 10).map((item) => {
                 const coverImg = item.posterUrl || (item.images?.posters?.[0]?.url || null);
-                const isCompleted = item.status === 'Completed';
+                const pct = Number(item.progressPercent || item.progressPct || 0);
+                const isCompleted = item.status === 'Completed' || pct >= 100;
+                const rating = item.rating > 0 ? parseFloat(item.rating).toFixed(1) : (item.score > 0 ? parseFloat(item.score).toFixed(1) : null);
+                const subLeft = item.year || item.contentType || 'Media';
+                const subRight = item.status || 'Plan to Watch';
 
                 return (
                   <div
@@ -6781,62 +6783,83 @@ export default function Dashboard({ onSelectAnime }) {
                     onClick={() => router.push(`/watchlist/${item.id}`)}
                     onMouseEnter={(e) => handleCardMouseEnter(item, 'watchlist', e)}
                     onMouseLeave={handleCardMouseLeave}
-                    className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-xl relative"
+                    className="group relative flex-none w-44 sm:w-48 md:w-52 rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-amber-400/50 hover:shadow-2xl hover:shadow-black/70 transition-all duration-300 cursor-pointer flex flex-col"
                   >
-                    <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
+                    <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
                       {coverImg ? (
                         <CachedImage
                           src={coverImg}
                           alt={item.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />
                       ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-amber-400/80 bg-gradient-to-br from-amber-950/30 to-purple-950/20 gap-1.5">
+                        <div className="w-full h-full flex flex-col items-center justify-center text-amber-400/80 bg-gradient-to-br from-amber-950/30 to-purple-950/20 gap-1.5 p-3">
                           <Bookmark size={36} />
-                          <span className="text-[9px] font-mono uppercase tracking-wider">Watchlist</span>
+                          <span className="text-[10px] font-bold text-white/90 line-clamp-2 text-center">{item.title}</span>
                         </div>
                       )}
 
-                      {/* Content Type Badge */}
-                      <div className="absolute top-2 left-2 flex items-center gap-1">
-                        <span className="px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md text-[9px] uppercase font-bold text-amber-300 border border-white/10">
-                          {item.contentType || 'Media'}
-                        </span>
+                      {/* Top Badges */}
+                      <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
+                        {rating ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
+                            <Star size={10} className="fill-amber-400" />
+                            <span>{rating}</span>
+                          </div>
+                        ) : (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[9px] uppercase font-bold text-amber-300 border border-white/10">
+                            {item.contentType || 'Media'}
+                          </div>
+                        )}
+
+                        {isCompleted ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
+                            <Check size={9} /> DONE
+                          </div>
+                        ) : pct > 0 ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
+                            {Math.round(pct)}%
+                          </div>
+                        ) : null}
                       </div>
-
-                      {/* Rating */}
-                      {item.rating > 0 && (
-                        <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-black/80 backdrop-blur-md text-amber-400 font-extrabold text-[9px] shadow border border-white/10 flex items-center gap-0.5">
-                          <Star size={9} className="fill-amber-400" />
-                          {item.rating}
-                        </div>
-                      )}
 
                       {/* Mobile 3-dot Options Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          setActiveMobileMenu({ type: 'watchlist', id: item.id, item });
-                        }}
-                        className="md:hidden absolute bottom-2 right-2 z-20 p-2 rounded-xl bg-black/85 hover:bg-black text-white border border-white/20 backdrop-blur-md shadow-lg active:scale-90 transition cursor-pointer"
-                        title="Options"
-                      >
-                        <MoreVertical size={14} />
-                      </button>
-                    </div>
-
-                    <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
-                      <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-amber-300 transition-colors" title={item.title}>
-                        {item.title}
-                      </h4>
-                      <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
-                        <span>{item.year || item.contentType}</span>
-                        <span className={isCompleted ? "text-emerald-400 font-bold flex items-center gap-1" : "text-amber-400 font-semibold"}>
-                          {item.status || 'Plan to Watch'}
-                        </span>
+                      <div className="md:hidden absolute top-2 right-2 z-20">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMobileMenu({ type: 'watchlist', id: item.id, item });
+                          }}
+                          className="p-1.5 rounded-lg bg-black/80 text-white border border-white/20 shadow-lg"
+                        >
+                          <MoreVertical size={13} />
+                        </button>
                       </div>
+
+                      {/* Bottom Gradient Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
+
+                      {/* Bottom Info inside Card */}
+                      <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 space-y-0.5 pointer-events-none">
+                        <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-amber-300 transition" title={item.title}>
+                          {item.title}
+                        </h3>
+                        <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
+                          <span>{subLeft}</span>
+                          <span>{subRight}</span>
+                        </div>
+                      </div>
+
+                      {/* Watch progress bar at the very bottom inside the poster card */}
+                      {pct > 0 && (
+                        <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-300"
+                            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -6845,18 +6868,19 @@ export default function Dashboard({ onSelectAnime }) {
               {/* SEE ALL CARD AT THE END */}
               <div
                 onClick={() => router.push('/watchlist')}
-                className="flex-none w-40 sm:w-44 md:w-48 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col items-center justify-center p-6 border border-white/10 hover:border-amber-500/50 transition-all duration-300 shadow-md hover:shadow-xl bg-gradient-to-br from-amber-500/5 via-transparent to-purple-600/5 text-center gap-3"
+                className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-amber-950/10 hover:bg-amber-950/20 self-start"
               >
-                <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-300 group-hover:bg-amber-500 group-hover:text-black flex items-center justify-center transition-all duration-300 group-hover:scale-110 shadow-lg">
-                  <ChevronRight size={24} />
-                </div>
-                <div>
-                  <h4 className="text-xs font-black text-white group-hover:text-amber-300 transition-colors">
-                    See All
-                  </h4>
-                  <p className="text-[10px] text-gray-400 mt-0.5">
-                    {watchlist.length} {watchlist.length === 1 ? 'item' : 'items'} in watchlist
-                  </p>
+                <div className="aspect-[2/3] flex flex-col items-center justify-center p-6 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-300 flex items-center justify-center group-hover:scale-110 transition-transform mb-1">
+                    <Bookmark size={24} />
+                  </div>
+                  <div>
+                    <span className="text-sm font-bold text-white block">See All</span>
+                    <span className="text-xs text-amber-400/80 font-mono mt-0.5 block">{watchlist.length} items</span>
+                  </div>
+                  <span className="px-3 py-1.5 rounded-xl bg-amber-500 text-black text-xs font-extrabold flex items-center gap-1 group-hover:bg-amber-400 transition">
+                    View All <ChevronRight size={14} />
+                  </span>
                 </div>
               </div>
             </div>
@@ -6902,50 +6926,98 @@ export default function Dashboard({ onSelectAnime }) {
               ref={recentlyUpdatedRef}
               className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
             >
-              {recentlyUpdated.map((show, i) => (
-                <div
-                  key={`recent-${show.type || 'anime'}-${show.id}-${i}`}
-                  onClick={() => {
-                    if (show.type === 'manga') {
-                      router.push(`/manga/${show.id}`);
-                    } else {
-                      onSelectAnime(show.id);
-                    }
-                  }}
-                  className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col justify-between border border-white/5 hover:border-[#7c5cff]/40 transition-all duration-300 shadow-md hover:shadow-xl"
-                >
-                  <div className="relative h-56 md:h-60 overflow-hidden bg-[#181c24] flex items-center justify-center">
-                    <CachedImage src={show.image} alt={show.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded-lg bg-black/70 backdrop-blur-md text-gray-300 font-bold text-[10px] border border-white/10">
-                      {show.episode}
+              {recentlyUpdated.map((show, i) => {
+                const pct = Number(show.pct || 0);
+                const isCompleted = pct >= 100;
+                return (
+                  <div
+                    key={`recent-${show.type || 'anime'}-${show.id}-${i}`}
+                    onClick={() => {
+                      if (show.type === 'manga') {
+                        router.push(`/manga/${show.id}`);
+                      } else {
+                        onSelectAnime(show.id);
+                      }
+                    }}
+                    onMouseEnter={(e) => handleCardMouseEnter(show.item || show, show.type || 'anime', e)}
+                    onMouseLeave={handleCardMouseLeave}
+                    className="group relative flex-none w-44 sm:w-48 md:w-52 rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-amber-400/50 hover:shadow-2xl hover:shadow-black/70 transition-all duration-300 cursor-pointer flex flex-col"
+                  >
+                    <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
+                      <CachedImage src={show.image} alt={show.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+
+                      {/* Top Badges */}
+                      <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
+                        {show.rating ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
+                            <Star size={10} className="fill-amber-400" />
+                            <span>{parseFloat(show.rating).toFixed(1)}</span>
+                          </div>
+                        ) : <span />}
+
+                        {isCompleted ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
+                            <Check size={9} /> DONE
+                          </div>
+                        ) : pct > 0 ? (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
+                            {Math.round(pct)}%
+                          </div>
+                        ) : (
+                          <div className="px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[9px] font-extrabold uppercase tracking-wider text-gray-300 border border-white/10 shadow">
+                            {show.type === 'manga' ? 'Manga' : (show.quality || 'HD')}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Red YouTube Logo Badge if YouTube folder */}
+                      {!!show.isYouTube && (
+                        <div className="absolute top-8 right-2 z-10 p-1 bg-black/60 rounded-xl flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md pointer-events-none">
+                          <YoutubeLogo size={16} />
+                        </div>
+                      )}
+
+                      {/* Mobile 3-Dot Options Button */}
+                      <div className="md:hidden absolute top-2 right-2 z-20">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMobileMenu({ type: show.type || 'anime', id: show.id, item: show.item || show });
+                          }}
+                          className="p-1.5 rounded-lg bg-black/80 text-white border border-white/20 shadow-lg"
+                        >
+                          <MoreVertical size={13} />
+                        </button>
+                      </div>
+
+                      {/* Bottom Gradient Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
+
+                      {/* Bottom Info inside Card */}
+                      <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 space-y-0.5 pointer-events-none">
+                        <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-amber-300 transition" title={show.title}>
+                          {show.title}
+                        </h3>
+                        <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
+                          <span>{show.episode}</span>
+                          <span>{show.type === 'manga' ? 'Manga' : 'Anime'}</span>
+                        </div>
+                      </div>
+
+                      {/* Watch progress bar at the very bottom inside the poster card */}
+                      {pct > 0 && (
+                        <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-300"
+                            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
-                    {show.type === 'manga' ? (
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-emerald-500/90 backdrop-blur-md text-white font-extrabold text-[8px] tracking-wider uppercase shadow-lg border border-emerald-400/30">
-                        MANGA
-                      </div>
-                    ) : show.isYouTube ? (
-                      <div className="absolute top-2 right-2 p-1 bg-black/60 rounded-lg shadow-lg border border-red-500/40 backdrop-blur-md flex items-center justify-center">
-                        <YoutubeLogo size={16} />
-                      </div>
-                    ) : (
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-lg bg-[#7c5cff]/90 backdrop-blur-md text-white font-extrabold text-[8px] border border-purple-400/30">
-                        {show.quality || 'HD'}
-                      </div>
-                    )}
                   </div>
-                  <div className="p-3 bg-gradient-to-b from-white/[0.02] to-black/30">
-                    <h4 className="font-bold text-xs sm:text-sm text-white line-clamp-1 group-hover:text-[#7c5cff] transition-colors">
-                      {show.title}
-                    </h4>
-                    <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1.5">
-                      <span className={show.type === 'manga' ? "text-emerald-400/90 font-semibold" : "text-gray-400 font-medium"}>
-                        {show.type === 'manga' ? 'Manga' : 'Anime'}
-                      </span>
-                      <span className="text-amber-400 font-bold">★ {show.rating}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}
@@ -7084,7 +7156,7 @@ export default function Dashboard({ onSelectAnime }) {
         </section>
 
         {/* 10. TOP 20 TOP-RATED EPISODES (LAZY-LOADED, DAILY SYNC) */}
-        <section id="top-rated" ref={lazyTopRatedRef} className="space-y-4 pt-4">
+        <section id="top-rated" ref={lazyTopRatedRef} className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
@@ -10035,6 +10107,10 @@ export default function Dashboard({ onSelectAnime }) {
             router.push(`/webseries/${item.id}`);
           } else if (activePreview?.type === 'anime') {
             onSelectAnime(item.id);
+          } else if (activePreview?.type === 'manga') {
+            router.push(`/manga/${item.id}`);
+          } else if (activePreview?.type === 'audioStory') {
+            router.push(`/audio-story/${item.id}`);
           } else {
             router.push(`/watchlist/${item.id}`);
           }
@@ -10046,6 +10122,10 @@ export default function Dashboard({ onSelectAnime }) {
             setWebseriesCompleteConfirm(item);
           } else if (activePreview?.type === 'anime') {
             handleToggleAnimeComplete(item);
+          } else if (activePreview?.type === 'manga') {
+            setMangaCompleteConfirm(item);
+          } else if (activePreview?.type === 'audioStory') {
+            setAudioStoryCompleteConfirm(item);
           } else {
             setWatchlistCompleteConfirm(item);
           }
@@ -10070,6 +10150,10 @@ export default function Dashboard({ onSelectAnime }) {
             handleDeleteWebseries(item);
           } else if (activePreview?.type === 'anime') {
             handleDeleteAnime(item);
+          } else if (activePreview?.type === 'manga') {
+            handleDeleteManga(item);
+          } else if (activePreview?.type === 'audioStory') {
+            handleDeleteAudioStory(item);
           } else {
             handleDeleteWatchlist(item);
           }
@@ -10114,6 +10198,11 @@ export default function Dashboard({ onSelectAnime }) {
         onTransferred={(deletedId) => {
           setWatchlist(prev => prev.filter(i => i.id !== deletedId));
           setTransferringWatchlistItem(null);
+          setWebseriesList(getLocalWebseries() || []);
+          setMovies(getLocalMovies() || []);
+          setAnimes(getLocalAnimes() || []);
+          setMangas(getLocalMangas() || []);
+          setAudioStories(getLocalAudioStories() || []);
         }}
       />
 
@@ -10163,6 +10252,10 @@ export default function Dashboard({ onSelectAnime }) {
                         ? 'Web-series'
                         : activeMobileMenu.type === 'anime'
                         ? 'Anime'
+                        : activeMobileMenu.type === 'manga'
+                        ? 'Manga'
+                        : activeMobileMenu.type === 'audioStory'
+                        ? 'Audio'
                         : 'Watchlist'
                     }
                   </p>
@@ -10191,6 +10284,10 @@ export default function Dashboard({ onSelectAnime }) {
                       router.push(`/webseries/${target.id}`);
                     } else if (mType === 'anime') {
                       onSelectAnime(target.id);
+                    } else if (mType === 'manga') {
+                      router.push(`/manga/${target.id}`);
+                    } else if (mType === 'audioStory') {
+                      router.push(`/audio-story/${target.id}`);
                     } else {
                       router.push(`/watchlist/${target.id}`);
                     }
@@ -10198,7 +10295,19 @@ export default function Dashboard({ onSelectAnime }) {
                   className="w-full text-left px-3.5 py-3 rounded-2xl bg-[#7c5cff]/20 hover:bg-[#7c5cff]/30 text-[#a855f7] flex items-center gap-3 text-sm font-bold transition active:scale-98 cursor-pointer"
                 >
                   <Play size={18} fill="currentColor" />
-                  <span>{activeMobileMenu.type === 'anime' ? 'Open Anime' : activeMobileMenu.type === 'movie' ? 'Play Movie' : 'Play Series'}</span>
+                  <span>
+                    {activeMobileMenu.type === 'anime'
+                      ? 'Open Anime'
+                      : activeMobileMenu.type === 'movie'
+                      ? 'Play Movie'
+                      : activeMobileMenu.type === 'webseries'
+                      ? 'Play Series'
+                      : activeMobileMenu.type === 'manga'
+                      ? 'Read Manga'
+                      : activeMobileMenu.type === 'audioStory'
+                      ? 'Listen Audio'
+                      : 'Open Details'}
+                  </span>
                 </button>
 
                 {/* Complete / Incomplete */}
@@ -10214,6 +10323,10 @@ export default function Dashboard({ onSelectAnime }) {
                       setWebseriesCompleteConfirm(target);
                     } else if (mType === 'anime') {
                       handleToggleAnimeComplete(target);
+                    } else if (mType === 'manga') {
+                      setMangaCompleteConfirm(target);
+                    } else if (mType === 'audioStory') {
+                      setAudioStoryCompleteConfirm(target);
                     } else {
                       setWatchlistCompleteConfirm(target);
                     }
@@ -10287,6 +10400,10 @@ export default function Dashboard({ onSelectAnime }) {
                       handleDeleteWebseries(target, e);
                     } else if (mType === 'anime') {
                       handleDeleteAnime(target, e);
+                    } else if (mType === 'manga') {
+                      handleDeleteManga(target, e);
+                    } else if (mType === 'audioStory') {
+                      handleDeleteAudioStory(target, e);
                     } else {
                       handleDeleteWatchlist(target, e);
                     }
@@ -10310,6 +10427,10 @@ export default function Dashboard({ onSelectAnime }) {
                       router.push(`/webseries/${target.id}`);
                     } else if (mType === 'anime') {
                       onSelectAnime(target.id);
+                    } else if (mType === 'manga') {
+                      router.push(`/manga/${target.id}`);
+                    } else if (mType === 'audioStory') {
+                      router.push(`/audio-story/${target.id}`);
                     } else {
                       router.push(`/watchlist/${target.id}`);
                     }

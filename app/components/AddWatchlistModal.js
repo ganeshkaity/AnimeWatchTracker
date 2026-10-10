@@ -42,6 +42,19 @@ const ALL_GENRES = [
   "Romance", "Science Fiction", "Thriller", "War", "Supernatural", "Slice of Life"
 ];
 
+const slugify = (text) => {
+  if (!text) return '';
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w\-]+/g, '')
+    .replace(/\-\-+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
+};
+
 export default function AddWatchlistModal({
   isOpen,
   onClose,
@@ -334,8 +347,10 @@ export default function AddWatchlistModal({
 
     setSubmitting(true);
     try {
+      const cleanSlug = slugify(title.trim()) || `wl-${Date.now()}`;
       const watchlistItem = {
-        id: `wl-${Date.now()}`,
+        id: cleanSlug,
+        slug: cleanSlug,
         tmdbId: selectedItem?.tmdbId || null,
         anilistId: selectedItem?.anilistId || null,
         contentType,

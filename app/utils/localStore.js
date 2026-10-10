@@ -36,11 +36,55 @@ function read(key) {
   } catch { return null; }
 }
 
+function sanitizeItemForStorage(item) {
+  if (!item || typeof item !== 'object') return item;
+  const copy = { ...item };
+  // Drop large data URI base64 strings if a remote URL exists, to stay well below localStorage limits
+  for (const k of Object.keys(copy)) {
+    if (typeof copy[k] === 'string' && copy[k].startsWith('data:image/') && copy[k].length > 10000) {
+      if (copy.posterUrl || copy.posterPath || copy.coverUrl || copy.backdropUrl || copy.thumbnailPath) {
+        delete copy[k];
+      }
+    }
+  }
+  return copy;
+}
+
+function sanitizeForStorage(val) {
+  if (!val) return val;
+  if (Array.isArray(val)) {
+    return val.map(sanitizeItemForStorage);
+  }
+  if (typeof val === 'object') {
+    return sanitizeItemForStorage(val);
+  }
+  return val;
+}
+
 function write(key, value) {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (e) {
+    // If quota exceeded, sanitize large base64 strings and retry
+    if (e && (e.name === 'QuotaExceededError' || e.code === 22 || e.number === -2147024882 || String(e).includes('quota'))) {
+      try {
+        const sanitized = sanitizeForStorage(value);
+        localStorage.setItem(key, JSON.stringify(sanitized));
+        return;
+      } catch (retryErr) {
+        // If still failing and value is a long array, save the latest 100 items
+        try {
+          if (Array.isArray(value) && value.length > 50) {
+            const trimmed = sanitizeForStorage(value.slice(0, 50));
+            localStorage.setItem(key, JSON.stringify(trimmed));
+            return;
+          }
+        } catch (_) {}
+        console.warn('localStore quota exceeded, unable to persist key:', key);
+        return;
+      }
+    }
     console.error('localStore write error:', e);
   }
 }
@@ -315,6 +359,9 @@ export function getLocalWebseries() {
 
 export function setLocalWebseries(seriesList) {
   write(KEYS.WEBSERIES, seriesList);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('webseries_store_updated'));
+  }
 }
 
 export function getLocalWebseriesItem(seriesId) {
@@ -379,7 +426,7 @@ export function setLocalWatchlist(items) {
 
 export function getLocalWatchlistItem(id) {
   const items = getLocalWatchlist();
-  return items.find(m => m.id === id || String(m.tmdbId) === String(id) || String(m.anilistId) === String(id)) || null;
+  return items.find(m => m.id === id || m.slug === id || String(m.tmdbId) === String(id) || String(m.anilistId) === String(id)) || null;
 }
 
 export function upsertLocalWatchlist(item) {

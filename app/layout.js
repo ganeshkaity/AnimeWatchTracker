@@ -2,6 +2,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from './context/AuthContext';
 import { OfflineProvider } from './context/OfflineContext';
+import CookieConsent from './components/CookieConsent';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -26,6 +27,7 @@ export default function RootLayout({ children }) {
         <AuthProvider>
           <OfflineProvider>
             {children}
+            <CookieConsent />
           </OfflineProvider>
         </AuthProvider>
       </body>

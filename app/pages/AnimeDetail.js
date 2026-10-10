@@ -17,6 +17,7 @@ import {
 } from '../utils/parser';
 import { toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 import EditAnimeModal from '../components/EditAnimeModal';
+import AssignEpisodesModal from '../components/AssignEpisodesModal';
 import { 
   ArrowLeft, Play, CheckCircle2, Bookmark, StickyNote, Star, AlertTriangle, 
   Sparkles, History, RotateCcw, X, Heart, EyeOff, Film, Clock, Search,
@@ -24,7 +25,8 @@ import {
   Wifi, Laptop, Smartphone, Settings2, QrCode, Youtube, FolderPlus, Trash2, Edit3,
   Move, Upload, FolderTree, FileVideo, HardDrive, FilePlus, Server,
   PlusCircle, CheckSquare, Square, SlidersHorizontal, ShieldCheck, Check, Layers, FolderMinus,
-  Users, Video, Image as ImageIcon, Download, Menu, Calendar, ChevronLeft, ChevronRight, Maximize2
+  Users, Video, Image as ImageIcon, Download, Menu, Calendar, ChevronLeft, ChevronRight, Maximize2,
+  Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -257,10 +259,19 @@ function parseLocalEpisodeSeasonAndNumber(ep, folderPath, seriesTotalSeasons = 1
 export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   const router = useRouter();
   const { currentUser, updateDefaultPlayer } = useAuth();
+  const userId = currentUser?.uid || getUserId();
   const { isOffline } = useOffline();
   const [anime, setAnime] = useState(null);
   const [episodes, setEpisodes] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Dynamic Document Title
+  useEffect(() => {
+    const title = anime?.title || anime?.name;
+    if (title) {
+      document.title = `${title} - Ganeshspace`;
+    }
+  }, [anime?.title, anime?.name]);
 
   // Online Metadata & Enrichment (TMDB + AniList)
   const [onlineData, setOnlineData] = useState(null);
@@ -270,6 +281,9 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
 
   // Seasons & Episodes View Mode: 'all_seasons' | 'local_cards' | 'folder_tree'
   const [episodeViewMode, setEpisodeViewMode] = useState('folder_tree');
+
+  // All seasons view expanded state (per season number)
+  const [expandedAllSeasons, setExpandedAllSeasons] = useState({});
 
   // Local cards expanded state (first 4 items + vignette toggle)
   const [isCardsExpanded, setIsCardsExpanded] = useState(false);
@@ -285,6 +299,9 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
 
   // Edit Anime Info Modal
   const [showEditModal, setShowEditModal] = useState(false);
+
+  // Assign Episodes Modal
+  const [showAssignModal, setShowAssignModal] = useState(false);
 
   // Gallery Tabs & Artwork Management
   const [imageTab, setImageTab] = useState('all');
@@ -2433,13 +2450,17 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   const localEpLookup = useMemo(() => {
     const lookup = new Map();
     episodes.forEach(ep => {
+      if (anime?.assignMode === 'custom' && (ep.customAssigned || (ep.seasonNumber && ep.episodeNumber))) {
+        lookup.set(`${ep.seasonNumber}_${ep.episodeNumber}`, ep);
+        return;
+      }
       const { seasonNumber, episodeNumber } = parseLocalEpisodeSeasonAndNumber(
         ep, anime?.folderPath, anime?.totalSeasons, seasonCumulativeMap
       );
       lookup.set(`${seasonNumber}_${episodeNumber}`, ep);
     });
     return lookup;
-  }, [episodes, anime?.folderPath, anime?.totalSeasons, seasonCumulativeMap]);
+  }, [episodes, anime?.folderPath, anime?.totalSeasons, anime?.assignMode, seasonCumulativeMap]);
 
   // Seasons structure (combines online seasons with local episode status)
   const seasons = useMemo(() => {
@@ -2604,6 +2625,39 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     }
   };
 
+  // Custom Episode Assignment Save Handler
+  const handleSaveAssignments = async (newAssignMode, updatedEpisodes, isFullSave = false) => {
+    setEpisodes(updatedEpisodes);
+    setLocalEpisodes(animeId, updatedEpisodes);
+
+    const updatedAnime = {
+      ...anime,
+      assignMode: newAssignMode,
+      updatedAt: new Date().toISOString(),
+    };
+    setAnime(updatedAnime);
+    upsertLocalAnime(updatedAnime);
+
+    if (db && userId) {
+      try {
+        await updateDoc(doc(db, 'users', userId, 'anime', animeId), {
+          assignMode: newAssignMode,
+          updatedAt: updatedAnime.updatedAt,
+        });
+
+        const { writeBatch } = await import('firebase/firestore');
+        const batch = writeBatch(db);
+        updatedEpisodes.forEach((ep) => {
+          const epRef = doc(db, 'users', userId, 'anime', animeId, 'episodes', ep.id);
+          batch.set(epRef, ep, { merge: true });
+        });
+        await batch.commit();
+      } catch (err) {
+        console.warn('[AnimeDetail] update episode assignments in firestore error:', err);
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#07090f] text-white flex flex-col relative pb-20 overflow-x-hidden">
       {/* ── Ambient Backdrop Image Layer (Extends from top-0 behind transparent header & hero) ── */}
@@ -2632,6 +2686,16 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
 
         {/* Desktop Action Buttons (sm and above) */}
         <div className="hidden sm:flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowAssignModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-300 hover:text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg"
+            title="Assign local episodes to online fetched episodes"
+          >
+            <SlidersHorizontal size={14} className="text-neonCyan" />
+            <span>Assign Episodes</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setShowEditModal(true)}
@@ -3037,119 +3101,163 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                 {/* Episode Cards in Active Season */}
                 {activeSeason && activeSeason.episodes?.length > 0 ? (
                   <div className="space-y-2.5">
-                    {activeSeason.episodes.map((ep) => {
-                      const stillImage = ep.stillUrl || (ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : backdrop || posterUrl);
-                      const durationStr = formatDuration(ep.runtime || Math.round((ep.durationSeconds || 0) / 60));
-                      const dateStr = formatAirDate(ep.airDate || ep.air_date);
-                      const ratingStr = formatRatingDisplay(ep.voteAverage || ep.vote_average);
+                    {(() => {
+                      const isSeasonExpanded = Boolean(expandedAllSeasons[activeSeason.seasonNumber]);
+                      const seasonEpisodes = activeSeason.episodes;
+                      const visibleEpisodes = isSeasonExpanded ? seasonEpisodes : seasonEpisodes.slice(0, 4);
 
                       return (
-                        <div
-                          key={`season_ep_${ep.episodeNumber}_${ep.id || ep.name}`}
-                          onClick={() => handleSeasonEpClick(ep)}
-                          className={`group flex items-start gap-4 p-3 rounded-2xl border transition-all duration-200 cursor-pointer ${
-                            ep.hasLocalFile
-                              ? 'bg-white/[0.02] hover:bg-white/[0.06] border-white/5 hover:border-neonCyan/30'
-                              : 'bg-white/[0.01] hover:bg-white/[0.03] border-dashed border-white/10 hover:border-purple-500/40 opacity-85 hover:opacity-100'
-                          }`}
-                        >
-                          {/* Thumbnail */}
-                          <div className="relative w-32 sm:w-44 aspect-video rounded-xl overflow-hidden bg-black/60 shrink-0 border border-white/10 group-hover:border-neonCyan/50 transition shadow-md">
-                            {stillImage ? (
-                              <img
-                                src={stillImage}
-                                alt={ep.name || `Episode ${ep.episodeNumber}`}
-                                loading="lazy"
-                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-gray-600">
-                                <Tv size={20} />
+                        <>
+                          {visibleEpisodes.map((ep) => {
+                            const stillImage = ep.stillUrl || (ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : backdrop || posterUrl);
+                            const durationStr = formatDuration(ep.runtime || Math.round((ep.durationSeconds || 0) / 60));
+                            const dateStr = formatAirDate(ep.airDate || ep.air_date);
+                            const ratingStr = formatRatingDisplay(ep.voteAverage || ep.vote_average);
+
+                            return (
+                              <div
+                                key={`season_ep_${ep.episodeNumber}_${ep.id || ep.name}`}
+                                onClick={() => handleSeasonEpClick(ep)}
+                                className={`group flex items-start gap-4 p-3 rounded-2xl border transition-all duration-200 cursor-pointer ${
+                                  ep.hasLocalFile
+                                    ? 'bg-white/[0.02] hover:bg-white/[0.06] border-white/5 hover:border-neonCyan/30'
+                                    : 'bg-white/[0.01] hover:bg-white/[0.03] border-dashed border-white/10 hover:border-purple-500/40 opacity-85 hover:opacity-100'
+                                }`}
+                              >
+                                {/* Thumbnail */}
+                                <div className="relative w-32 sm:w-44 aspect-video rounded-xl overflow-hidden bg-black/60 shrink-0 border border-white/10 group-hover:border-neonCyan/50 transition shadow-md">
+                                  {stillImage ? (
+                                    <img
+                                      src={stillImage}
+                                      alt={ep.name || `Episode ${ep.episodeNumber}`}
+                                      loading="lazy"
+                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-gray-600">
+                                      <Tv size={20} />
+                                    </div>
+                                  )}
+
+                                  {/* Play & Info Icons in Bottom-Left */}
+                                  <div className="absolute bottom-2 left-2 z-10 flex items-center gap-1.5">
+                                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white shadow-lg backdrop-blur-sm ${
+                                      ep.hasLocalFile ? 'bg-gradient-to-r from-neonCyan to-purple-600' : 'bg-black/75 border border-white/20'
+                                    }`}>
+                                      {ep.hasLocalFile ? (
+                                        <Play size={11} className="fill-white translate-x-0.5" />
+                                      ) : (
+                                        <Sparkles size={11} className="text-neonCyan" />
+                                      )}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedOnlineEpModal({
+                                          ...ep,
+                                          seasonNumber: ep.seasonNumber || activeSeason?.seasonNumber || 1,
+                                          showLogo: animeLogo,
+                                          seriesTitle: anime?.title,
+                                        });
+                                      }}
+                                      className="w-7 h-7 rounded-full bg-black/75 hover:bg-black/90 border border-white/20 hover:border-white/50 text-white flex items-center justify-center shadow-lg backdrop-blur-sm transition cursor-pointer"
+                                      title="Episode details & information"
+                                    >
+                                      <Info size={12} />
+                                    </button>
+                                  </div>
+
+                                  {/* Watched Badge */}
+                                  {ep.isWatched && (
+                                    <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-bold flex items-center gap-1 shadow backdrop-blur-sm">
+                                      <Check size={10} /> Watched
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Info */}
+                                <div className="flex-1 min-w-0 pt-0.5 space-y-1">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <h3 className="text-sm sm:text-base font-bold text-white group-hover:text-neonCyan transition truncate">
+                                      {ep.name || ep.title || `Episode ${ep.episodeNumber}`}
+                                    </h3>
+
+                                    {/* Local File Ready vs Not Downloaded Badge */}
+                                    {ep.hasLocalFile ? (
+                                      <span className="hidden sm:inline-flex px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold shrink-0">
+                                        Local Ready
+                                      </span>
+                                    ) : (
+                                      <span className="hidden sm:inline-flex px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold shrink-0">
+                                        Not in folder
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="text-xs text-gray-400 font-medium flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                    <span className="text-white font-bold">
+                                      S{ep.seasonNumber || activeSeason?.seasonNumber} E{ep.episodeNumber}
+                                    </span>
+                                    {dateStr && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{dateStr}</span>
+                                      </>
+                                    )}
+                                    {durationStr && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{durationStr}</span>
+                                      </>
+                                    )}
+                                    {ratingStr && (
+                                      <>
+                                        <span>•</span>
+                                        <span className="text-amber-400 flex items-center gap-0.5 font-semibold">
+                                          ★ {ratingStr}
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
+
+                                  {ep.overview && (
+                                    <p className="text-[11px] text-gray-400 line-clamp-2 max-w-2xl pt-0.5">
+                                      {ep.overview}
+                                    </p>
+                                  )}
+
+                                  {/* Mobile only status badge */}
+                                  <div className="sm:hidden pt-1">
+                                    {ep.hasLocalFile ? (
+                                      <span className="text-[10px] text-emerald-400 font-bold">● Local file ready</span>
+                                    ) : (
+                                      <span className="text-[10px] text-amber-400 font-bold">○ Click to view episode info</span>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
-                            )}
+                            );
+                          })}
 
-                            {/* Play Circle Icon */}
-                            <div className={`absolute bottom-2 left-2 w-7 h-7 rounded-full flex items-center justify-center text-white shadow-lg backdrop-blur-sm ${
-                              ep.hasLocalFile ? 'bg-gradient-to-r from-neonCyan to-purple-600' : 'bg-black/75 border border-white/20'
-                            }`}>
-                              {ep.hasLocalFile ? (
-                                <Play size={11} className="fill-white translate-x-0.5" />
-                              ) : (
-                                <Sparkles size={11} className="text-neonCyan" />
-                              )}
+                          {seasonEpisodes.length > 4 && (
+                            <div className="pt-4 flex justify-center">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedAllSeasons(prev => ({
+                                  ...prev,
+                                  [activeSeason.seasonNumber]: !isSeasonExpanded
+                                }))}
+                                className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-300 hover:text-white transition-colors cursor-pointer py-2 px-4 rounded-lg hover:bg-white/5"
+                              >
+                                <span>{isSeasonExpanded ? 'Show Less' : 'Show All'}</span>
+                                <ChevronDown size={14} className={`transition-transform duration-200 ${isSeasonExpanded ? 'rotate-180' : ''}`} />
+                              </button>
                             </div>
-
-                            {/* Watched Badge */}
-                            {ep.isWatched && (
-                              <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-bold flex items-center gap-1 shadow backdrop-blur-sm">
-                                <Check size={10} /> Watched
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Info */}
-                          <div className="flex-1 min-w-0 pt-0.5 space-y-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <h3 className="text-sm sm:text-base font-bold text-white group-hover:text-neonCyan transition truncate">
-                                {ep.name || ep.title || `Episode ${ep.episodeNumber}`}
-                              </h3>
-
-                              {/* Local File Ready vs Not Downloaded Badge */}
-                              {ep.hasLocalFile ? (
-                                <span className="hidden sm:inline-flex px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold shrink-0">
-                                  Local Ready
-                                </span>
-                              ) : (
-                                <span className="hidden sm:inline-flex px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold shrink-0">
-                                  Not in folder
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="text-xs text-gray-400 font-medium flex flex-wrap items-center gap-1.5 sm:gap-2">
-                              <span className="text-white font-bold">
-                                S{ep.seasonNumber || activeSeason?.seasonNumber} E{ep.episodeNumber}
-                              </span>
-                              {dateStr && (
-                                <>
-                                  <span>•</span>
-                                  <span>{dateStr}</span>
-                                </>
-                              )}
-                              {durationStr && (
-                                <>
-                                  <span>•</span>
-                                  <span>{durationStr}</span>
-                                </>
-                              )}
-                              {ratingStr && (
-                                <>
-                                  <span>•</span>
-                                  <span className="text-amber-400 flex items-center gap-0.5 font-semibold">
-                                    ★ {ratingStr}
-                                  </span>
-                                </>
-                              )}
-                            </div>
-
-                            {ep.overview && (
-                              <p className="text-[11px] text-gray-400 line-clamp-2 max-w-2xl pt-0.5">
-                                {ep.overview}
-                              </p>
-                            )}
-
-                            {/* Mobile only status badge */}
-                            <div className="sm:hidden pt-1">
-                              {ep.hasLocalFile ? (
-                                <span className="text-[10px] text-emerald-400 font-bold">● Local file ready</span>
-                              ) : (
-                                <span className="text-[10px] text-amber-400 font-bold">○ Click to view episode info</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
+                          )}
+                        </>
                       );
-                    })}
+                    })()}
                   </div>
                 ) : (
                   <div className="p-8 rounded-2xl bg-white/[0.02] border border-white/5 text-center text-gray-400 text-xs">
@@ -3198,8 +3306,33 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                                 </div>
                               )}
 
-                              <div className="absolute bottom-2 left-2 w-7 h-7 rounded-full bg-gradient-to-r from-neonCyan to-purple-600 flex items-center justify-center text-white shadow-lg">
-                                <Play size={11} className="fill-white translate-x-0.5" />
+                              {/* Play & Info Icons in Bottom-Left */}
+                              <div className="absolute bottom-2 left-2 z-10 flex items-center gap-1.5">
+                                <div className="w-7 h-7 rounded-full bg-gradient-to-r from-neonCyan to-purple-600 flex items-center justify-center text-white shadow-lg">
+                                  <Play size={11} className="fill-white translate-x-0.5" />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedOnlineEpModal({
+                                      ...(matchedOnline || {}),
+                                      seasonNumber: seasonNumber || 1,
+                                      episodeNumber: episodeNumber || 1,
+                                      name: matchedOnline?.name || ep.fileName,
+                                      overview: matchedOnline?.overview || '',
+                                      still_path: matchedOnline?.still_path,
+                                      hasLocalFile: true,
+                                      localEp: ep,
+                                      showLogo: animeLogo,
+                                      seriesTitle: anime?.title,
+                                    });
+                                  }}
+                                  className="w-7 h-7 rounded-full bg-black/75 hover:bg-black/90 border border-white/20 hover:border-white/50 text-white flex items-center justify-center shadow-lg backdrop-blur-sm transition cursor-pointer"
+                                  title="Episode details & information"
+                                >
+                                  <Info size={12} />
+                                </button>
                               </div>
 
                               {ep.isWatched && (
@@ -5484,7 +5617,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
 
                 {/* Season & Episode Badge overlay */}
                 <div className="absolute bottom-4 left-5 z-10 flex items-center gap-2">
-                  <span className="px-3 py-1 rounded-xl bg-gradient-to-r from-neonCyan to-purple-600 text-white font-black text-xs shadow-lg uppercase tracking-wider">
+                  <span className="px-3 py-1 rounded-xl bg-gradient-to-r from-blue to-purple-600 text-white font-black text-xs shadow-lg uppercase tracking-wider">
                     S{selectedOnlineEpModal.seasonNumber} E{selectedOnlineEpModal.episodeNumber}
                   </span>
                   {selectedOnlineEpModal.voteAverage > 0 && (
@@ -5526,32 +5659,56 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                   <h4 className="text-xs font-bold uppercase tracking-wider text-gray-300">
                     Storyline
                   </h4>
-                  <p className="text-xs sm:text-sm text-gray-300 leading-relaxed bg-white/[0.02] p-3.5 rounded-2xl border border-white/5">
+                  <p className="text-xs sm:text-sm text-gray-300 leading-relaxed">
                     {selectedOnlineEpModal.overview || 'No detailed overview description is available for this episode yet.'}
                   </p>
                 </div>
 
-                {/* Non-local warning & Rescan trigger */}
-                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                      <AlertTriangle size={14} /> Episode Not Scanned
-                    </span>
-                    <p className="text-[11px] text-gray-400">
-                      This episode file is not yet detected in your local scanned folder. Place the video file in the anime directory and rescan to play.
-                    </p>
+                {/* Local Ready vs Non-local warning */}
+                {selectedOnlineEpModal.hasLocalFile ? (
+                  <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                        <CheckCircle2 size={14} /> Local File Ready
+                      </span>
+                      <p className="text-[11px] text-gray-400 font-mono truncate max-w-sm">
+                        {selectedOnlineEpModal.fileName || selectedOnlineEpModal.localEp?.fileName || 'Video file linked and ready to stream'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const epToPlay = selectedOnlineEpModal.localEp || selectedOnlineEpModal;
+                        setSelectedOnlineEpModal(null);
+                        handlePlayEpisode(epToPlay);
+                      }}
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-neonCyan to-purple-600 hover:from-neonCyan/90 hover:to-purple-500 text-white font-extrabold text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-2 shrink-0 shadow-lg"
+                    >
+                      <Play size={13} className="fill-white" /> Play Episode
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedOnlineEpModal(null);
-                      handleRescan();
-                    }}
-                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5 shrink-0 shadow-lg"
-                  >
-                    <RefreshCw size={12} /> Rescan Folder
-                  </button>
-                </div>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                        <AlertTriangle size={14} /> Episode Not Scanned
+                      </span>
+                      <p className="text-[11px] text-gray-400">
+                        This episode file is not yet detected in your local scanned folder. Place the video file in the anime directory and rescan to play.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedOnlineEpModal(null);
+                        handleRescan();
+                      }}
+                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5 shrink-0 shadow-lg"
+                    >
+                      <RefreshCw size={12} /> Rescan Folder
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Modal Footer */}
@@ -5624,11 +5781,23 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                   type="button"
                   onClick={() => {
                     setShowMobileActionModal(false);
+                    setShowAssignModal(true);
+                  }}
+                  className="w-full p-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center gap-3 text-left text-xs font-bold text-white transition cursor-pointer"
+                >
+                  <SlidersHorizontal size={16} className="text-neonCyan" />
+                  <span>Assign Episodes</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileActionModal(false);
                     setShowEditModal(true);
                   }}
                   className="w-full p-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center gap-3 text-left text-xs font-bold text-white transition cursor-pointer"
                 >
-                  <Edit3 size={16} className="text-neonCyan" />
+                  <Edit3 size={16} className="text-purple-400" />
                   <span>Edit Anime Details</span>
                 </button>
 
@@ -5698,6 +5867,19 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
           anime={anime}
           onClose={() => setShowEditModal(false)}
           onSaveAnime={handleSaveAnimeEdit}
+        />
+      )}
+
+      {/* ── ASSIGN EPISODES MODAL ────────────────────────────────────────── */}
+      {showAssignModal && (
+        <AssignEpisodesModal
+          isOpen={showAssignModal}
+          onClose={() => setShowAssignModal(false)}
+          media={anime}
+          localEpisodes={episodes}
+          onlineSeasons={onlineSeasons}
+          onSaveAssignments={handleSaveAssignments}
+          fetchingOnline={loadingOnlineData}
         />
       )}
 
