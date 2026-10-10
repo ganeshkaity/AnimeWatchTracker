@@ -66,11 +66,6 @@ export default function MediaServerPlayerContainer({
           </button>
 
           <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-lg bg-transparent border border-pink-500/30 text-pink-300 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5">
-              <Server size={11} className="text-pink-400" />
-              Windows Media Server
-            </span>
-            <span className="text-gray-600 hidden sm:inline">•</span>
             <span className="text-xs font-semibold text-gray-200 truncate max-w-[200px] md:max-w-md drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
               {animeDetails?.title || animeId}
             </span>
