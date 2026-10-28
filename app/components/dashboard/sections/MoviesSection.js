@@ -99,7 +99,7 @@ export default function MoviesSection({
         /* Horizontal Slider */
         <div
           ref={movieScrollRef}
-          className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+          className="flex items-start gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2 scroll-smooth"
         >
           {sortedMovies.slice(0, 10).map((movie) => {
             const isWatched = Boolean(movie.watched || movie.completed || movie.watchStatus === 'Completed' || (movie.watchProgress && movie.watchProgress >= 95));
@@ -133,18 +133,18 @@ export default function MoviesSection({
           {sortedMovies.length > 10 && (
             <div
               onClick={() => router.push('/movies')}
-              className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-amber-950/10 hover:bg-amber-950/20 self-start"
+              className="flex-none w-28 sm:w-32 md:w-36 glass-card rounded-lg overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-amber-950/10 hover:bg-amber-950/20 self-start"
             >
-              <div className="aspect-[2/3] flex flex-col items-center justify-center p-6 text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-300 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <Film size={24} />
+              <div className="aspect-[2/3] flex flex-col items-center justify-center p-3 sm:p-4 text-center space-y-2">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <Film size={20} />
                 </div>
                 <div>
-                  <span className="text-sm font-bold text-white block">See All Movies</span>
-                  <span className="text-xs text-amber-400/80 font-mono mt-0.5 block">{moviesCount} total</span>
+                  <span className="text-xs sm:text-sm font-bold text-white block">See All</span>
+                  <span className="text-[10px] text-amber-400/80 font-mono mt-0.5 block">{moviesCount} total</span>
                 </div>
-                <span className="px-3 py-1.5 rounded-xl bg-amber-500 text-black text-xs font-extrabold flex items-center gap-1 group-hover:bg-amber-400 transition">
-                  View All <ChevronRight size={14} />
+                <span className="px-2.5 py-1 rounded-lg bg-amber-500 text-black text-[10px] font-extrabold flex items-center gap-1 group-hover:bg-amber-400 transition">
+                  View All <ChevronRight size={12} />
                 </span>
               </div>
             </div>

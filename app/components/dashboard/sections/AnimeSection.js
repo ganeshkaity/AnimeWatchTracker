@@ -108,7 +108,7 @@ export default function AnimeSection({
       ) : (
         <div
           ref={animeScrollRef}
-          className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+          className="flex items-start gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2 scroll-smooth"
         >
           {topTrackedAnimes.map((anime) => {
             const pct = getAnimeProgressPercent(anime);
@@ -149,18 +149,18 @@ export default function AnimeSection({
           {/* See All Card at the end */}
           <div
             onClick={() => router.push('/animes')}
-            className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-[#7c5cff]/5 hover:bg-[#7c5cff]/10 self-start"
+            className="flex-none w-32 sm:w-36 md:w-40 glass-card rounded-lg overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-[#7c5cff]/5 hover:bg-[#7c5cff]/10 self-start"
           >
-            <div className="aspect-[2/3] flex flex-col items-center justify-center p-6 text-center space-y-3">
-              <div className="w-12 h-12 rounded-2xl bg-[#7c5cff]/20 text-[#a855f7] flex items-center justify-center group-hover:scale-110 transition-transform mb-1">
-                <Film size={24} />
+            <div className="aspect-[2/3] flex flex-col items-center justify-center p-3 sm:p-4 text-center space-y-2">
+              <div className="w-10 h-10 rounded-xl bg-[#7c5cff]/20 text-[#a855f7] flex items-center justify-center group-hover:scale-110 transition-transform">
+                <Film size={20} />
               </div>
               <div>
-                <span className="text-sm font-bold text-white block">See All Anime</span>
-                <span className="text-xs text-purple-300/80 font-mono mt-0.5 block">{animesCount} Total Series</span>
+                <span className="text-xs sm:text-sm font-bold text-white block">See All</span>
+                <span className="text-[10px] text-purple-300/80 font-mono mt-0.5 block">{animesCount} Series</span>
               </div>
-              <span className="px-3 py-1.5 rounded-xl bg-[#7c5cff] text-white text-xs font-extrabold flex items-center gap-1 group-hover:bg-[#6c4cf0] transition shadow-md shadow-[#7c5cff]/30">
-                View All <ChevronRight size={14} />
+              <span className="px-2.5 py-1 rounded-lg bg-[#7c5cff] text-white text-[10px] font-extrabold flex items-center gap-1 group-hover:bg-[#6c4cf0] transition shadow-md shadow-[#7c5cff]/30">
+                View All <ChevronRight size={12} />
               </span>
             </div>
           </div>

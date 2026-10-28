@@ -1,8 +1,8 @@
 import React, { useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Play, Film, Tv, BookOpen, Headphones, ChevronLeft, ChevronRight } from 'lucide-react';
-import MediaCard from '../cards/MediaCard';
-import MediaRowSkeleton from '../skeletons/MediaRowSkeleton';
+import ContinueWatchingCard from '../cards/ContinueWatchingCard';
+import ContinueWatchingSkeleton from '../skeletons/ContinueWatchingSkeleton';
 import { getAnimeProgressPercent } from '../utils/dashboardHelpers';
 
 export default function ContinueWatchingSection({
@@ -40,7 +40,7 @@ export default function ContinueWatchingSection({
             </div>
           </div>
         </div>
-        <MediaRowSkeleton count={6} />
+        <ContinueWatchingSkeleton count={5} />
       </section>
     );
   }
@@ -84,79 +84,64 @@ export default function ContinueWatchingSection({
         </div>
       </div>
 
-      {/* Horizontal Slider */}
+      {/* Horizontal Slider with 16:9 Backdrop Cards */}
       <div
         ref={continueScrollRef}
-        className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+        className="flex items-start gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2 scroll-smooth"
       >
         {continueWatchingList.map((item) => {
-          let coverImg = null;
+          let backdropImg = null;
+          let logoUrl = item.logoUrl || item.logo || (item.images?.logos?.[0]?.url) || null;
           let itemRating = item.rating || item.score || item.vote_average || null;
           let pct = 0;
           let isCompleted = false;
-          let subLeft = '';
-          let subRight = '';
-          let badgeMediaType = '';
-          let fallbackIcon = <Play size={36} />;
+          let subText = '';
+          let fallbackIcon = <Play size={32} />;
 
           if (item.mediaType === 'movie') {
-            coverImg = item.posterUrl || item.posterPath || (item.thumbnailBase64 || null);
+            backdropImg = item.backdropUrl || item.bannerUrl || item.backdropPath || item.posterUrl || item.posterPath || (item.thumbnailBase64 || null);
             pct = item.progressPct || (item.duration ? Math.min(100, Math.round(((item.currentTime || 0) / item.duration) * 100)) : 0);
             isCompleted = Boolean(item.watched || item.completed || item.watchStatus === 'Completed' || pct >= 95);
-            subLeft = item.year || (item.releaseDate ? item.releaseDate.split('-')[0] : 'Movie');
-            subRight = item.runtime
-              ? `${Math.floor(item.runtime / 60)}h ${item.runtime % 60}m`
-              : item.duration
-              ? `${Math.floor(item.duration / 3600) > 0 ? Math.floor(item.duration / 3600) + 'h ' : ''}${Math.floor((item.duration % 3600) / 60)}m`
-              : 'Feature';
-            badgeMediaType = 'Movie';
-            fallbackIcon = <Film size={36} />;
+            subText = item.year || (item.releaseDate ? item.releaseDate.split('-')[0] : 'Movie');
+            fallbackIcon = <Film size={32} />;
           } else if (item.mediaType === 'webseries') {
-            coverImg = item.posterUrl || item.posterPath || item.coverUrl || (item.thumbnailBase64 || null);
+            backdropImg = item.backdropUrl || item.bannerUrl || item.backdropPath || item.coverUrl || item.posterUrl || (item.thumbnailBase64 || null);
             pct = item.progressPct || item.progressPercent || 0;
             isCompleted = Boolean(item.watched || item.isWatched || item.watchStatus === 'Completed' || pct >= 100);
-            subLeft = item.lastWatchedEpisode ? `EP ${item.lastWatchedEpisode}` : (item.year || 'Series');
-            subRight = item.totalEpisodes ? `${item.totalEpisodes} Ep` : (item.episodeCount ? `${item.episodeCount} Ep` : 'Series');
-            badgeMediaType = 'Series';
-            fallbackIcon = <Tv size={36} />;
+            subText = item.lastWatchedEpisode ? `EP ${item.lastWatchedEpisode}` : (item.year || 'Series');
+            fallbackIcon = <Tv size={32} />;
           } else if (item.mediaType === 'anime') {
-            coverImg = item.posterUrl || item.posterPath || item.coverUrl || item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : null);
+            backdropImg = item.backdropUrl || item.bannerUrl || item.banner || item.coverUrl || item.posterUrl || item.posterPath || item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : null);
             pct = getAnimeProgressPercent(item);
             isCompleted = Boolean(item.watched || item.isWatched || item.watchStatus === 'Completed' || pct >= 100);
-            subLeft = item.lastWatchedEpisode ? `EP ${item.lastWatchedEpisode}` : (item.year || 'Anime');
-            subRight = item.totalEpisodes ? `${item.totalEpisodes} Ep` : (item.episodeCount ? `${item.episodeCount} Ep` : 'Anime');
-            badgeMediaType = 'Anime';
-            fallbackIcon = <Play size={36} />;
+            subText = item.lastWatchedEpisode ? `EP ${item.lastWatchedEpisode}` : (item.year || 'Anime');
+            fallbackIcon = <Play size={32} />;
           } else if (item.mediaType === 'manga') {
-            coverImg = item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : (item.coverUrl || item.posterUrl || null));
+            backdropImg = item.bannerUrl || item.backdropUrl || item.coverUrl || item.posterUrl || item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : null);
             pct = item.progressPct || item.progressPercent || 0;
             isCompleted = Boolean(item.isWatched || item.isCompleted || pct >= 100);
-            subLeft = item.lastWatchedChapter ? `CH ${item.lastWatchedChapter}` : (item.completedChapters ? `CH ${item.completedChapters}` : (item.year || 'Manga'));
-            subRight = item.totalChapters ? `${item.totalChapters} Ch` : (item.chapterCount ? `${item.chapterCount} Ch` : 'Manga');
-            badgeMediaType = 'Manga';
-            fallbackIcon = <BookOpen size={36} />;
+            subText = item.lastWatchedChapter ? `CH ${item.lastWatchedChapter}` : (item.completedChapters ? `CH ${item.completedChapters}` : (item.year || 'Manga'));
+            fallbackIcon = <BookOpen size={32} />;
           } else if (item.mediaType === 'audioStory') {
-            coverImg = item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : (item.coverUrl || item.posterUrl || null));
+            backdropImg = item.bannerUrl || item.backdropUrl || item.coverUrl || item.posterUrl || item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : null);
             pct = item.progressPct || item.progressPercent || 0;
             isCompleted = Boolean(item.isWatched || item.isCompleted || pct >= 100);
-            subLeft = item.lastWatchedTrack || (item.completedTracks ? `Tr ${item.completedTracks}` : 'Audio');
-            subRight = item.totalTracks ? `${item.totalTracks} Tr` : (item.trackCount ? `${item.trackCount} Tr` : 'Audio');
-            badgeMediaType = 'Audio';
-            fallbackIcon = <Headphones size={36} />;
+            subText = item.lastWatchedTrack || (item.completedTracks ? `Tr ${item.completedTracks}` : 'Audio');
+            fallbackIcon = <Headphones size={32} />;
           }
 
           return (
-            <MediaCard
+            <ContinueWatchingCard
               key={`continue-${item.mediaType}-${item.id}`}
               item={item}
-              type={item.mediaType}
-              coverImg={coverImg}
+              mediaType={item.mediaType}
+              backdropImg={backdropImg}
+              logoUrl={logoUrl}
+              title={item.title || item.name}
+              subText={subText}
               rating={itemRating}
-              isCompleted={isCompleted}
               pct={pct}
-              subLeft={subLeft}
-              subRight={subRight}
-              badgeMediaType={badgeMediaType}
+              isCompleted={isCompleted}
               fallbackIcon={fallbackIcon}
               onClick={() => {
                 if (item.mediaType === 'movie') {

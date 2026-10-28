@@ -99,6 +99,7 @@ export async function getCachedImageUrl(src) {
 export default function CachedImage({
   src,
   alt = '',
+  title = '',
   className = '',
   style = {},
   loading = 'lazy',
@@ -164,40 +165,46 @@ export default function CachedImage({
     };
   }, []);
 
-  const currentImgSrc = hasError ? fallbackSrc : (resolvedSrc || processedSrc || fallbackSrc);
+  const displayText = title || alt;
+  const currentImgSrc = hasError ? (displayText ? null : fallbackSrc) : (resolvedSrc || processedSrc || fallbackSrc);
+  const showTitlePlaceholder = (!isLoaded || hasError || !processedSrc) && Boolean(displayText);
 
   return (
     <div className={`relative overflow-hidden ${className}`} style={style}>
-      {/* Shimmer Placeholder while image is loading */}
-      {!isLoaded && !hasError && (
-        <div className="absolute inset-0 bg-white/5 animate-pulse flex items-center justify-center pointer-events-none z-0">
-          <div className="w-5 h-5 rounded-full border-2 border-white/20 border-t-transparent animate-spin" />
+      {/* Title Placeholder while image is loading or missing (Image 4 style) */}
+      {showTitlePlaceholder && (
+        <div className="absolute inset-0 bg-[#0b0f19] flex items-center justify-center p-3 text-center pointer-events-none z-10">
+          <span className="text-xs sm:text-sm font-medium text-slate-400/90 line-clamp-3 select-none leading-snug px-1">
+            {displayText}
+          </span>
         </div>
       )}
 
       {/* Render Native HTML Image with Lazy Loading & Decoded Cache */}
-      <img
-        src={currentImgSrc}
-        alt={alt}
-        loading={loading}
-        decoding="async"
-        onLoad={(e) => {
-          if (isMountedRef.current) {
-            setIsLoaded(true);
-          }
-          if (onLoad) onLoad(e);
-        }}
-        onError={() => {
-          if (isMountedRef.current) {
-            setHasError(true);
-            setIsLoaded(true);
-          }
-        }}
-        className={`w-full h-full object-cover transition-opacity duration-300 ${
-          isLoaded ? 'opacity-100' : 'opacity-0'
-        }`}
-        {...props}
-      />
+      {currentImgSrc && (
+        <img
+          src={currentImgSrc}
+          alt={alt}
+          loading={loading}
+          decoding="async"
+          onLoad={(e) => {
+            if (isMountedRef.current) {
+              setIsLoaded(true);
+            }
+            if (onLoad) onLoad(e);
+          }}
+          onError={() => {
+            if (isMountedRef.current) {
+              setHasError(true);
+              setIsLoaded(true);
+            }
+          }}
+          className={`w-full h-full object-cover transition-opacity duration-300 ${
+            isLoaded && !hasError ? 'opacity-100' : 'opacity-0'
+          }`}
+          {...props}
+        />
+      )}
     </div>
   );
 }

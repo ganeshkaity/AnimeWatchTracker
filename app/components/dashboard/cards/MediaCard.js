@@ -24,11 +24,11 @@ export default function MediaCard({
   const defaultFallbackIcon = () => {
     if (fallbackIcon) return fallbackIcon;
     switch (type) {
-      case 'movie': return <Film size={36} />;
-      case 'webseries': return <Tv size={36} />;
-      case 'manga': return <BookOpen size={36} />;
-      case 'audioStory': return <Headphones size={36} />;
-      default: return <Play size={36} />;
+      case 'movie': return <Film size={28} />;
+      case 'webseries': return <Tv size={28} />;
+      case 'manga': return <BookOpen size={28} />;
+      case 'audioStory': return <Headphones size={28} />;
+      default: return <Play size={28} />;
     }
   };
 
@@ -37,52 +37,28 @@ export default function MediaCard({
       onClick={onClick}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className={`group relative flex-none w-44 sm:w-48 md:w-52 rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 ${accentBorder} hover:shadow-2xl hover:shadow-black/70 transition-all duration-300 cursor-pointer flex flex-col`}
+      className={`group relative flex-none w-32 sm:w-36 md:w-40 rounded-lg overflow-hidden bg-[#0d121f] border border-white/10 ${accentBorder} hover:shadow-2xl hover:shadow-black/80 hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col`}
     >
       <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
-        {coverImg ? (
-          <CachedImage
-            src={coverImg}
-            alt={item?.title || 'Media poster'}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-          />
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-1.5 p-3">
-            {defaultFallbackIcon()}
-            <span className="text-[10px] font-bold text-white/90 line-clamp-2 text-center">{item?.title}</span>
+        <CachedImage
+          src={coverImg}
+          alt={item?.title || 'Media poster'}
+          title={item?.title || ''}
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+        />
+
+        {/* Liquid Glass Rating Badge (Top-Left) */}
+        {rating && (
+          <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 text-[10px] font-bold text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.5)] backdrop-saturate-150 pointer-events-none">
+            <Star size={10} className="fill-amber-400 text-amber-400" />
+            <span className="leading-none">{parseFloat(rating).toFixed(1)}</span>
           </div>
         )}
 
-        {/* Top Badges */}
-        <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
-          {rating ? (
-            <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
-              <Star size={10} className="fill-amber-400" />
-              <span>{parseFloat(rating).toFixed(1)}</span>
-            </div>
-          ) : badgeMediaType ? (
-            <div className="px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[9px] font-extrabold uppercase tracking-wider text-gray-300 border border-white/10 shadow">
-              {badgeMediaType}
-            </div>
-          ) : (
-            <span />
-          )}
-
-          {isCompleted ? (
-            <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
-              <Check size={9} /> DONE
-            </div>
-          ) : pct > 0 ? (
-            <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
-              {Math.round(pct)}%
-            </div>
-          ) : null}
-        </div>
-
         {/* Red YouTube Logo Badge if YouTube folder */}
         {isYouTube && (
-          <div className="absolute top-8 right-2 z-10 p-1 bg-black/60 rounded-xl flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md pointer-events-none">
-            <YoutubeLogo size={16} />
+          <div className="absolute top-2 right-2 z-10 p-1 bg-black/60 rounded-md flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md pointer-events-none">
+            <YoutubeLogo size={14} />
           </div>
         )}
 
@@ -95,33 +71,26 @@ export default function MediaCard({
                 e.stopPropagation();
                 onMobileMenuToggle(e);
               }}
-              className="p-1.5 rounded-lg bg-black/80 text-white border border-white/20 shadow-lg active:scale-95 transition-transform"
+              className="p-1 rounded-md bg-black/70 backdrop-blur-md text-white border border-white/20 shadow-lg active:scale-95 transition-transform"
             >
-              <MoreVertical size={13} />
+              <MoreVertical size={12} />
             </button>
           </div>
         )}
 
-        {/* Bottom Gradient Overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity pointer-events-none" />
-
-        {/* Bottom Info inside Card */}
-        <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 space-y-0.5 pointer-events-none">
-          <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-amber-300 transition" title={item?.title}>
-            {item?.title}
-          </h3>
-          <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
-            <span>{subLeft}</span>
-            <span>{subRight}</span>
+        {/* Green Small Tick in Bottom-Left Side if watched (Request 2) */}
+        {isCompleted && (
+          <div className="absolute bottom-2 left-2 z-20 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center shadow-md shadow-emerald-950/50 pointer-events-none">
+            <Check size={10} strokeWidth={3} className="text-black" />
           </div>
-        </div>
+        )}
 
-        {/* Watch progress bar at the very bottom inside the poster card */}
-        {pct > 0 && (
-          <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 overflow-hidden">
+        {/* Watch Track Bar at Bottom (Original gradient color, 100% width if completed) */}
+        {(isCompleted || pct > 0) && (
+          <div className="absolute bottom-0 inset-x-0 h-1 sm:h-1.5 bg-black/60 z-20 overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-300"
-              style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+              className="h-full bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 transition-all duration-300"
+              style={{ width: `${isCompleted ? 100 : Math.min(100, Math.max(3, pct))}%` }}
             />
           </div>
         )}

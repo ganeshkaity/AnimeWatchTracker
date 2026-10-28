@@ -89,7 +89,7 @@ export default function MangaSection({
       ) : (
         <div
           ref={mangaScrollRef}
-          className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+          className="flex gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2 scroll-smooth"
         >
           {sortedMangas.map((m) => {
             const isWatched = Boolean(m.isWatched || m.progressPercent === 100 || m.status === 'completed');

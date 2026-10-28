@@ -98,7 +98,7 @@ export default function WebseriesSection({
       ) : (
         <div
           ref={webseriesScrollRef}
-          className="flex items-start gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+          className="flex items-start gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2 scroll-smooth"
         >
           {sortedWebseries.slice(0, 10).map((series) => {
             const isWatched = Boolean(series.watched || series.isWatched || series.watchStatus === 'Completed' || (series.progressPercent && series.progressPercent >= 100));
@@ -132,18 +132,18 @@ export default function WebseriesSection({
           {sortedWebseries.length > 10 && (
             <div
               onClick={() => router.push('/webseries')}
-              className="flex-none w-44 sm:w-48 md:w-52 glass-card rounded-2xl overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-cyan-950/10 hover:bg-cyan-950/20 self-start"
+              className="flex-none w-28 sm:w-32 md:w-36 glass-card rounded-lg overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-cyan-950/10 hover:bg-cyan-950/20 self-start"
             >
-              <div className="aspect-[2/3] flex flex-col items-center justify-center p-6 text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 text-cyan-300 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <Tv size={24} />
+              <div className="aspect-[2/3] flex flex-col items-center justify-center p-3 sm:p-4 text-center space-y-2">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-300 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <Tv size={20} />
                 </div>
                 <div>
-                  <span className="text-sm font-bold text-white block">See All Series</span>
-                  <span className="text-xs text-cyan-400/80 font-mono mt-0.5 block">{webseriesCount} total</span>
+                  <span className="text-xs sm:text-sm font-bold text-white block">See All</span>
+                  <span className="text-[10px] text-cyan-400/80 font-mono mt-0.5 block">{webseriesCount} total</span>
                 </div>
-                <span className="px-3 py-1.5 rounded-xl bg-cyan-500 text-black text-xs font-extrabold flex items-center gap-1 group-hover:bg-cyan-400 transition">
-                  View All <ChevronRight size={14} />
+                <span className="px-2.5 py-1 rounded-lg bg-cyan-500 text-black text-[10px] font-extrabold flex items-center gap-1 group-hover:bg-cyan-400 transition">
+                  View All <ChevronRight size={12} />
                 </span>
               </div>
             </div>

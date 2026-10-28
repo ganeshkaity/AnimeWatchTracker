@@ -89,7 +89,7 @@ export default function AudioStoriesSection({
       ) : (
         <div
           ref={audioStoryScrollRef}
-          className="flex gap-4 overflow-x-auto no-scrollbar py-2 scroll-smooth"
+          className="flex gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2 scroll-smooth"
         >
           {sortedAudioStories.map((s) => {
             const isWatched = Boolean(s.isWatched || s.progressPercent === 100 || s.status === 'completed');

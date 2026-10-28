@@ -76,10 +76,10 @@ import WebseriesSection from '../components/dashboard/sections/WebseriesSection'
 import MangaSection from '../components/dashboard/sections/MangaSection';
 import AudioStoriesSection from '../components/dashboard/sections/AudioStoriesSection';
 import WatchlistSection from '../components/dashboard/sections/WatchlistSection';
-import RecentlyUpdatedSection from '../components/dashboard/sections/RecentlyUpdatedSection';
 import TopRatedMasterpiecesSection from '../components/dashboard/sections/TopRatedMasterpiecesSection';
-import GenresSection from '../components/dashboard/sections/GenresSection';
-import TopRatedOnlineSection from '../components/dashboard/sections/TopRatedOnlineSection';
+import PopularLanguagesSection from '../components/dashboard/sections/PopularLanguagesSection';
+import PopularGenresSection from '../components/dashboard/sections/PopularGenresSection';
+import EndlessGenreSections from '../components/dashboard/sections/EndlessGenreSections';
 
 // Extracted Modal Components
 import AddAnimeModal from '../components/dashboard/modals/AddAnimeModal';
@@ -417,8 +417,6 @@ export default function Dashboard({ onSelectAnime }) {
   const [editTotalEpisodes, setEditTotalEpisodes] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
 
-  // Ref for recently updated horizontal scroll
-  const recentlyUpdatedRef = useRef(null);
   // Ref for manga horizontal scroll
   const mangaScrollRef = useRef(null);
   // Ref for audio story horizontal scroll
@@ -469,7 +467,6 @@ export default function Dashboard({ onSelectAnime }) {
   const [loadingTopRated, setLoadingTopRated] = useState(false);
   const [hasScrolledToTopRated, setHasScrolledToTopRated] = useState(false);
   const lazyTopRatedRef = useRef(null);
-  const topRatedScrollRef = useRef(null);
 
   // Lazy-load sentinel: only triggers when user scrolls near the Top Rated section
   useEffect(() => {
@@ -582,56 +579,6 @@ export default function Dashboard({ onSelectAnime }) {
     return () => { isMounted = false; };
   }, [hasScrolledToTopRated]);
 
-  const scrollTopRated = (direction) => {
-    if (topRatedScrollRef.current) {
-      const { scrollLeft, clientWidth } = topRatedScrollRef.current;
-      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
-      topRatedScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
-    }
-  };
-
-  const localTopRatedScrollRef = useRef(null);
-
-  const scrollLocalTopRated = (direction) => {
-    if (localTopRatedScrollRef.current) {
-      const { scrollLeft, clientWidth } = localTopRatedScrollRef.current;
-      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
-      localTopRatedScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
-    }
-  };
-
-  const [isDraggingTopRated, setIsDraggingTopRated] = useState(false);
-  const [topRatedStartX, setTopRatedStartX] = useState(0);
-  const [topRatedScrollLeft, setTopRatedScrollLeft] = useState(0);
-  const [topRatedHasDragged, setTopRatedHasDragged] = useState(false);
-
-  const handleTopRatedMouseDown = (e) => {
-    if (!topRatedScrollRef.current) return;
-    setIsDraggingTopRated(true);
-    setTopRatedHasDragged(false);
-    setTopRatedStartX(e.pageX - topRatedScrollRef.current.offsetLeft);
-    setTopRatedScrollLeft(topRatedScrollRef.current.scrollLeft);
-  };
-
-  const handleTopRatedMouseMove = (e) => {
-    if (!isDraggingTopRated || !topRatedScrollRef.current) return;
-    e.preventDefault();
-    const x = e.pageX - topRatedScrollRef.current.offsetLeft;
-    const walk = (x - topRatedStartX) * 1.5;
-    if (Math.abs(walk) > 5) {
-      setTopRatedHasDragged(true);
-    }
-    topRatedScrollRef.current.scrollLeft = topRatedScrollLeft - walk;
-  };
-
-  const handleTopRatedMouseUp = () => {
-    setIsDraggingTopRated(false);
-  };
-
-  const handleTopRatedMouseLeave = () => {
-    setIsDraggingTopRated(false);
-  };
-
   const topRatedWithLibrary = useMemo(() => {
     const clean = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -731,49 +678,6 @@ export default function Dashboard({ onSelectAnime }) {
 
   // Get dynamic lists from database animes, mangas, audio stories, movies and web series
   const heroSlides = useMemo(() => getHeroSlides(animes, mangas, audioStories, movies, webseriesList), [animes, mangas, audioStories, movies, webseriesList]);
-
-  const recentlyUpdated = useMemo(() => {
-    const formattedAnime = (animes || []).map(anime => {
-      const cover = getAnimeFolderCover(anime) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop';
-      return {
-        id: anime.id,
-        type: 'anime',
-        title: anime.title || 'Untitled Anime',
-        episode: anime.lastWatchedEpisode ? `Ep ${anime.lastWatchedEpisode}` : (anime.episodeCount ? `${anime.episodeCount} EP` : 'EP 0'),
-        rating: getDeterministicRating(anime.id, anime.rating),
-        image: cover,
-        quality: anime.quality || 'HD',
-        isYouTube: !!(anime.isYouTube || anime.folderPath?.startsWith('http') || anime.folderPath?.startsWith('youtube://')),
-        updatedAt: anime.updatedAt || anime.createdAt || 0,
-        pct: getAnimeProgressPercent(anime),
-        item: anime,
-      };
-    });
-
-    const formattedManga = (mangas || []).map(manga => {
-      const cover = getMangaFolderCover(manga) || 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop';
-      const chLabel = manga.lastReadChapter
-        ? `Ch ${manga.lastReadChapter}`
-        : (manga.chapterCount ? `${manga.chapterCount} Chs` : (manga.totalChapters ? `${manga.totalChapters} Chs` : 'Manga'));
-      return {
-        id: manga.id,
-        type: 'manga',
-        title: manga.title || 'Untitled Manga',
-        episode: chLabel,
-        rating: getDeterministicRating(manga.id, manga.rating),
-        image: cover,
-        quality: 'MANGA',
-        isYouTube: false,
-        updatedAt: manga.updatedAt || manga.lastReadAt || manga.createdAt || 0,
-        pct: Number(manga.progressPercent || 0),
-        item: manga,
-      };
-    });
-
-    return [...formattedAnime, ...formattedManga]
-      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
-      .slice(0, 30);
-  }, [animes, mangas]);
 
   const legacyLocalTopRated = [...animes]
     .sort((a, b) => parseFloat(b.rating || 0) - parseFloat(a.rating || 0))
@@ -3575,14 +3479,6 @@ export default function Dashboard({ onSelectAnime }) {
 
   const genresScrollRef = useRef(null);
 
-  const scrollRecentlyUpdated = (direction) => {
-    if (recentlyUpdatedRef.current) {
-      const { scrollLeft, clientWidth } = recentlyUpdatedRef.current;
-      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.7 : scrollLeft + clientWidth * 0.7;
-      recentlyUpdatedRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
-    }
-  };
-
   const scrollManga = (direction) => {
     if (mangaScrollRef.current) {
       const { scrollLeft, clientWidth } = mangaScrollRef.current;
@@ -3831,46 +3727,32 @@ export default function Dashboard({ onSelectAnime }) {
           setActiveMobileMenu={setActiveMobileMenu}
         />
 
-        {/* Recently Updated */}
-        <RecentlyUpdatedSection
-          recentlyUpdated={recentlyUpdated}
+        {/* Top Rated Anime */}
+        <TopRatedMasterpiecesSection
+          lazyTopRatedRef={lazyTopRatedRef}
+          loadingTopRated={loadingTopRated}
+          hasScrolledToTopRated={hasScrolledToTopRated}
+          topRatedWithLibrary={topRatedWithLibrary}
+          onSelectAnime={onSelectAnime}
+          handleAddAnimeToLibrary={handleAddAnimeToLibrary}
+        />
+
+        {/* Popular Languages (Image 1 & 2) */}
+        <PopularLanguagesSection />
+
+        {/* Popular Genres (Image 1 & 3) */}
+        <PopularGenresSection />
+
+        {/* Endless Scroll Genre Sections (Requirement 5 & Image 4) */}
+        <EndlessGenreSections
+          movies={movies}
+          animes={animes}
+          webseriesList={webseriesList}
           onSelectAnime={onSelectAnime}
           handleCardMouseEnter={handleCardMouseEnter}
           handleCardMouseLeave={handleCardMouseLeave}
           activeMobileMenu={activeMobileMenu}
           setActiveMobileMenu={setActiveMobileMenu}
-        />
-
-        {/* Top Rated Masterpieces */}
-        <TopRatedMasterpiecesSection
-          topRatedWithLibrary={topRatedWithLibrary}
-          onSelectAnime={onSelectAnime}
-          handleAddAnimeToLibrary={handleAddAnimeToLibrary}
-        />
-
-        {/* Genres */}
-        <GenresSection
-          selectedGenre={selectedGenre}
-          setSelectedGenre={setSelectedGenre}
-        />
-
-        {/* Top Rated Online */}
-        <TopRatedOnlineSection
-          lazyTopRatedRef={lazyTopRatedRef}
-          scrollTopRated={scrollTopRated}
-          hasScrolledToTopRated={hasScrolledToTopRated}
-          loadingTopRated={loadingTopRated}
-          topRatedWithLibrary={topRatedWithLibrary}
-          topRatedScrollRef={topRatedScrollRef}
-          handleTopRatedMouseDown={handleTopRatedMouseDown}
-          handleTopRatedMouseMove={handleTopRatedMouseMove}
-          handleTopRatedMouseUp={handleTopRatedMouseUp}
-          handleTopRatedMouseLeave={handleTopRatedMouseLeave}
-          topRatedHasDragged={topRatedHasDragged}
-          onSelectAnime={onSelectAnime}
-          handleAddAnimeToLibrary={handleAddAnimeToLibrary}
-          handleOpenExternalAnime={handleOpenExternalAnime}
-          handleOpenMalSearch={handleOpenMalSearch}
         />
       </main>
 

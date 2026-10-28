@@ -31,7 +31,7 @@ export default function DashboardFooter({
             <li><a href="#hero" className="hover:text-white transition">Home Spotlight</a></li>
             <li><a href="#continue-watching" className="hover:text-white transition">Continue Watching</a></li>
             <li><a href="#anime" className="hover:text-white transition">Local Catalog</a></li>
-            <li><a href="#top-rated" className="hover:text-white transition flex items-center gap-1.5"><span className="text-amber-400">★</span> Top 20 Rated</a></li>
+            <li><a href="#top-rated-masterpieces" className="hover:text-white transition flex items-center gap-1.5"><span className="text-amber-400">★</span> Top Rated Anime</a></li>
           </ul>
         </div>
 
