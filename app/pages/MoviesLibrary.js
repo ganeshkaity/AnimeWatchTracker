@@ -7,7 +7,7 @@ import {
   Film, Search, Filter, ArrowUpDown, ChevronLeft, Plus,
   Star, Clock, CheckCircle2, AlertTriangle, X, Play,
   Edit3, Trash2, RotateCcw, Sparkles, SlidersHorizontal,
-  Eye, Check, Calendar, Tv, Loader2, MoreVertical
+  Eye, Check, Calendar, Tv, Loader2, MoreVertical, FolderPlus, Layers
 } from 'lucide-react';
 import { collection, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -475,7 +475,29 @@ export default function MoviesLibrary() {
           </div>
 
           {/* Action Buttons: Filter & Sort */}
-          <div className="flex items-center gap-2.5 self-end md:self-auto w-full md:w-auto justify-between md:justify-end">
+          <div className="flex items-center gap-2.5 self-end md:self-auto w-full md:w-auto justify-between md:justify-end flex-wrap">
+            {/* View Groups */}
+            <button
+              type="button"
+              onClick={() => router.push('/group')}
+              className="flex items-center gap-1.5 px-3 py-2.5 rounded-2xl text-xs font-bold border transition cursor-pointer bg-white/5 hover:bg-white/10 border-white/10 text-gray-300 hover:text-white shadow-sm"
+              title="View All Movie Groups"
+            >
+              <Layers size={14} className="text-amber-400" />
+              <span>Groups</span>
+            </button>
+
+            {/* Create Group Button */}
+            <button
+              type="button"
+              onClick={() => router.push('/create-group')}
+              className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-bold border transition cursor-pointer bg-purple-600/15 hover:bg-purple-600/25 border-purple-500/30 text-purple-300 hover:text-white shadow-sm"
+              title="Create & Manage Movie Groups"
+            >
+              <FolderPlus size={14} className="text-purple-400" />
+              <span>Create Group</span>
+            </button>
+
             {/* Filter Modal Trigger */}
             <button
               type="button"

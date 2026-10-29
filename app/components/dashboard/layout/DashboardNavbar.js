@@ -4,7 +4,8 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, Wifi, WifiOff, Plus, ChevronDown, Settings,
-  SlidersHorizontal, Menu, Bookmark, Tv, Film, Headphones, BookOpen
+  SlidersHorizontal, Menu, Bookmark, Tv, Film, Headphones, BookOpen,
+  FolderPlus, Layers
 } from 'lucide-react';
 import CachedImage from '../../../utils/imageCache';
 import { toFanartBigPreview } from '../../../lib/fanartUtils';
@@ -572,7 +573,7 @@ export default function DashboardNavbar({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 8, scale: 0.96 }}
                 transition={{ duration: 0.18, ease: 'easeOut' }}
-                className="absolute top-full right-0 mt-2.5 w-72 bg-[#0d111b]/95 backdrop-blur-2xl border border-white/15 rounded-2xl p-2 shadow-2xl shadow-black/80 z-50 space-y-1"
+                className="absolute top-full right-0 mt-2.5 w-72 max-h-[85vh] overflow-y-auto no-scrollbar bg-[#0d111b]/95 backdrop-blur-2xl border border-white/15 rounded-2xl p-2 shadow-2xl shadow-black/80 z-50 space-y-1"
                 onMouseEnter={() => {
                   if (actionModalTimerRef.current) clearTimeout(actionModalTimerRef.current);
                   setShowActionModal(true);
@@ -743,6 +744,42 @@ export default function DashboardNavbar({
                       <span className="text-[9px] font-bold text-cyan-400 uppercase">Live</span>
                     </div>
                     <p className="text-[10px] text-gray-400 truncate">Hotspot wireless stream page</p>
+                  </div>
+                </Link>
+
+                {/* 8. Create Movie Group */}
+                <Link
+                  href="/create-group"
+                  onClick={() => setShowActionModal(false)}
+                  className="w-full flex items-center gap-3 p-2.5 rounded-xl transition text-left group hover:bg-purple-950/40 border border-transparent hover:border-purple-500/30 cursor-pointer"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <FolderPlus size={16} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-white group-hover:text-purple-300 transition-colors">Create Group</h4>
+                      <span className="text-[9px] font-bold text-purple-400 uppercase">New</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 truncate">Sequential movie collections</p>
+                  </div>
+                </Link>
+
+                {/* 9. All Movie Groups */}
+                <Link
+                  href="/group"
+                  onClick={() => setShowActionModal(false)}
+                  className="w-full flex items-center gap-3 p-2.5 rounded-xl transition text-left group hover:bg-amber-950/40 border border-transparent hover:border-amber-500/30 cursor-pointer"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <Layers size={16} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-white group-hover:text-amber-300 transition-colors">Movie Groups</h4>
+                      <span className="text-[9px] font-bold text-amber-400 uppercase">View All</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 truncate">Browse &amp; watch franchise sets</p>
                   </div>
                 </Link>
               </motion.div>

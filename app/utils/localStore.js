@@ -22,6 +22,7 @@ const KEYS = {
   WEBSERIES: 'watchanime_webseries',
   WEBSERIES_EPISODES: (seriesId) => `watchanime_webseries_episodes_${seriesId}`,
   WATCHLIST: 'watchanime_watchlist',
+  MOVIE_GROUPS: 'watchanime_movie_groups',
   NOTES: 'watchanime_notes',
   DIRTY_QUEUE: 'watchanime_dirty_queue',
 };
@@ -443,6 +444,40 @@ export function upsertLocalWatchlist(item) {
 export function deleteLocalWatchlist(id) {
   const items = getLocalWatchlist().filter(m => m.id !== id && String(m.tmdbId) !== String(id));
   setLocalWatchlist(items);
+}
+
+// ─── Movie Groups ─────────────────────────────────────────────────────────────
+
+export function getLocalMovieGroups() {
+  return read(KEYS.MOVIE_GROUPS) || [];
+}
+
+export function setLocalMovieGroups(groups) {
+  write(KEYS.MOVIE_GROUPS, groups);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('movie_groups_updated'));
+  }
+}
+
+export function getLocalMovieGroup(idOrSlug) {
+  const groups = getLocalMovieGroups();
+  return groups.find(g => g.id === idOrSlug || g.slug === idOrSlug) || null;
+}
+
+export function upsertLocalMovieGroup(group) {
+  const groups = getLocalMovieGroups();
+  const idx = groups.findIndex(g => g.id === group.id || (group.slug && g.slug === group.slug));
+  if (idx >= 0) {
+    groups[idx] = { ...groups[idx], ...group, updatedAt: new Date().toISOString() };
+  } else {
+    groups.unshift({ ...group, createdAt: group.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() });
+  }
+  setLocalMovieGroups(groups);
+}
+
+export function deleteLocalMovieGroup(groupId) {
+  const groups = getLocalMovieGroups().filter(g => g.id !== groupId && g.slug !== groupId);
+  setLocalMovieGroups(groups);
 }
 
 // ─── Dirty Queue (pending Firestore writes) ────────────────────────────────────

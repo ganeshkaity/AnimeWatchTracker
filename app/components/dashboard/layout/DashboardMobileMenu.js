@@ -1,13 +1,15 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   SlidersHorizontal, X, Bookmark, Tv, Film, Headphones,
   BookOpen, Sparkles, Play, StickyNote,
-  Compass, Settings, Plus, WifiOff, Wifi, RefreshCw
+  Compass, Settings, Plus, WifiOff, Wifi, RefreshCw,
+  FolderPlus, Layers
 } from 'lucide-react';
 import { GENRES_LIST } from '../utils/dashboardHelpers';
+import { getLocalMovieGroups } from '../../../utils/localStore';
 
 export default function DashboardMobileMenu({
   mobileMenuOpen,
@@ -23,6 +25,20 @@ export default function DashboardMobileMenu({
   isSyncing,
 }) {
   const router = useRouter();
+  const [movieGroups, setMovieGroups] = useState(() => (typeof window !== 'undefined' ? getLocalMovieGroups() || [] : []));
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setMovieGroups(getLocalMovieGroups() || []);
+    }
+    const handleGroupsUpdate = () => {
+      setMovieGroups(getLocalMovieGroups() || []);
+    };
+    window.addEventListener('movie_groups_updated', handleGroupsUpdate);
+    return () => {
+      window.removeEventListener('movie_groups_updated', handleGroupsUpdate);
+    };
+  }, [mobileMenuOpen]);
 
   return (
     <AnimatePresence>
@@ -129,6 +145,68 @@ export default function DashboardMobileMenu({
                     <span className="flex items-center gap-2"><Sparkles size={15} className="text-amber-400" /> All Movies (Library)</span>
                     <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">See All</span>
                   </Link>
+
+                  {/* Movie Groups Subsection */}
+                  <div className="my-1.5 p-2 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1.5">
+                    <div className="flex items-center justify-between px-1">
+                      <span className="text-[11px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                        <Layers size={13} className="text-amber-400" /> Movie Groups
+                      </span>
+                      <Link
+                        href="/create-group"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="text-[10px] font-bold text-purple-300 hover:text-white flex items-center gap-1 bg-purple-500/20 hover:bg-purple-500/30 px-2 py-0.5 rounded-full border border-purple-500/30 transition cursor-pointer"
+                        title="Create new group"
+                      >
+                        <Plus size={11} /> Add Group
+                      </Link>
+                    </div>
+
+                    {/* All Groups (Overview) */}
+                    <Link
+                      href="/group"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="hover:text-amber-400 p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Sparkles size={14} className="text-amber-400" /> All Groups
+                      </span>
+                      <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">
+                        {movieGroups.length} {movieGroups.length === 1 ? 'Group' : 'Groups'}
+                      </span>
+                    </Link>
+
+                    {/* Links to every individual created group */}
+                    {movieGroups.length > 0 ? (
+                      <div className="pl-2.5 space-y-0.5 border-l-2 border-amber-500/30 ml-2 pt-0.5">
+                        {movieGroups.map((group) => {
+                          const groupSlug = group.slug || group.id;
+                          const count = Array.isArray(group.movies) ? group.movies.length : (group.movieCount || 0);
+
+                          return (
+                            <Link
+                              key={group.id}
+                              href={`/group/${encodeURIComponent(groupSlug)}`}
+                              onClick={() => setMobileMenuOpen(false)}
+                              className="p-1.5 rounded-lg hover:bg-white/5 hover:text-white text-gray-300 flex items-center justify-between transition group text-[11px]"
+                            >
+                              <span className="truncate flex items-center gap-1.5">
+                                <FolderPlus size={12} className="text-amber-400/80 group-hover:text-amber-400 shrink-0" />
+                                <span className="truncate">{group.name}</span>
+                              </span>
+                              <span className="text-[9px] text-amber-300/80 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.2 rounded font-mono shrink-0 ml-1">
+                                {count}
+                              </span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="px-2 py-1 text-[11px] text-gray-500 italic">
+                        No groups yet — click "+ Add Group" to create one.
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => { setMobileMenuOpen(false); handleSectionJump('webseries'); }}
@@ -236,6 +314,14 @@ export default function DashboardMobileMenu({
                     className="w-full py-2 px-3 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-purple-600 text-white flex items-center justify-center gap-2 cursor-pointer shadow-md"
                   >
                     <Headphones size={15} /> Track Audio Folder
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMenuOpen(false); router.push('/create-group'); }}
+                    className="w-full py-2 px-3 rounded-xl text-xs font-bold bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                  >
+                    <FolderPlus size={15} /> Create Movie Group
                   </button>
 
                   <button
