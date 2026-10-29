@@ -4,254 +4,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, Sparkles, Film, Play, Tv } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import MediaCard from '../cards/MediaCard';
-
-// Seed curated items matching user's Image 4 for "Action Movies" and diverse genres
-const CURATED_GENRE_SEEDS = {
-  'action-movies': [
-    {
-      id: 'seed-act-1',
-      title: 'Singham Returns',
-      type: 'movie',
-      rating: '7.8',
-      year: '2014',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/qjY7pXgD3p2v54QdC66i1r4Y0Gg.jpg',
-    },
-    {
-      id: 'seed-act-2',
-      title: 'Shang-Chi and The Legend of The Ten Rings',
-      type: 'movie',
-      rating: '7.9',
-      year: '2021',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/1BIoJGKbXjdFDAvFarT3Ojh5q92.jpg',
-    },
-    {
-      id: 'seed-act-3',
-      title: 'Vikram',
-      type: 'movie',
-      rating: '8.3',
-      year: '2022',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/h2P6F1i7vD0zP0vW9o2g9fV2i2v.jpg',
-    },
-    {
-      id: 'seed-act-4',
-      title: 'Empuraan: Lucifer 2',
-      type: 'movie',
-      rating: '8.5',
-      year: '2025',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/9yY9oU7w7w8v8v7f7f7f7f7f7f7.jpg',
-    },
-    {
-      id: 'seed-act-5',
-      title: 'Aavesham',
-      type: 'movie',
-      rating: '8.2',
-      year: '2024',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/3o9o9o9o9o9o9o9o9o9o9o9o9o9.jpg',
-    },
-    {
-      id: 'seed-act-6',
-      title: 'Iron Man',
-      type: 'movie',
-      rating: '8.4',
-      year: '2008',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/78lPtwv72eTNqFW9COBYI0dWDJa.jpg',
-    },
-    {
-      id: 'seed-act-7',
-      title: 'Avengers: Infinity War',
-      type: 'movie',
-      rating: '8.7',
-      year: '2018',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/mDfAV9uH9s6o8gG8v2f0s5u0e6d.jpg',
-    },
-    {
-      id: 'seed-act-8',
-      title: 'John Wick: Chapter 4',
-      type: 'movie',
-      rating: '8.6',
-      year: '2023',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/vZloFAK7NKnMGKEHvY2ilR22jF8.jpg',
-    },
-  ],
-  'action-anime': [
-    {
-      id: 'seed-ani-1',
-      title: 'Jujutsu Kaisen',
-      type: 'anime',
-      rating: '8.8',
-      year: '2020',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/fD14tP44Y0V1yS8Z4Zf9f9f9f9f.jpg',
-    },
-    {
-      id: 'seed-ani-2',
-      title: 'Demon Slayer: Kimetsu no Yaiba',
-      type: 'anime',
-      rating: '8.9',
-      year: '2019',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/xUfRZu2mi8jH69hmV1KiMFF78q3.jpg',
-    },
-    {
-      id: 'seed-ani-3',
-      title: 'Attack on Titan',
-      type: 'anime',
-      rating: '9.1',
-      year: '2013',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/hTP1DtLGFamjfu8WqjnuQdP1n4i.jpg',
-    },
-    {
-      id: 'seed-ani-4',
-      title: 'Solo Leveling',
-      type: 'anime',
-      rating: '8.6',
-      year: '2024',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuPxJ8BGdM.jpg',
-    },
-    {
-      id: 'seed-ani-5',
-      title: 'Bleach: Thousand-Year Blood War',
-      type: 'anime',
-      rating: '9.0',
-      year: '2022',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/2Eewgp7o5AU1xCmuIOxte01nvXA.jpg',
-    },
-  ],
-  'romance-drama': [
-    {
-      id: 'seed-rom-1',
-      title: 'Your Name (Kimi no Na wa)',
-      type: 'anime',
-      rating: '9.2',
-      year: '2016',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/q719jXXEzOoYaps6qFsxWa93bu.jpg',
-    },
-    {
-      id: 'seed-rom-2',
-      title: 'La La Land',
-      type: 'movie',
-      rating: '8.5',
-      year: '2016',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/uDO8zWDhfWwoFdKS4fzkVJt0Rf0.jpg',
-    },
-    {
-      id: 'seed-rom-3',
-      title: 'A Silent Voice',
-      type: 'anime',
-      rating: '8.9',
-      year: '2016',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/tuFaWiqX0TXoWu7DGNcmX3UW7sT.jpg',
-    },
-    {
-      id: 'seed-rom-4',
-      title: 'Titanic',
-      type: 'movie',
-      rating: '8.8',
-      year: '1997',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/9xjZS2rlVxm8SFx8kPC3aIGCOYQ.jpg',
-    },
-  ],
-  'scifi-fantasy': [
-    {
-      id: 'seed-sci-1',
-      title: 'Interstellar',
-      type: 'movie',
-      rating: '8.9',
-      year: '2014',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg',
-    },
-    {
-      id: 'seed-sci-2',
-      title: 'Dune: Part Two',
-      type: 'movie',
-      rating: '8.8',
-      year: '2024',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg',
-    },
-    {
-      id: 'seed-sci-3',
-      title: 'Steins;Gate',
-      type: 'anime',
-      rating: '9.1',
-      year: '2011',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/5k3M5gQf2d1e2s3k4j5l6a7b8c9.jpg',
-    },
-    {
-      id: 'seed-sci-4',
-      title: 'Inception',
-      type: 'movie',
-      rating: '8.8',
-      year: '2010',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/edv5CZvWj09upOsy2Y6IwDhK8bt.jpg',
-    },
-  ],
-  'comedy-slice': [
-    {
-      id: 'seed-com-1',
-      title: 'Spy x Family',
-      type: 'anime',
-      rating: '8.6',
-      year: '2022',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/3r4Cd1pENbBsqE6t2v6Ww03qRrq.jpg',
-    },
-    {
-      id: 'seed-com-2',
-      title: 'Deadpool & Wolverine',
-      type: 'movie',
-      rating: '8.3',
-      year: '2024',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/8cdWjvZQUExUUTzyp4t6EDMubfO.jpg',
-    },
-    {
-      id: 'seed-com-3',
-      title: 'KonoSuba: God\'s Blessing',
-      type: 'anime',
-      rating: '8.4',
-      year: '2016',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/4gV8LgK5o7c1x2z3b4v5n6m7q8w.jpg',
-    },
-    {
-      id: 'seed-com-4',
-      title: 'Ted Lasso',
-      type: 'webseries',
-      rating: '8.8',
-      year: '2020',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/5fhZdwPmsUmHgQaox5e363sY714.jpg',
-    },
-  ],
-  'crime-thriller': [
-    {
-      id: 'seed-crm-1',
-      title: 'Death Note',
-      type: 'anime',
-      rating: '9.0',
-      year: '2006',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/iigTJJskR1PcjjPLiNzV2JgZkH7.jpg',
-    },
-    {
-      id: 'seed-crm-2',
-      title: 'The Dark Knight',
-      type: 'movie',
-      rating: '9.0',
-      year: '2008',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/qJ2tW6WMUDux911r6m7haRef0WH.jpg',
-    },
-    {
-      id: 'seed-crm-3',
-      title: 'Monster',
-      type: 'anime',
-      rating: '9.1',
-      year: '2004',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/2gB1i5c3d4e5f6g7h8i9j0k1l2m.jpg',
-    },
-    {
-      id: 'seed-crm-4',
-      title: 'Breaking Bad',
-      type: 'webseries',
-      rating: '9.5',
-      year: '2008',
-      posterUrl: 'https://image.tmdb.org/t/p/w500/ggFHVNu6YYI5L9pCfOacjizRGt.jpg',
-    },
-  ],
-};
+import MediaCardSkeleton from '../skeletons/MediaCardSkeleton';
 
 const GENRE_ROW_DEFINITIONS = [
   { id: 'action-movies', title: 'Action Movies', filterGenre: 'Action', mediaFilter: 'movie' },
@@ -310,7 +63,7 @@ export default function EndlessGenreSections({
     return () => observer.disconnect();
   }, [isLoadingMore, visibleCount]);
 
-  // Aggregate and sort items for each genre definition
+  // Aggregate and sort items for each genre definition — only from user's DB
   const genreRowsData = useMemo(() => {
     return GENRE_ROW_DEFINITIONS.slice(0, visibleCount).map((def) => {
       const gTerm = def.filterGenre.toLowerCase();
@@ -336,13 +89,11 @@ export default function EndlessGenreSections({
         return gList.some((g) => g.trim().toLowerCase().includes(gTerm)) || (w.genre || '').toLowerCase().includes(gTerm);
       });
 
-      // Combine library matches with curated seed items to guarantee a rich row matching Image 4
-      const seedItems = CURATED_GENRE_SEEDS[def.id] || [];
+      // Only items from user's library — no curated seeds
       const combined = [
         ...matchedMovies.map((m) => ({ ...m, mediaType: 'movie' })),
         ...matchedAnimes.map((a) => ({ ...a, mediaType: 'anime' })),
         ...matchedSeries.map((s) => ({ ...s, mediaType: 'webseries' })),
-        ...seedItems,
       ];
 
       // Remove duplicates by title
@@ -363,9 +114,12 @@ export default function EndlessGenreSections({
     });
   }, [movies, animes, webseriesList, visibleCount]);
 
+  // Only render rows that have at least 1 item from user's library
+  const nonEmptyRows = genreRowsData.filter((row) => row.items.length > 0);
+
   return (
     <div className="space-y-8 pt-4">
-      {genreRowsData.map((row) => (
+      {nonEmptyRows.map((row) => (
         <section key={row.id} className="space-y-3">
           {/* Row Header */}
           <div className="flex items-center justify-between">
@@ -374,6 +128,14 @@ export default function EndlessGenreSections({
             </h2>
 
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => router.push(`/results?filter=${encodeURIComponent(row.filterGenre)}&media=${encodeURIComponent(row.mediaFilter)}`)}
+                className="text-xs font-bold text-gray-300 hover:text-white flex items-center gap-1 transition px-2 py-1 rounded-lg hover:bg-white/5 cursor-pointer"
+              >
+                <span>View All</span>
+                <ChevronRight size={14} />
+              </button>
               <button
                 type="button"
                 onClick={() => scrollRow(row.id, 'left')}
@@ -393,14 +155,14 @@ export default function EndlessGenreSections({
             </div>
           </div>
 
-          {/* Horizontal Slider with Minimal Gap (gap-1.5 sm:gap-2) and Title-in-Middle Loading */}
+          {/* Horizontal Slider with Minimal Gap (gap-1.5 sm:gap-2) */}
           <div
             ref={(el) => {
               if (el) rowRefs.current[row.id] = el;
             }}
             className="flex items-start gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2 scroll-smooth select-none"
           >
-            {row.items.map((item) => {
+            {row.items.slice(0, 12).map((item) => {
               const coverImg = item.posterUrl || item.posterPath || (item.thumbnailBase64 || null);
               const rating = item.rating || item.score || null;
               const isWatched = Boolean(item.watched || item.completed || item.isWatched || (item.watchProgress && item.watchProgress >= 95));
@@ -421,11 +183,11 @@ export default function EndlessGenreSections({
                   subRight={subRight}
                   accentBorder="hover:border-purple-400/50"
                   onClick={() => {
-                    if (item.mediaType === 'movie' && !item.id.startsWith('seed-')) {
+                    if (item.mediaType === 'movie') {
                       router.push(`/movies/${item.id}`);
-                    } else if (item.mediaType === 'anime' && !item.id.startsWith('seed-') && onSelectAnime) {
+                    } else if (item.mediaType === 'anime' && onSelectAnime) {
                       onSelectAnime(item.id);
-                    } else if (item.mediaType === 'webseries' && !item.id.startsWith('seed-')) {
+                    } else if (item.mediaType === 'webseries') {
                       router.push(`/webseries/${item.id}`);
                     }
                   }}
@@ -439,16 +201,40 @@ export default function EndlessGenreSections({
                 />
               );
             })}
+
+            {row.items.length > 12 && (
+              <div
+                onClick={() => router.push(`/results?filter=${encodeURIComponent(row.filterGenre)}&media=${encodeURIComponent(row.mediaFilter)}`)}
+                className="flex-none w-28 sm:w-32 md:w-36 glass-card rounded-lg overflow-hidden group cursor-pointer flex flex-col transition shadow-md hover:shadow-xl bg-purple-950/20 hover:bg-purple-950/30 border border-purple-500/20 self-start"
+              >
+                <div className="aspect-[2/3] flex flex-col items-center justify-center p-3 sm:p-4 text-center space-y-2">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Sparkles size={20} />
+                  </div>
+                  <div>
+                    <span className="text-xs sm:text-sm font-bold text-white block">See All</span>
+                    <span className="text-[10px] text-purple-300/80 font-mono mt-0.5 block">{row.items.length} total</span>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-lg bg-purple-600 text-white text-[10px] font-extrabold flex items-center gap-1 group-hover:bg-purple-500 transition">
+                    View All <ChevronRight size={12} />
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </section>
       ))}
 
-      {/* Endless Scroll Sentinel */}
-      <div ref={observerTargetRef} className="py-6 flex items-center justify-center">
+      {/* Endless Scroll Sentinel with Skeleton Loader */}
+      <div ref={observerTargetRef} className="py-6">
         {isLoadingMore && (
-          <div className="flex items-center gap-2 text-xs text-gray-400 font-mono">
-            <Loader2 size={16} className="animate-spin text-purple-400" />
-            <span>Loading more recommendations...</span>
+          <div className="space-y-3">
+            <div className="h-6 w-36 bg-white/10 rounded animate-pulse" />
+            <div className="flex items-start gap-1.5 sm:gap-2 overflow-hidden py-2">
+              {Array.from({ length: 6 }).map((_, idx) => (
+                <MediaCardSkeleton key={`endless-skel-${idx}`} />
+              ))}
+            </div>
           </div>
         )}
       </div>

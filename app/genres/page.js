@@ -31,7 +31,7 @@ export default function GenresPage() {
         {POPULAR_GENRES.map((genre) => (
           <div
             key={genre.id}
-            onClick={() => router.push(`/?genre=${genre.id}`)}
+            onClick={() => router.push(`/results?genre=${encodeURIComponent(genre.name)}`)}
             className={`relative h-24 sm:h-28 rounded-lg overflow-hidden border border-white/10 bg-gradient-to-br ${genre.bgGradient} transition-all duration-300 hover:scale-[1.02] hover:brightness-110 cursor-pointer shadow-lg group`}
           >
             {/* Thematic Background Image with Duotone Overlay */}

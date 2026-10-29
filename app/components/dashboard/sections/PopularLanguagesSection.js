@@ -64,7 +64,7 @@ export default function PopularLanguagesSection() {
         {POPULAR_LANGUAGES.map((lang) => (
           <div
             key={lang.id}
-            onClick={() => router.push(`/languages?lang=${lang.id}`)}
+            onClick={() => router.push(`/results?lang=${encodeURIComponent(lang.id)}`)}
             className={`relative flex-none w-56 sm:w-64 md:w-72 h-24 sm:h-28 rounded-lg overflow-hidden border border-white/10 bg-gradient-to-r ${lang.bgGradient} transition-all duration-300 hover:scale-[1.02] hover:brightness-110 cursor-pointer shadow-md group`}
           >
             {/* Actor / Character Portrait Blend */}

@@ -9,7 +9,7 @@ import {
   Edit3, Trash2, RotateCcw, Sparkles, SlidersHorizontal,
   Eye, Check, Calendar, Tv, Loader2, MoreVertical
 } from 'lucide-react';
-import { collection, getDocs, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -19,6 +19,7 @@ import {
 import AddMovieModal from '../components/AddMovieModal';
 import EditMovieModal from '../components/EditMovieModal';
 import MediaPreviewModal from '../components/MediaPreviewModal';
+import MediaCardSkeleton from '../components/dashboard/skeletons/MediaCardSkeleton';
 import CachedImage from '../utils/imageCache';
 
 const YoutubeLogo = ({ size = 16, className = "" }) => (
@@ -69,9 +70,9 @@ const getMovieInitialScreenCount = () => {
   if (w < 460) return 8;   // mobile: 2 cols x 4 rows
   if (w < 640) return 12;  // 3 cols x 4 rows
   if (w < 768) return 16;  // 4 cols x 4 rows
-  if (w < 1024) return 20; // 5 cols x 4 rows
-  if (w < 1280) return 24; // 6 cols x 4 rows
-  return 28;               // 7-8 cols
+  if (w < 1024) return 18; // 5 cols x ~3-4 rows
+  if (w < 1280) return 18; // 6 cols x 3 rows
+  return 24;               // wide screens: 6-8 cols x 3-4 rows
 };
 
 export default function MoviesLibrary() {
@@ -97,32 +98,13 @@ export default function MoviesLibrary() {
     document.title = "Movie Library - Ganeshspace";
   }, []);
 
-  // Progressive loading & screen-filling card count state with session persistence
+  // Progressive loading & screen-filling card count state
   const [visibleCount, setVisibleCount] = useState(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = sessionStorage.getItem('watchanime_movie_lib_visible_count');
-        const parsed = stored ? parseInt(stored, 10) : 0;
-        const saved = Math.max(parsed || 0, persistedMovieVisibleCount || 0);
-        if (saved > 0) return saved;
-      } catch (e) {}
-      return getMovieInitialScreenCount();
-    }
-    return 16;
+    return getMovieInitialScreenCount();
   });
 
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const loadMoreRef = useRef(null);
-  const isLoadingMoreRef = useRef(false);
-
-  // Persist visibleCount to module and sessionStorage so re-opening library retains all loaded cards
-  useEffect(() => {
-    if (visibleCount > 0) {
-      persistedMovieVisibleCount = visibleCount;
-      try {
-        sessionStorage.setItem('watchanime_movie_lib_visible_count', String(visibleCount));
-      } catch (e) {}
-    }
-  }, [visibleCount]);
 
   // Card Hover Preview Modal & Mobile Action Sheet States
   const [activePreview, setActivePreview] = useState(null); // { item, type, rect }
@@ -205,35 +187,33 @@ export default function MoviesLibrary() {
   const [movieEditing, setMovieEditing] = useState(null);
   const [movieCompleteConfirm, setMovieCompleteConfirm] = useState(null);
 
-  // Load Movies
+  // Load Movies: localStorage first for instantaneous rendering, then background Firestore
   useEffect(() => {
-    const loadMovies = async () => {
-      setLoading(true);
-      try {
-        const local = getLocalMovies();
-        if (local && local.length > 0) {
-          setMovies(local);
-          setLoading(false);
-        }
+    const local = getLocalMovies();
+    if (local && local.length > 0) {
+      setMovies(local);
+      setLoading(false);
+    }
 
-        if (currentUser?.uid && db) {
-          const snap = await getDocs(collection(db, 'users', currentUser.uid, 'movies'));
-          const remoteMovies = [];
-          snap.forEach(d => remoteMovies.push({ id: d.id, ...d.data() }));
+    if (!currentUser?.uid || !db) {
+      setLoading(false);
+      return;
+    }
 
-          if (remoteMovies.length > 0) {
-            setMovies(remoteMovies);
-            remoteMovies.forEach(m => upsertLocalMovie(m));
-          }
-        }
-      } catch (err) {
-        console.error('[MoviesLibrary] Load error:', err);
-      } finally {
-        setLoading(false);
+    const unsub = onSnapshot(collection(db, 'users', currentUser.uid, 'movies'), (snap) => {
+      const remoteMovies = [];
+      snap.forEach(d => remoteMovies.push({ id: d.id, ...d.data() }));
+      if (remoteMovies.length > 0) {
+        setMovies(remoteMovies);
+        remoteMovies.forEach(m => upsertLocalMovie(m));
       }
-    };
+      setLoading(false);
+    }, (err) => {
+      console.warn('[MoviesLibrary] Snapshot error:', err);
+      setLoading(false);
+    });
 
-    loadMovies();
+    return () => unsub();
   }, [currentUser]);
 
   // Handle Delete
@@ -410,11 +390,6 @@ export default function MoviesLibrary() {
     setSearch('');
   };
 
-  // Reset lock when visibleCount updates
-  useEffect(() => {
-    isLoadingMoreRef.current = false;
-  }, [visibleCount]);
-
   // Infinite scroll observer to progressively load more cards as user scrolls down
   useEffect(() => {
     if (visibleCount >= filteredAndSortedMovies.length) return;
@@ -423,17 +398,20 @@ export default function MoviesLibrary() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && !isLoadingMoreRef.current) {
-          isLoadingMoreRef.current = true;
-          setVisibleCount((prev) => prev + getMovieInitialScreenCount());
+        if (entries[0].isIntersecting && !isLoadingMore) {
+          setIsLoadingMore(true);
+          setTimeout(() => {
+            setVisibleCount((prev) => prev + getMovieInitialScreenCount());
+            setIsLoadingMore(false);
+          }, 300);
         }
       },
-      { rootMargin: '350px' }
+      { rootMargin: '300px' }
     );
 
     observer.observe(target);
     return () => observer.disconnect();
-  }, [visibleCount, filteredAndSortedMovies.length]);
+  }, [visibleCount, filteredAndSortedMovies.length, isLoadingMore]);
 
   const displayedMovies = useMemo(() => {
     return filteredAndSortedMovies.slice(0, visibleCount);
@@ -594,10 +572,7 @@ export default function MoviesLibrary() {
         {loading ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-5 pt-2">
             {Array.from({ length: skeletonCount }).map((_, idx) => (
-              <div
-                key={`movie-skel-${idx}`}
-                className="aspect-[2/3] rounded-2xl bg-white/5 animate-pulse"
-              />
+              <MediaCardSkeleton key={`movie-skel-${idx}`} className="w-full" />
             ))}
           </div>
         ) : filteredAndSortedMovies.length === 0 ? (
@@ -732,11 +707,22 @@ export default function MoviesLibrary() {
 
             {/* Infinite Scroll Sentinel */}
             {visibleCount < filteredAndSortedMovies.length && (
-              <div ref={loadMoreRef} className="col-span-full py-8 flex justify-center items-center">
-                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 text-xs text-gray-400 backdrop-blur-md">
-                  <Loader2 size={15} className="animate-spin text-amber-400" />
-                  <span>Loading more movies...</span>
+              <div ref={loadMoreRef} className="col-span-full py-6 space-y-4">
+                <div className="flex justify-center items-center">
+                  <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 text-xs text-gray-400 backdrop-blur-md">
+                    <Loader2 size={15} className="animate-spin text-amber-400" />
+                    <span>Loading more movies...</span>
+                  </div>
                 </div>
+
+                {/* Skeletons while loading next screen batch */}
+                {isLoadingMore && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-5 pt-2">
+                    {Array.from({ length: 6 }).map((_, idx) => (
+                      <MediaCardSkeleton key={`more-movie-skel-${idx}`} className="w-full" />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

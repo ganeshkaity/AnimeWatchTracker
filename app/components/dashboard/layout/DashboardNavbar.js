@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -39,6 +39,7 @@ export default function DashboardNavbar({
   setShowSettings,
 }) {
   const router = useRouter();
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const actionModalTimerRef = useRef(null);
   const actionModalRef = useRef(null);
 
@@ -50,7 +51,7 @@ export default function DashboardNavbar({
         }`}
     >
       {/* Left Brand */}
-      <div className="flex items-center gap-6">
+      <div className={`flex items-center gap-6 ${mobileSearchOpen ? 'hidden' : 'flex'}`}>
         <Link href="/" className="flex items-center gap-2.5 group">
           <img
             src="/logo.png"
@@ -65,8 +66,243 @@ export default function DashboardNavbar({
         </Link>
       </div>
 
+      {/* Mobile Opened Search Bar (Logo + Full Search Bar + Close button) */}
+      {mobileSearchOpen && (
+        <div className="flex md:hidden items-center gap-2.5 w-full">
+          <Link href="/" className="shrink-0">
+            <img
+              src="/logo.png"
+              alt="AnimeWatch Logo"
+              className="h-9 w-auto"
+            />
+          </Link>
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/80 pointer-events-none z-10" size={15} />
+            <input
+              type="text"
+              autoFocus
+              placeholder="Search titles or names..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-8 py-2 text-xs rounded-full bg-[#111827] border border-white/20 text-white placeholder-gray-400 focus:outline-none focus:border-[#7c5cff]"
+            />
+            {search.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-white/10 text-gray-300 hover:text-white"
+              >
+                <X size={12} />
+              </button>
+            )}
+
+            {/* Mobile Search Results Dropdown */}
+            {search.trim().length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-[#111827] border border-white/15 rounded-2xl shadow-2xl z-50 max-h-[75vh] overflow-y-auto no-scrollbar">
+                {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 && autocompleteMovieMatches.length === 0 && autocompleteWebseriesMatches.length === 0 && autocompleteWatchlistMatches.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-gray-400">
+                    No anime, manga, audio story, movie, webseries, or watchlist matches found
+                  </div>
+                ) : (
+                  <div className="p-2 space-y-1">
+                    {autocompleteWatchlistMatches.slice(0, 4).map((item) => {
+                      const coverImg = item.posterUrl || (item.images?.posters?.[0]?.url || item.backdropUrl || null);
+                      return (
+                        <div
+                          key={`m-search-watchlist-${item.id}`}
+                          onClick={() => {
+                            router.push(`/watchlist/${item.id}`);
+                            setSearch('');
+                            setMobileSearchOpen(false);
+                          }}
+                          className="flex items-center gap-3 p-2 rounded-xl hover:bg-amber-950/40 border border-amber-500/20 transition cursor-pointer"
+                        >
+                          <div className="w-9 h-12 rounded-lg overflow-hidden bg-amber-950/60 flex-shrink-0 relative flex items-center justify-center">
+                            {coverImg ? (
+                              <img src={coverImg} alt={item.title} className="w-full h-full object-cover" />
+                            ) : (
+                              <Bookmark size={16} className="text-amber-400" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-amber-400 to-yellow-500 text-[8px] font-extrabold text-black uppercase flex items-center gap-0.5 shadow-sm">
+                                <Bookmark size={8} /> Watchlist
+                              </span>
+                              <h4 className="font-bold text-xs text-white truncate">{item.title}</h4>
+                            </div>
+                            <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                              {item.year ? `${item.year} • ` : ''}{item.status || 'Plan to Watch'}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {autocompleteWebseriesMatches.slice(0, 3).map((ws) => (
+                      <div
+                        key={`m-search-webseries-${ws.id}`}
+                        onClick={() => {
+                          router.push(`/webseries/${ws.id}`);
+                          setSearch('');
+                          setMobileSearchOpen(false);
+                        }}
+                        className="flex items-center gap-3 p-2 rounded-xl hover:bg-cyan-950/40 border border-cyan-500/20 transition cursor-pointer"
+                      >
+                        <div className="w-9 h-12 rounded-lg overflow-hidden bg-cyan-950/60 flex-shrink-0 relative flex items-center justify-center">
+                          {ws.posterUrl || ws.posterPath ? (
+                            <img src={ws.posterUrl || ws.posterPath} alt={ws.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <Tv size={16} className="text-cyan-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-cyan-500 to-blue-600 text-[8px] font-bold text-white uppercase">Series</span>
+                            <h4 className="font-bold text-xs text-white truncate">{ws.title}</h4>
+                          </div>
+                          <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                            {ws.year ? `${ws.year} • ` : ''}{ws.episodeCount ? `${ws.episodeCount} Ep` : 'Web-series'}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {autocompleteMovieMatches.slice(0, 3).map((mov) => (
+                      <div
+                        key={`m-search-movie-${mov.id}`}
+                        onClick={() => {
+                          router.push(`/movies/${mov.id}`);
+                          setSearch('');
+                          setMobileSearchOpen(false);
+                        }}
+                        className="flex items-center gap-3 p-2 rounded-xl hover:bg-amber-950/40 border border-amber-500/20 transition cursor-pointer"
+                      >
+                        <div className="w-9 h-12 rounded-lg overflow-hidden bg-amber-950/60 flex-shrink-0 relative flex items-center justify-center">
+                          {mov.posterUrl || mov.posterPath ? (
+                            <img src={mov.posterUrl || mov.posterPath} alt={mov.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <Film size={16} className="text-amber-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-amber-500 to-rose-600 text-[8px] font-bold text-black uppercase">Movie</span>
+                            <h4 className="font-bold text-xs text-white truncate">{mov.title}</h4>
+                          </div>
+                          <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                            {mov.year ? `${mov.year} • ` : ''}{mov.runtime ? `${Math.floor(mov.runtime / 60)}h ${mov.runtime % 60}m` : 'Feature Film'}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {autocompleteAudioStoryMatches.slice(0, 3).map((a) => (
+                      <div
+                        key={`m-search-audio-${a.id}`}
+                        onClick={() => {
+                          router.push(`/audio-story/${a.id}`);
+                          setSearch('');
+                          setMobileSearchOpen(false);
+                        }}
+                        className="flex items-center gap-3 p-2 rounded-xl hover:bg-cyan-950/40 border border-cyan-500/20 transition cursor-pointer"
+                      >
+                        <div className="w-9 h-12 rounded-lg overflow-hidden bg-cyan-950/60 flex-shrink-0 relative flex items-center justify-center">
+                          {a.thumbnailBase64 ? (
+                            <img src={a.thumbnailBase64} alt={a.title} className="w-full h-full object-cover" />
+                          ) : a.thumbnailPath ? (
+                            <img src={`/api/image?path=${encodeURIComponent(a.thumbnailPath)}`} alt={a.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <Headphones size={16} className="text-cyan-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-cyan-600 to-blue-600 text-[8px] font-bold text-white uppercase">Audio</span>
+                            <h4 className="font-bold text-xs text-white truncate">{a.title}</h4>
+                          </div>
+                          <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                            {a.trackCount || a.totalTracks || 0} Tracks • Audio Story
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {autocompleteMangaMatches.slice(0, 3).map((m) => (
+                      <div
+                        key={`m-search-manga-${m.id}`}
+                        onClick={() => {
+                          router.push(`/manga/${m.id}`);
+                          setSearch('');
+                          setMobileSearchOpen(false);
+                        }}
+                        className="flex items-center gap-3 p-2 rounded-xl hover:bg-purple-950/40 border border-purple-500/20 transition cursor-pointer"
+                      >
+                        <div className="w-9 h-12 rounded-lg overflow-hidden bg-purple-950/60 flex-shrink-0 relative flex items-center justify-center">
+                          {m.thumbnailBase64 ? (
+                            <img src={toFanartBigPreview(m.thumbnailBase64)} alt={m.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <BookOpen size={16} className="text-purple-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-purple-600 text-[8px] font-bold text-white uppercase">Manga</span>
+                            <h4 className="font-bold text-xs text-white truncate">{m.title}</h4>
+                          </div>
+                          <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                            {m.chapterCount || m.totalChapters || 0} Chapters • Local PDF
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {autocompleteMatches.slice(0, 4).map((anime) => (
+                      <div
+                        key={`m-search-anime-${anime.id}`}
+                        onClick={() => {
+                          onSelectAnime(anime.id);
+                          setSearch('');
+                          setMobileSearchOpen(false);
+                        }}
+                        className="flex items-center gap-3 p-2 rounded-xl hover:bg-white/5 transition cursor-pointer"
+                      >
+                        <div className="w-9 h-12 rounded-lg overflow-hidden bg-white/5 flex-shrink-0 relative">
+                          {anime.thumbnailBase64 || anime.thumbnailPath ? (
+                            <CachedImage
+                              src={anime.thumbnailBase64 && (anime.thumbnailBase64.startsWith('http') || anime.thumbnailBase64.startsWith('data:')) ? anime.thumbnailBase64 : `/api/image?path=${encodeURIComponent(anime.thumbnailPath || '')}`}
+                              alt={anime.title}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className={`w-full h-full bg-gradient-to-tr ${anime.coverGradient || 'from-violet-600 to-indigo-700'} flex items-center justify-center font-bold text-[8px] text-white/50`}>
+                              {getInitials(anime.title)}
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-bold text-xs text-white truncate">{anime.title}</h4>
+                          <p className="text-[10px] text-gray-400 truncate">
+                            {anime.totalEpisodes || anime.episodeCount} Episodes
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setMobileSearchOpen(false);
+              setSearch('');
+            }}
+            className="p-2 rounded-lg bg-white/10 text-gray-300 hover:text-white shrink-0"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      )}
+
       {/* Right Actions & Search */}
-      <div className="flex items-center gap-3">
+      <div className={`items-center gap-3 ${mobileSearchOpen ? 'hidden md:flex' : 'flex'}`}>
         {/* Quick Search Input with Liquid-Glass Effect */}
         <div className="relative hidden md:block w-56 lg:w-72 group">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/80 group-hover:text-white group-focus-within:text-cyan-400 pointer-events-none z-10 transition-colors drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]" size={16} />
@@ -523,11 +759,25 @@ export default function DashboardNavbar({
           <Settings size={18} />
         </button>
 
+        {/* Mobile Search Button */}
+        <button
+          onClick={() => {
+            setMobileSearchOpen(true);
+            if (quickActionsOpen) setQuickActionsOpen(false);
+            if (mobileMenuOpen) setMobileMenuOpen(false);
+          }}
+          className="p-2 rounded-lg bg-white/5 text-gray-300 hover:text-white transition cursor-pointer md:hidden"
+          title="Search"
+        >
+          <Search size={20} />
+        </button>
+
         {/* Quick Actions Dropdown Trigger for Mobile */}
         <button
           onClick={() => {
             setQuickActionsOpen(!quickActionsOpen);
             if (mobileMenuOpen) setMobileMenuOpen(false);
+            if (mobileSearchOpen) setMobileSearchOpen(false);
           }}
           className={`p-2 rounded-lg bg-white/5 text-gray-300 hover:text-white transition cursor-pointer md:hidden relative ${quickActionsOpen ? 'text-[#7c5cff] bg-[#7c5cff]/10 border border-[#7c5cff]/30' : ''
             }`}
@@ -541,6 +791,7 @@ export default function DashboardNavbar({
           onClick={() => {
             setMobileMenuOpen(!mobileMenuOpen);
             if (quickActionsOpen) setQuickActionsOpen(false);
+            if (mobileSearchOpen) setMobileSearchOpen(false);
           }}
           className="p-2 rounded-lg bg-white/5 text-gray-300 hover:text-white transition cursor-pointer"
           title="Menu"
@@ -557,7 +808,7 @@ export default function DashboardNavbar({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="absolute top-16 right-4 z-50 w-56 glass-panel rounded-2xl p-4 shadow-xl border border-white/10 flex flex-col gap-2.5 md:hidden"
+            className="absolute top-16 right-4 z-50 w-56 bg-[#0c101b] rounded-2xl p-4 shadow-2xl border border-white/15 flex flex-col gap-2.5 md:hidden"
           >
             <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Quick Actions</span>
 

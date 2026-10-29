@@ -61,10 +61,10 @@ export default function PopularGenresSection() {
         ref={scrollRef}
         className="flex items-start gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-1 scroll-smooth select-none"
       >
-        {POPULAR_GENRES.map((genre) => (
+        {POPULAR_GENRES.slice(0, 12).map((genre) => (
           <div
             key={genre.id}
-            onClick={() => router.push(`/genres?genre=${genre.id}`)}
+            onClick={() => router.push(`/results?genre=${encodeURIComponent(genre.name)}`)}
             className={`relative flex-none w-56 sm:w-64 md:w-72 h-24 sm:h-28 rounded-lg overflow-hidden border border-white/10 bg-gradient-to-br ${genre.bgGradient} transition-all duration-300 hover:scale-[1.02] hover:brightness-110 cursor-pointer shadow-md group`}
           >
             {/* Thematic Background Image with Duotone Overlay */}
@@ -86,6 +86,22 @@ export default function PopularGenresSection() {
             </div>
           </div>
         ))}
+
+        {POPULAR_GENRES.length > 12 && (
+          <div
+            onClick={() => router.push('/genres')}
+            className="flex-none w-44 sm:w-52 h-24 sm:h-28 glass-card rounded-lg overflow-hidden group cursor-pointer flex flex-col items-center justify-center p-3 text-center transition shadow-md hover:shadow-xl bg-purple-950/20 hover:bg-purple-950/30 border border-purple-500/20 self-start"
+          >
+            <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center mb-1 group-hover:scale-110 transition-transform">
+              <Compass size={18} />
+            </div>
+            <span className="text-xs sm:text-sm font-bold text-white block">See All</span>
+            <span className="text-[10px] text-purple-300/80 font-mono mt-0.5 block">{POPULAR_GENRES.length} total</span>
+            <span className="mt-1 px-2 py-0.5 rounded-md bg-purple-500 text-white text-[9px] font-extrabold flex items-center gap-1 group-hover:bg-purple-400 transition">
+              View All <ChevronRight size={10} />
+            </span>
+          </div>
+        )}
       </div>
     </section>
   );

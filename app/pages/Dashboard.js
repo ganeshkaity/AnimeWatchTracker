@@ -3189,13 +3189,9 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
-  // Process sorting & filtering
+  // Process sorting & filtering (search does not filter the page sections; search only shows in navbar dropdown)
   const filteredAnimes = animes
     .filter(anime => {
-      const title = anime?.title || '';
-      const matchSearch = title.toLowerCase().includes((search || '').toLowerCase());
-      if (!matchSearch) return false;
-
       if (selectedGenre !== 'All') {
         let genres = [];
         if (Array.isArray(anime?.genres)) {
@@ -3348,36 +3344,24 @@ export default function Dashboard({ onSelectAnime }) {
       .slice(0, 25);
   }, [animes, mangas, audioStories, movies, webseriesList]);
 
-  // ── Manga List (Filtered by search & sorted new to old) ──────────────────────
+  // ── Manga List (Sorted new to old) ──────────────────────
   const sortedMangas = useMemo(() => {
-    return mangas
-      .filter((m) => {
-        if (!search || !search.trim()) return true;
-        return (m?.title || '').toLowerCase().includes(search.trim().toLowerCase());
-      })
-      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-  }, [mangas, search]);
+    return (mangas || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }, [mangas]);
 
-  // ── Audio Stories List (Filtered by search & sorted new to old) ──────────────
+  // ── Audio Stories List (Sorted new to old) ──────────────
   const sortedAudioStories = useMemo(() => {
-    return audioStories
-      .filter((a) => {
-        if (!search || !search.trim()) return true;
-        return (a?.title || '').toLowerCase().includes(search.trim().toLowerCase());
-      })
-      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-  }, [audioStories, search]);
+    return (audioStories || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }, [audioStories]);
 
-  // ── Movies List (Filtered by search, genre & status; recently watched first priority, then latest added) ──────
+  // ── Movies List (Filtered by genre & status; recently watched first priority, then latest added) ──────
   const sortedMovies = useMemo(() => {
     return (movies || [])
       .filter((m) => {
-        const q = (search || '').toLowerCase().trim();
-        const matchSearch = !q || (m?.title || '').toLowerCase().includes(q) || (m?.originalTitle || '').toLowerCase().includes(q);
         const matchGenre = selectedGenre === 'All' || (Array.isArray(m?.genres) && m.genres.some(g => (typeof g === 'string' ? g : g?.name || '').toLowerCase() === selectedGenre.toLowerCase()));
         const isWatched = Boolean(m.watched || m.completed || m.watchStatus === 'Completed' || (m.watchProgress && m.watchProgress >= 95));
         const matchFilter = filterBy === 'all' || (filterBy === 'completed' ? isWatched : !isWatched);
-        return matchSearch && matchGenre && matchFilter;
+        return matchGenre && matchFilter;
       })
       .sort((a, b) => {
         if (sortBy === 'alpha') return (a.title || '').localeCompare(b.title || '');
@@ -3402,18 +3386,16 @@ export default function Dashboard({ onSelectAnime }) {
         const bAdded = new Date(b.addedAt || b.createdAt || b.updatedAt || 0).getTime();
         return bAdded - aAdded;
       });
-  }, [movies, search, selectedGenre, filterBy, sortBy]);
+  }, [movies, selectedGenre, filterBy, sortBy]);
 
-  // ── Webseries List (Filtered by search, genre & status; recently watched first priority, then latest added) ──────
+  // ── Webseries List (Filtered by genre & status; recently watched first priority, then latest added) ──────
   const sortedWebseries = useMemo(() => {
     return (webseriesList || [])
       .filter((w) => {
-        const q = (search || '').toLowerCase().trim();
-        const matchSearch = !q || (w?.title || '').toLowerCase().includes(q) || (w?.originalTitle || '').toLowerCase().includes(q);
         const matchGenre = selectedGenre === 'All' || (Array.isArray(w?.genres) && w.genres.some(g => (typeof g === 'string' ? g : g?.name || '').toLowerCase() === selectedGenre.toLowerCase()));
         const isWatched = Boolean(w.watched || w.isWatched || w.watchStatus === 'Completed' || (w.progressPercent && w.progressPercent >= 100));
         const matchFilter = filterBy === 'all' || (filterBy === 'completed' ? isWatched : !isWatched);
-        return matchSearch && matchGenre && matchFilter;
+        return matchGenre && matchFilter;
       })
       .sort((a, b) => {
         if (sortBy === 'alpha') return (a.title || '').localeCompare(b.title || '');
@@ -3436,27 +3418,23 @@ export default function Dashboard({ onSelectAnime }) {
         const bAdded = new Date(b.addedAt || b.createdAt || b.updatedAt || 0).getTime();
         return bAdded - aAdded;
       });
-  }, [webseriesList, search, selectedGenre, filterBy, sortBy]);
+  }, [webseriesList, selectedGenre, filterBy, sortBy]);
 
-  // ── Watchlist List (Filtered by search & sorted new to old) ──────────────────
+  // ── Watchlist List (Sorted new to old) ──────────────────
   const sortedWatchlist = useMemo(() => {
     return (watchlist || [])
-      .filter((w) => {
-        if (!search || !search.trim()) return true;
-        const q = search.trim().toLowerCase();
-        return (w?.title || '').toLowerCase().includes(q) || (w?.originalTitle || '').toLowerCase().includes(q);
-      })
+      .slice()
       .sort((a, b) => new Date(b.addedAt || b.createdAt || b.updatedAt || 0) - new Date(a.addedAt || a.createdAt || a.updatedAt || 0));
-  }, [watchlist, search]);
+  }, [watchlist]);
 
   // ── Lazy-Load Chunking for Anime Catalog (Initial 24, +24 on scroll) ───────
   const [visibleCount, setVisibleCount] = useState(24);
   const loadMoreRef = useRef(null);
 
-  // Reset pagination count when search, filter, or sort changes
+  // Reset pagination count when filter or sort changes
   useEffect(() => {
     setVisibleCount(24);
-  }, [search, sortBy, filterBy, selectedGenre]);
+  }, [sortBy, filterBy, selectedGenre]);
 
   // IntersectionObserver to lazily load next batch when scrolling near bottom
   useEffect(() => {

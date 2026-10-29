@@ -4,16 +4,11 @@ import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useAuth } from './context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import ModernTrackerLoader from './components/ModernTrackerLoader';
 
 const Dashboard = dynamic(() => import('./pages/Dashboard'), {
-  loading: () => (
-    <div className="min-h-screen flex flex-col justify-center items-center gap-3">
-      <Loader2 className="animate-spin text-[#7c5cff]" size={36} />
-      <span className="text-xs uppercase tracking-widest text-gray-500 font-bold">Loading Tracker...</span>
-    </div>
-  ),
+  loading: () => <ModernTrackerLoader text="Loading Tracker..." />,
   ssr: false,
 });
 
@@ -42,12 +37,7 @@ export default function Home() {
   const [playerType, setPlayerType] = useState('mediaserver');
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex flex-col justify-center items-center gap-3">
-        <Loader2 className="animate-spin text-neonCyan" size={36} />
-        <span className="text-xs uppercase tracking-widest text-gray-500 font-bold">Booting Tracker...</span>
-      </div>
-    );
+    return <ModernTrackerLoader text="Booting Tracker..." />;
   }
 
   return (
