@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  Play, Pause, Volume2, VolumeX, Maximize, Minimize, Maximize2,
+  Play, Pause, Volume2, VolumeX, Maximize, Minimize, Maximize2, Minimize2,
   RotateCcw, RotateCw, SkipForward, SkipBack, Settings,
   AlertTriangle, RefreshCw, Subtitles, Check, Server,
   Sliders, Info, Activity, Radio, ChevronRight, ChevronLeft, X,
