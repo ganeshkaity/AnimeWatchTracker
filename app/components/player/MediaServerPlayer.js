@@ -256,6 +256,24 @@ export default function MediaServerPlayer({
     }
   }, [theatreMode, onTheatreModeChange]);
 
+  const [videoAspectRatio, setVideoAspectRatio] = useState(16 / 9);
+
+  const updateVideoAspectRatio = useCallback((width, height) => {
+    if (width && height && height > 0) {
+      const ratio = width / height;
+      if (isFinite(ratio) && ratio > 0.3 && ratio < 4) {
+        setVideoAspectRatio((prev) => (Math.abs(prev - ratio) > 0.005 ? ratio : prev));
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video && video.videoWidth && video.videoHeight) {
+      updateVideoAspectRatio(video.videoWidth, video.videoHeight);
+    }
+  }, [theatreMode, updateVideoAspectRatio]);
+
   const [mobilePlayerSettingsOpen, setMobilePlayerSettingsOpen] = useState(false);
   const lastActiveSubIndexRef = useRef(-1);
   const [scrubTime, setScrubTime] = useState(null);
@@ -764,6 +782,12 @@ export default function MediaServerPlayer({
                   videoRef.current._fakeDuration = mData.metadata.duration;
                 }
               }
+
+              if (mData.metadata.videoResolution?.width && mData.metadata.videoResolution?.height) {
+                updateVideoAspectRatio(mData.metadata.videoResolution.width, mData.metadata.videoResolution.height);
+              } else if (mData.metadata.width && mData.metadata.height) {
+                updateVideoAspectRatio(mData.metadata.width, mData.metadata.height);
+              }
             })
             .catch((mErr) => {
               console.warn('[MediaServerPlayer] Metadata fetch notice:', mErr);
@@ -1176,6 +1200,10 @@ export default function MediaServerPlayer({
     const video = videoRef.current;
     if (!video) return;
 
+    if (video.videoWidth && video.videoHeight) {
+      updateVideoAspectRatio(video.videoWidth, video.videoHeight);
+    }
+
     const vidDuration = video.duration;
     // CRITICAL: Remuxed piped streams return 1s or Infinity. Ignore values <= 4!
     if (!isNaN(vidDuration) && vidDuration > 4 && isFinite(vidDuration)) {
@@ -1213,6 +1241,10 @@ export default function MediaServerPlayer({
   };
 
   const handleCanPlay = () => {
+    const video = videoRef.current;
+    if (video && video.videoWidth && video.videoHeight) {
+      updateVideoAspectRatio(video.videoWidth, video.videoHeight);
+    }
     if (playerState === 'loading' || playerState === 'buffering') {
       setPlayerState('ready');
     }
@@ -1229,6 +1261,10 @@ export default function MediaServerPlayer({
   const handlePlaying = () => {
     setPlayerState('playing');
     updateBufferMetrics();
+    const video = videoRef.current;
+    if (video && video.videoWidth && video.videoHeight) {
+      updateVideoAspectRatio(video.videoWidth, video.videoHeight);
+    }
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     controlsTimeoutRef.current = setTimeout(() => {
@@ -1253,6 +1289,10 @@ export default function MediaServerPlayer({
   const handleTimeUpdate = () => {
     const video = videoRef.current;
     if (!video || isScrubbing) return;
+
+    if (video.videoWidth && video.videoHeight) {
+      updateVideoAspectRatio(video.videoWidth, video.videoHeight);
+    }
 
     const absNow = isRemuxing ? (streamStartOffset + video.currentTime) : video.currentTime;
     setCurrentTime(absNow);
@@ -1817,14 +1857,23 @@ export default function MediaServerPlayer({
 
           {/* 1. Video Player Container with Ambient Light Glow */}
           <div className={theatreMode
-            ? "fixed inset-0 z-50 bg-black flex items-center justify-center p-6 sm:p-10 md:p-14 overflow-hidden"
+            ? "fixed inset-0 z-50 bg-black flex items-center justify-center p-4 sm:p-6 md:p-10 overflow-hidden select-none"
             : "relative w-full aspect-video"
           }>
-            <div className={theatreMode ? "relative w-full max-w-6xl aspect-video max-h-[calc(100vh-6rem)] flex items-center justify-center" : "relative w-full h-full"}>
+            <div
+              className={theatreMode ? "relative flex items-center justify-center" : "relative w-full h-full"}
+              style={theatreMode ? {
+                aspectRatio: `${Number(videoAspectRatio || 16 / 9).toFixed(5)}`,
+                width: `min(calc(100vw - 5rem), calc((100vh - 5rem) * ${Number(videoAspectRatio || 16 / 9).toFixed(5)}))`,
+                height: `min(calc(100vh - 5rem), calc((100vw - 5rem) / ${Number(videoAspectRatio || 16 / 9).toFixed(5)}))`,
+                maxWidth: 'calc(100vw - 5rem)',
+                maxHeight: 'calc(100vh - 5rem)',
+              } : undefined}
+            >
               {/* Ambient Glow Canvas Backdrop (YouTube Style Two-Layer Ping-Pong Crossfade) */}
               {ambientMode && (
                 <div
-                  className="absolute -top-8 sm:-top-14 -inset-x-4 sm:-inset-x-8 -bottom-4 sm:-bottom-8 pointer-events-none -z-10 rounded-3xl overflow-hidden transition-opacity duration-700 ease-out"
+                  className={`absolute -top-8 sm:-top-14 -inset-x-4 sm:-inset-x-8 -bottom-4 sm:-bottom-8 pointer-events-none -z-10 overflow-hidden transition-opacity duration-700 ease-out ${theatreMode ? 'rounded-none' : 'rounded-3xl'}`}
                   style={{
                     opacity: playerState === 'playing' ? 0.75 : 0.3,
                     filter: 'blur(50px) saturate(2.0)',
@@ -1864,7 +1913,11 @@ export default function MediaServerPlayer({
                   setSpeedMenuOpen(false);
                 }
               }}
-              className="relative w-full h-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-white/10 group"
+              className={`relative w-full h-full bg-black overflow-hidden shadow-2xl group transition-all duration-200 ${
+                theatreMode
+                  ? 'rounded-none border-0'
+                  : 'rounded-2xl border border-white/10'
+              }`}
             >
 
               {/* HTML5 Native Video Tag */}
