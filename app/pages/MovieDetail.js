@@ -21,6 +21,7 @@ import {
 import MediaCard from '../components/dashboard/cards/MediaCard';
 import EditMovieModal from '../components/EditMovieModal';
 import OmdbRatingsBlock from '../components/OmdbRatingsBlock';
+import MovieDetailSkeleton from '../components/MovieDetailSkeleton';
 import { cleanTitleForOmdb } from '../utils/omdbUtils';
 import { toFanartBigPreview } from '../lib/fanartUtils';
 import { getEffectiveRating } from '../utils/ratingUtils';
@@ -935,14 +936,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
   const galleryHasImages = totalGalleryCount > 0;
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex flex-col justify-center items-center gap-3 bg-[#07090f] text-white">
-        <RefreshCw className="animate-spin text-amber-400" size={36} />
-        <span className="text-xs uppercase tracking-widest text-gray-500 font-bold">
-          Loading Movie Details...
-        </span>
-      </div>
-    );
+    return <MovieDetailSkeleton onBack={onBack || (() => router.push('/movies'))} />;
   }
 
   if (!movie) {
