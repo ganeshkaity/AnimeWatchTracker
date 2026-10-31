@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  Play, Pause, Volume2, VolumeX, Maximize, Minimize,
+  Play, Pause, Volume2, VolumeX, Maximize, Minimize, Maximize2,
   RotateCcw, RotateCw, SkipForward, SkipBack, Settings,
   AlertTriangle, RefreshCw, Subtitles, Check, Server,
   Sliders, Info, Activity, Radio, ChevronRight, ChevronLeft, X,
@@ -216,7 +216,22 @@ export default function MediaServerPlayer({
   });
   const [autoPlay, setAutoPlay] = useState(true);
   const [autoNext, setAutoNext] = useState(true);
-  const [autoSkipIntro, setAutoSkipIntro] = useState(false);
+  const [theatreMode, setTheatreMode] = useState(false);
+  const [mobilePlayerSettingsOpen, setMobilePlayerSettingsOpen] = useState(false);
+  const lastActiveSubIndexRef = useRef(-1);
+  const [scrubTime, setScrubTime] = useState(null);
+  const isDraggingSeekRef = useRef(false);
+
+  // Exit Theatre Mode on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && theatreMode) {
+        setTheatreMode(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [theatreMode]);
 
   const toggleAmbientMode = () => {
     setAmbientMode((prev) => {
@@ -1288,14 +1303,60 @@ export default function MediaServerPlayer({
     performSeek(absNow + delta);
   }, [isRemuxing, streamStartOffset, performSeek, triggerSeekAnimation]);
 
-  // Scrubbing on Seekbar
-  const handleSeekbarClick = (e) => {
-    if (!progressBarRef.current) return;
+  // Scrubbing on Seekbar with drag and scroll support
+  const getSeekTimeFromClientX = useCallback((clientX) => {
+    if (!progressBarRef.current) return null;
     const rect = progressBarRef.current.getBoundingClientRect();
-    const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    if (rect.width <= 0) return null;
+    const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const targetDur = duration || metadataDurationRef.current || episode?.durationSeconds || 1;
-    performSeek(pos * targetDur);
-  };
+    return pos * targetDur;
+  }, [duration, episode?.durationSeconds]);
+
+  const handleSeekStart = useCallback((e) => {
+    e.preventDefault();
+    isDraggingSeekRef.current = true;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const targetTime = getSeekTimeFromClientX(clientX);
+    if (targetTime !== null) {
+      setScrubTime(targetTime);
+    }
+
+    const onMove = (moveEvent) => {
+      if (!isDraggingSeekRef.current) return;
+      const moveX = moveEvent.touches ? moveEvent.touches[0].clientX : moveEvent.clientX;
+      const t = getSeekTimeFromClientX(moveX);
+      if (t !== null) {
+        setScrubTime(t);
+      }
+    };
+
+    const onEnd = (endEvent) => {
+      if (isDraggingSeekRef.current) {
+        isDraggingSeekRef.current = false;
+        const endX = endEvent.changedTouches
+          ? endEvent.changedTouches[0].clientX
+          : (endEvent.touches && endEvent.touches[0] ? endEvent.touches[0].clientX : endEvent.clientX);
+        const t = endX !== undefined ? getSeekTimeFromClientX(endX) : null;
+        setScrubTime((currentScrub) => {
+          const finalTime = t !== null ? t : currentScrub;
+          if (finalTime !== null) {
+            performSeek(finalTime);
+          }
+          return null;
+        });
+      }
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onEnd);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onEnd);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onEnd);
+    window.addEventListener('touchmove', onMove);
+    window.addEventListener('touchend', onEnd);
+  }, [getSeekTimeFromClientX, performSeek]);
 
   // Volume slider
   const handleVolumeChange = (newVol) => {
@@ -1478,7 +1539,8 @@ export default function MediaServerPlayer({
     }
   };
 
-  const progressPercent = effectiveDuration > 0 ? Math.min(100, (currentTime / effectiveDuration) * 100) : 0;
+  const displayCurrentTime = scrubTime !== null ? scrubTime : currentTime;
+  const progressPercent = effectiveDuration > 0 ? Math.min(100, Math.max(0, (displayCurrentTime / effectiveDuration) * 100)) : 0;
   const bufferPercent = effectiveDuration > 0 ? Math.min(100, (bufferedEnd / effectiveDuration) * 100) : 0;
 
   return (
@@ -1496,10 +1558,10 @@ export default function MediaServerPlayer({
       )}
 
       {/* Main Grid: Left Episodes Column + Right Player & Controls Column */}
-      <div className="max-w-[1700px] mx-auto p-2 sm:p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-5 relative z-10">
+      <div className="max-w-[1750px] mx-auto p-2 sm:p-4 md:p-6 flex flex-col lg:flex-row gap-5 relative z-10">
 
         {/* ── LEFT COLUMN: Folder-Wise Episode Selector (Transparent Liquid Glass) ─────────────────────── */}
-        <div className="lg:col-span-4 xl:col-span-3 transparent-liquid-glass rounded-2xl p-3.5 sm:p-4 flex flex-col h-[650px] lg:h-[760px] relative overflow-hidden shadow-2xl">
+        <div className={`w-full lg:w-64 xl:w-72 shrink-0 transparent-liquid-glass rounded-2xl p-3 sm:p-3.5 flex flex-col h-[520px] lg:h-[720px] relative overflow-hidden shadow-2xl ${theatreMode ? 'hidden' : 'flex'}`}>
 
           {/* Subtle Ambient Liquid Sheen Reflections */}
           <div className="absolute -top-16 -left-16 w-36 h-36 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -1657,36 +1719,52 @@ export default function MediaServerPlayer({
         </div>
 
         {/* ── RIGHT COLUMN: Video Player + Controls + Options Below ─────────── */}
-        <div className="lg:col-span-8 xl:col-span-9 flex flex-col space-y-4">
+        <div className="flex-1 min-w-0 flex flex-col space-y-4">
 
           {/* 1. Video Player Container with Ambient Light Glow */}
-          <div className="relative w-full aspect-video">
-            {/* Ambient Glow Canvas Backdrop (YouTube Style Two-Layer Ping-Pong Crossfade) */}
-            {ambientMode && (
-              <div
-                className="absolute -top-8 sm:-top-14 -inset-x-4 sm:-inset-x-8 -bottom-4 sm:-bottom-8 pointer-events-none -z-10 rounded-3xl overflow-hidden transition-opacity duration-700 ease-out"
-                style={{
-                  opacity: playerState === 'playing' ? 0.75 : 0.3,
-                  filter: 'blur(50px) saturate(2.0)',
-                  transform: 'scale(1.08)',
-                }}
+          <div className={theatreMode
+            ? "fixed inset-0 z-50 bg-black flex items-center justify-center p-6 sm:p-10 md:p-14 overflow-hidden"
+            : "relative w-full aspect-video"
+          }>
+            {/* Exit Theatre Mode Floating Button */}
+            {theatreMode && (
+              <button
+                onClick={() => setTheatreMode(false)}
+                className="absolute top-4 right-4 z-40 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/15 backdrop-blur-md transition flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95"
+                title="Exit Theatre Mode (Esc)"
               >
-                <canvas
-                  ref={ambientCanvasA}
-                  width={16}
-                  height={9}
-                  className="absolute inset-0 w-full h-full object-cover will-change-[opacity]"
-                  style={{ opacity: 1, zIndex: 1 }}
-                />
-                <canvas
-                  ref={ambientCanvasB}
-                  width={16}
-                  height={9}
-                  className="absolute inset-0 w-full h-full object-cover will-change-[opacity]"
-                  style={{ opacity: 0, zIndex: 1 }}
-                />
-              </div>
+                <Minimize2 size={13} />
+                <span>Exit Theatre</span>
+              </button>
             )}
+
+            <div className={theatreMode ? "relative w-full max-w-6xl aspect-video max-h-[calc(100vh-6rem)] flex items-center justify-center" : "relative w-full h-full"}>
+              {/* Ambient Glow Canvas Backdrop (YouTube Style Two-Layer Ping-Pong Crossfade) */}
+              {ambientMode && (
+                <div
+                  className="absolute -top-8 sm:-top-14 -inset-x-4 sm:-inset-x-8 -bottom-4 sm:-bottom-8 pointer-events-none -z-10 rounded-3xl overflow-hidden transition-opacity duration-700 ease-out"
+                  style={{
+                    opacity: playerState === 'playing' ? 0.75 : 0.3,
+                    filter: 'blur(50px) saturate(2.0)',
+                    transform: 'scale(1.08)',
+                  }}
+                >
+                  <canvas
+                    ref={ambientCanvasA}
+                    width={16}
+                    height={9}
+                    className="absolute inset-0 w-full h-full object-cover will-change-[opacity]"
+                    style={{ opacity: 1, zIndex: 1 }}
+                  />
+                  <canvas
+                    ref={ambientCanvasB}
+                    width={16}
+                    height={9}
+                    className="absolute inset-0 w-full h-full object-cover will-change-[opacity]"
+                    style={{ opacity: 0, zIndex: 1 }}
+                  />
+                </div>
+              )}
 
             <div
               ref={videoWrapperRef}
@@ -1846,9 +1924,9 @@ export default function MediaServerPlayer({
                 </div>
               )}
 
-              {/* Top Bar Vignette: File Name, Prev/Next Ep, Mark Complete */}
+              {/* Top Bar Vignette: File Name, Prev/Next Ep, Mark Complete (Hidden on mobile per request) */}
               <div
-                className={`absolute top-0 inset-x-0 pt-3 pb-8 px-3 sm:px-5 bg-gradient-to-b from-black/20 via-black/5 to-transparent transition-opacity duration-300 z-30 flex items-center justify-between gap-3 pointer-events-none ${showControls || playerState === 'paused' || playerState === 'idle'
+                className={`hidden sm:flex absolute top-0 inset-x-0 pt-3 pb-8 px-3 sm:px-5 bg-gradient-to-b from-black/20 via-black/5 to-transparent transition-opacity duration-300 z-30 items-center justify-between gap-3 pointer-events-none ${showControls || playerState === 'paused' || playerState === 'idle'
                   ? 'opacity-100'
                   : 'opacity-0'
                   }`}
@@ -1954,23 +2032,24 @@ export default function MediaServerPlayer({
                   {/* Yellow Seekbar */}
                   <div
                     ref={progressBarRef}
-                    onClick={handleSeekbarClick}
-                    className="relative h-1.5 hover:h-2.5 bg-white/20 rounded-full cursor-pointer transition-all duration-150 flex items-center"
+                    onMouseDown={handleSeekStart}
+                    onTouchStart={handleSeekStart}
+                    className="relative group/timeline h-1 hover:h-1.5 bg-white/20 rounded-full cursor-pointer transition-all duration-150 flex items-center select-none py-1.5 -my-1.5"
                   >
                     {/* Buffer Line */}
                     <div
-                      className="absolute left-0 top-0 bottom-0 bg-white/40 rounded-full pointer-events-none"
+                      className="absolute left-0 top-1.5 bottom-1.5 bg-white/40 rounded-full pointer-events-none"
                       style={{ width: `${bufferPercent}%` }}
                     />
                     {/* Yellow Active Progress Line */}
                     <div
-                      className="absolute left-0 top-0 bottom-0 bg-[#ffd000] rounded-full pointer-events-none shadow-[0_0_8px_rgba(255,208,0,0.8)]"
+                      className="absolute left-0 top-1.5 bottom-1.5 bg-[#ffd000] rounded-full pointer-events-none shadow-[0_0_8px_rgba(255,208,0,0.8)]"
                       style={{ width: `${progressPercent}%` }}
                     />
                     {/* Scrubber Knob */}
                     <div
-                      className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-[#ffd000] rounded-full shadow-md pointer-events-none"
-                      style={{ left: `calc(${progressPercent}% - 7px)` }}
+                      className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-[#ffd000] rounded-full shadow-[0_0_6px_rgba(255,208,0,0.9)] cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
+                      style={{ left: `calc(${progressPercent}% - 5px)` }}
                     />
                   </div>
 
@@ -1987,42 +2066,54 @@ export default function MediaServerPlayer({
                         {playerState === 'playing' ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
                       </button>
 
-                      {/* Volume with Hover Slider & Colored Percentage Fill */}
-                      <div className="flex items-center gap-1.5 group/vol">
+                      {/* Vertical Volume with Hover Slider */}
+                      <div className="relative group/vol flex items-center justify-center">
                         <button
                           onClick={toggleMute}
                           className="p-1 text-white hover:text-[#ffd000] transition cursor-pointer"
+                          title={isMuted ? "Unmute" : "Mute"}
                         >
                           {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
                         </button>
-                        <input
-                          type="range"
-                          min="0"
-                          max="1"
-                          step="0.05"
-                          value={isMuted ? 0 : volume}
-                          onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                          style={{
-                            background: `linear-gradient(to right, #ffd000 ${(isMuted ? 0 : volume) * 100}%, rgba(255, 255, 255, 0.2) ${(isMuted ? 0 : volume) * 100}%)`,
-                          }}
-                          className="w-16 sm:w-20 h-1.5 accent-[#ffd000] rounded-full appearance-none cursor-pointer hidden sm:inline-block"
-                        />
+
+                        {/* Vertical Popover Slider appearing on Hover */}
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 pb-3 hidden group-hover/vol:flex group-focus-within/vol:flex flex-col items-center z-50 pointer-events-auto">
+                          <div className="bg-[#0b0f19]/95 backdrop-blur-xl border border-white/20 rounded-2xl px-2.5 py-3 shadow-2xl flex flex-col items-center gap-2">
+                            <span className="text-[10px] font-mono font-bold text-gray-300">
+                              {Math.round((isMuted ? 0 : volume) * 100)}%
+                            </span>
+                            <div className="relative h-24 w-6 flex items-center justify-center">
+                              <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.02"
+                                value={isMuted ? 0 : volume}
+                                onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                                style={{
+                                  background: `linear-gradient(to right, #ffd000 ${(isMuted ? 0 : volume) * 100}%, rgba(255, 255, 255, 0.25) ${(isMuted ? 0 : volume) * 100}%)`,
+                                }}
+                                className="w-24 h-1.5 accent-[#ffd000] rounded-full appearance-none cursor-pointer -rotate-90 origin-center bg-white/20"
+                              />
+                            </div>
+                          </div>
+                        </div>
                       </div>
 
                       {/* Accurate Video Duration: 01:36 / 23:39 */}
                       <div className="font-mono text-xs sm:text-sm font-semibold tracking-wider text-gray-300 ml-1">
-                        <span>{formatTime(currentTime)}</span>
+                        <span>{formatTime(displayCurrentTime)}</span>
                         <span className="text-gray-500 mx-1.5">/</span>
                         <span className="text-gray-400">{formatTime(effectiveDuration)}</span>
                       </div>
                     </div>
 
-                    {/* Right Controls: Rewind 10, Forward 10, Speed Menu, CC, Sub Settings, PiP, Fullscreen */}
+                    {/* Right Controls: Rewind 10, Forward 10, Speed Menu, CC, Sub Settings, Theatre, PiP, Settings, Fullscreen */}
                     <div className="flex items-center gap-2 sm:gap-3">
                       {/* Rewind 10s */}
                       <button
                         onClick={() => seekRelative(-10)}
-                        className="p-1 text-gray-300 hover:text-[#ffd000] transition cursor-pointer flex items-center justify-center relative"
+                        className="hidden sm:flex p-1 text-gray-300 hover:text-[#ffd000] transition cursor-pointer items-center justify-center relative"
                         title="Rewind 10s (ArrowLeft / J)"
                       >
                         <RotateCcw size={19} />
@@ -2032,7 +2123,7 @@ export default function MediaServerPlayer({
                       {/* Forward 10s */}
                       <button
                         onClick={() => seekRelative(10)}
-                        className="p-1 text-gray-300 hover:text-[#ffd000] transition cursor-pointer flex items-center justify-center relative"
+                        className="hidden sm:flex p-1 text-gray-300 hover:text-[#ffd000] transition cursor-pointer items-center justify-center relative"
                         title="Forward 10s (ArrowRight / L)"
                       >
                         <RotateCw size={19} />
@@ -2040,7 +2131,7 @@ export default function MediaServerPlayer({
                       </button>
 
                       {/* Speed Selector (Presets with 0.5 gap + Slider) */}
-                      <div className="relative group/speedmenu">
+                      <div className="relative group/speedmenu hidden sm:block">
                         <button
                           onClick={() => setSpeedMenuOpen((prev) => !prev)}
                           className={`px-2 py-0.5 rounded text-xs font-mono font-bold border transition cursor-pointer flex items-center gap-1 ${playbackSpeed !== 1.0
@@ -2123,21 +2214,28 @@ export default function MediaServerPlayer({
                       {/* Closed Captions CC */}
                       <button
                         onClick={() => {
-                          if (subtitleTracks.length > 0) {
-                            setSelectedSubtitleIndex((prev) => (prev === -1 ? 0 : -1));
+                          if (selectedSubtitleIndex !== -1) {
+                            lastActiveSubIndexRef.current = selectedSubtitleIndex;
+                            setSelectedSubtitleIndex(-1);
+                          } else {
+                            const fallback = subtitleTracks.length > 0 ? (subtitleTracks[0]?.index ?? 0) : -1;
+                            const target = (lastActiveSubIndexRef.current !== -1 && subtitleTracks.some(t => t.index === lastActiveSubIndexRef.current))
+                              ? lastActiveSubIndexRef.current
+                              : fallback;
+                            setSelectedSubtitleIndex(target);
                           }
                         }}
-                        className={`px-1.5 py-0.5 rounded text-[11px] font-black border transition cursor-pointer ${selectedSubtitleIndex !== -1
+                        className={`hidden sm:inline-flex px-1.5 py-0.5 rounded text-[11px] font-black border transition cursor-pointer ${selectedSubtitleIndex !== -1
                           ? 'bg-[#ffd000] text-black border-[#ffd000]'
                           : 'bg-transparent text-gray-300 border-white/20 hover:text-white'
                           }`}
-                        title={subtitleTracks.length > 0 ? 'Toggle Subtitles' : 'No subtitles found'}
+                        title={subtitleTracks.length > 0 ? (selectedSubtitleIndex !== -1 ? 'Turn Off Subtitles' : 'Turn On Subtitles') : 'No subtitles found'}
                       >
                         CC
                       </button>
 
                       {/* Subtitle Appearance Settings Popover */}
-                      <div className="relative group/subsettings">
+                      <div className="relative group/subsettings hidden sm:block">
                         <button
                           onClick={() => {
                             setSubSettingsOpen((prev) => !prev);
@@ -2351,6 +2449,15 @@ export default function MediaServerPlayer({
                         )}
                       </div>
 
+                      {/* Theatre Mode Toggle (Desktop) */}
+                      <button
+                        onClick={() => setTheatreMode((prev) => !prev)}
+                        className={`hidden sm:flex p-1 transition cursor-pointer ${theatreMode ? 'text-[#f472b6]' : 'text-gray-300 hover:text-[#ffd000]'}`}
+                        title={theatreMode ? "Exit Theatre Mode" : "Theatre Mode"}
+                      >
+                        <Maximize2 size={19} />
+                      </button>
+
                       {/* Picture-in-Picture (Real PiP SVG Icon) */}
                       <button
                         onClick={togglePiP}
@@ -2361,6 +2468,15 @@ export default function MediaServerPlayer({
                           <rect x="2" y="4" width="20" height="16" rx="2" />
                           <rect x="12" y="10" width="8" height="7" rx="1" fill="currentColor" fillOpacity="0.35" />
                         </svg>
+                      </button>
+
+                      {/* Mobile-Only Settings Button (Requirement 5) */}
+                      <button
+                        onClick={() => setMobilePlayerSettingsOpen(true)}
+                        className="flex sm:hidden p-1 text-gray-300 hover:text-[#ffd000] transition cursor-pointer"
+                        title="Settings"
+                      >
+                        <Settings size={19} />
                       </button>
 
                       {/* Fullscreen (Anime video only!) */}
@@ -2377,12 +2493,13 @@ export default function MediaServerPlayer({
                 </div>
               </div>
             </div>
+            </div>
           </div>
 
           {/* 2. Below Video: Quick Controls Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 px-2 text-xs text-gray-300">
+          <div className={`flex flex-wrap items-center justify-between gap-3 px-2 text-xs text-gray-300 ${theatreMode ? 'hidden' : ''}`}>
 
-            {/* Left Toggles: Light, Ambient, Auto Play, Auto Next, Auto Skip Intro */}
+            {/* Left Toggles: Light, Ambient, Auto Play, Auto Next, Theatre Mode */}
             <div className="flex flex-wrap items-center gap-4">
 
               {/* Light On / Off Toggle */}
@@ -2432,21 +2549,15 @@ export default function MediaServerPlayer({
                 </span>
               </button>
 
-              {/* Auto Skip Intro (+85s) */}
+              {/* Theatre Mode Toggle (Replaced Auto Skip Intro) */}
               <button
-                onClick={() => {
-                  if (autoSkipIntro) {
-                    setAutoSkipIntro(false);
-                  } else {
-                    setAutoSkipIntro(true);
-                    seekRelative(85);
-                  }
-                }}
-                className="flex items-center gap-1 hover:text-white transition cursor-pointer font-medium"
+                onClick={() => setTheatreMode(prev => !prev)}
+                className="flex items-center gap-1.5 hover:text-white transition cursor-pointer font-medium"
               >
-                <span>Auto Skip Intro</span>
-                <span className={`font-bold ${autoSkipIntro ? 'text-[#f472b6]' : 'text-gray-400'}`}>
-                  {autoSkipIntro ? 'On' : 'Off'}
+                <Maximize2 size={14} className={theatreMode ? 'text-[#f472b6]' : 'text-gray-400'} />
+                <span>Theatre Mode</span>
+                <span className={`font-bold ${theatreMode ? 'text-[#f472b6]' : 'text-gray-400'}`}>
+                  {theatreMode ? 'On' : 'Off'}
                 </span>
               </button>
             </div>
@@ -2456,7 +2567,7 @@ export default function MediaServerPlayer({
               <button
                 onClick={() => prevEpisode && onEpisodeChange && onEpisodeChange(prevEpisode)}
                 disabled={!prevEpisode}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#181f30] hover:bg-[#252f48] text-white font-bold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl liquid-glass-item text-white font-bold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <SkipBack size={13} fill="currentColor" />
                 <span>Prev</span>
@@ -2465,7 +2576,7 @@ export default function MediaServerPlayer({
               <button
                 onClick={() => nextEpisode && onEpisodeChange && onEpisodeChange(nextEpisode)}
                 disabled={!nextEpisode}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#181f30] hover:bg-[#252f48] text-white font-bold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl liquid-glass-item text-white font-bold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <span>Next</span>
                 <SkipForward size={13} fill="currentColor" />
@@ -2475,8 +2586,8 @@ export default function MediaServerPlayer({
               <button
                 onClick={handleToggleWatched}
                 className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold transition cursor-pointer border ${isCurrentWatched
-                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 hover:bg-emerald-500/30'
-                  : 'bg-[#181f30] hover:bg-[#252f48] text-gray-300 border-white/10 hover:text-white'
+                  ? 'bg-emerald-500/25 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/35 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                  : 'liquid-glass-item text-gray-300 hover:text-white'
                   }`}
                 title={isCurrentWatched ? 'Click to mark as Unwatched' : 'Click to mark as Watched'}
               >
@@ -2493,21 +2604,26 @@ export default function MediaServerPlayer({
 
           </div>
 
-          {/* 3. Pink Banner: "You are watching Episode X" + SUB, AUDIO, SPEED Options */}
-          <div className="bg-[#0d111d] border border-white/10 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center gap-5 shadow-xl">
+          {/* 3. Pink Banner: "You are watching Episode X" + SUB, AUDIO, SPEED Options (Liquid Glass Effect with Ambient Sheen) */}
+          <div className={`transparent-liquid-glass rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center gap-5 shadow-2xl relative overflow-hidden ${theatreMode ? 'hidden' : ''}`}>
 
-            {/* Left Pink Card: "You are watching Episode X" */}
-            <div className="bg-[#fbcfe8] text-gray-900 px-5 py-3 rounded-2xl shrink-0 shadow-md">
-              <div className="text-[11px] font-semibold tracking-wide text-gray-700">
+            {/* Subtle Ambient Liquid Sheen Reflections inside SUB/AUDIO/SPEED section */}
+            <div className="absolute -top-16 -left-16 w-44 h-44 bg-purple-500/15 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-16 -right-16 w-44 h-44 bg-pink-500/15 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute top-1/2 left-1/3 -translate-y-1/2 w-64 h-32 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+
+            {/* Left Pink Card: "You are watching Episode X" with Liquid Glass Effect */}
+            <div className="bg-gradient-to-br from-pink-500/25 via-purple-500/20 to-pink-500/10 backdrop-blur-xl border border-pink-400/30 text-white px-5 py-3 rounded-2xl shrink-0 shadow-lg relative z-10">
+              <div className="text-[11px] font-bold tracking-wider uppercase text-pink-300">
                 You are watching
               </div>
-              <div className="text-base sm:text-lg font-black text-black">
+              <div className="text-base sm:text-lg font-black text-white">
                 Episode {visibleEpisodes.find(e => e.id === episode?.id)?.folderEpNum || episode?.episodeNumber || (currentIndex + 1)}
               </div>
             </div>
 
             {/* Right Controls: SUB, AUDIO, SPEED Pills */}
-            <div className="flex-1 space-y-3 w-full">
+            <div className="flex-1 space-y-3 w-full relative z-10">
 
               {/* SUBTITLE Options */}
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -2519,8 +2635,8 @@ export default function MediaServerPlayer({
                 <button
                   onClick={() => setSelectedSubtitleIndex(-1)}
                   className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer border ${selectedSubtitleIndex === -1
-                    ? 'bg-[#f472b6] text-black border-[#f472b6] shadow'
-                    : 'bg-[#181f30] text-gray-300 border-white/10 hover:text-white'
+                    ? 'bg-[#f472b6] text-black border-[#f472b6] shadow-[0_0_12px_rgba(244,114,182,0.6)] font-black'
+                    : 'liquid-glass-item text-gray-300 border-white/10 hover:text-white'
                     }`}
                 >
                   Off
@@ -2533,8 +2649,8 @@ export default function MediaServerPlayer({
                       key={track.index}
                       onClick={() => setSelectedSubtitleIndex(track.index)}
                       className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer border ${isSelected
-                        ? 'bg-[#f472b6] text-black border-[#f472b6] shadow'
-                        : 'bg-[#181f30] text-gray-300 border-white/10 hover:text-white'
+                        ? 'bg-[#f472b6] text-black border-[#f472b6] shadow-[0_0_12px_rgba(244,114,182,0.6)] font-black'
+                        : 'liquid-glass-item text-gray-300 border-white/10 hover:text-white'
                         }`}
                     >
                       {track.title || `Track ${track.index + 1}`}
@@ -2545,7 +2661,7 @@ export default function MediaServerPlayer({
                 {/* Subtitle Appearance Settings Button */}
                 <button
                   onClick={() => setSubSettingsOpen(true)}
-                  className="px-2.5 py-1 rounded-xl text-xs font-bold bg-[#181f30] hover:bg-[#252f48] text-gray-300 hover:text-white border border-white/10 flex items-center gap-1 transition cursor-pointer"
+                  className="px-2.5 py-1 rounded-xl text-xs font-bold liquid-glass-item text-gray-300 hover:text-white border border-white/10 flex items-center gap-1 transition cursor-pointer"
                   title="Subtitle Style & Sync Settings"
                 >
                   <SlidersHorizontal size={13} className="text-[#f472b6]" />
@@ -2567,8 +2683,8 @@ export default function MediaServerPlayer({
                 <button
                   onClick={() => setSelectedAudioIndex(null)}
                   className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer border ${selectedAudioIndex === null
-                    ? 'bg-cyan-400 text-black border-cyan-400 shadow'
-                    : 'bg-[#181f30] text-gray-300 border-white/10 hover:text-white'
+                    ? 'bg-cyan-400 text-black border-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.6)] font-black'
+                    : 'liquid-glass-item text-gray-300 border-white/10 hover:text-white'
                     }`}
                 >
                   Default
@@ -2581,8 +2697,8 @@ export default function MediaServerPlayer({
                       key={track.index}
                       onClick={() => setSelectedAudioIndex(track.index)}
                       className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer border ${isSelected
-                        ? 'bg-cyan-400 text-black border-cyan-400 shadow'
-                        : 'bg-[#181f30] text-gray-300 border-white/10 hover:text-white'
+                        ? 'bg-cyan-400 text-black border-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.6)] font-black'
+                        : 'liquid-glass-item text-gray-300 border-white/10 hover:text-white'
                         }`}
                     >
                       {track.title || `Audio ${track.index}`}
@@ -2605,8 +2721,8 @@ export default function MediaServerPlayer({
                       key={spd}
                       onClick={() => handleSpeedChange(spd, true)}
                       className={`px-2.5 py-0.5 rounded-xl text-xs font-bold transition cursor-pointer border ${isSelected
-                        ? 'bg-amber-400 text-black border-amber-400 shadow'
-                        : 'bg-[#181f30] text-gray-300 border-white/10 hover:text-white'
+                        ? 'bg-amber-400 text-black border-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.6)] font-black'
+                        : 'liquid-glass-item text-gray-300 border-white/10 hover:text-white'
                         }`}
                     >
                       {spd === 1 || spd === 2 || spd === 3 || spd === 5 || spd === 10 ? `${spd}x` : `${spd.toFixed(2)}x`}
@@ -2615,7 +2731,7 @@ export default function MediaServerPlayer({
                 })}
 
                 {/* Custom Speed Input up to 10x */}
-                <div className="flex items-center gap-1 bg-[#181f30] border border-white/10 rounded-xl px-2 py-0.5">
+                <div className="flex items-center gap-1 liquid-glass-item border border-white/10 rounded-xl px-2 py-0.5">
                   <span className="text-gray-400 text-[10px] font-semibold">Custom:</span>
                   <input
                     type="number"
@@ -2765,6 +2881,182 @@ export default function MediaServerPlayer({
           </div>
         );
       })()}
+
+      {/* ── Mobile Player Settings Bottom Sheet (Requirement 5) ─────────────── */}
+      {mobilePlayerSettingsOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:hidden pointer-events-auto"
+          onClick={() => setMobilePlayerSettingsOpen(false)}
+        >
+          <div
+            className="w-full bg-[#0d121f]/95 backdrop-blur-2xl border-t border-white/20 rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto space-y-4 shadow-2xl animate-in slide-in-from-bottom duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                <Settings size={18} className="text-[#ffd000]" />
+                <h3 className="text-sm font-bold text-white">Playback Settings</h3>
+              </div>
+              <button
+                onClick={() => setMobilePlayerSettingsOpen(false)}
+                className="p-1 rounded-full bg-white/10 text-gray-300 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Quick Seek 10s */}
+            <div className="flex items-center justify-between gap-3">
+              <button
+                onClick={() => seekRelative(-10)}
+                className="flex-1 py-2.5 rounded-xl liquid-glass-item flex items-center justify-center gap-2 text-xs font-bold text-gray-200 active:scale-95"
+              >
+                <RotateCcw size={16} />
+                <span>Rewind 10s</span>
+              </button>
+              <button
+                onClick={() => seekRelative(10)}
+                className="flex-1 py-2.5 rounded-xl liquid-glass-item flex items-center justify-center gap-2 text-xs font-bold text-gray-200 active:scale-95"
+              >
+                <RotateCw size={16} />
+                <span>Forward 10s</span>
+              </button>
+            </div>
+
+            {/* Speed Selector */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-gray-300 flex items-center gap-1.5">
+                  <Gauge size={14} className="text-amber-400" />
+                  Playback Speed
+                </span>
+                <span className="font-mono text-amber-400 font-bold">{playbackSpeed}x</span>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0].map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => handleSpeedChange(s, true)}
+                    className={`py-1.5 rounded-xl text-xs font-bold border transition ${playbackSpeed === s
+                      ? 'bg-amber-400 text-black border-amber-400 font-black'
+                      : 'liquid-glass-item text-gray-300 border-white/10'
+                      }`}
+                  >
+                    {s}x
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Subtitles Track Selection */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-gray-300 flex items-center gap-1.5">
+                  <Subtitles size={14} className="text-[#f472b6]" />
+                  Subtitles
+                </span>
+                <button
+                  onClick={() => {
+                    setSubSettingsOpen(true);
+                    setMobilePlayerSettingsOpen(false);
+                  }}
+                  className="text-[11px] text-pink-400 underline font-bold"
+                >
+                  Style &amp; Sync
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => setSelectedSubtitleIndex(-1)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${selectedSubtitleIndex === -1
+                    ? 'bg-[#f472b6] text-black border-[#f472b6] font-black'
+                    : 'liquid-glass-item text-gray-300 border-white/10'
+                    }`}
+                >
+                  Off
+                </button>
+                {subtitleTracks.map((tr) => (
+                  <button
+                    key={tr.index}
+                    onClick={() => setSelectedSubtitleIndex(tr.index)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${selectedSubtitleIndex === tr.index
+                      ? 'bg-[#f472b6] text-black border-[#f472b6] font-black'
+                      : 'liquid-glass-item text-gray-300 border-white/10'
+                      }`}
+                  >
+                    {tr.title || `Track ${tr.index + 1}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Audio Track Selection */}
+            <div className="space-y-2">
+              <span className="font-bold text-gray-300 text-xs flex items-center gap-1.5">
+                <Volume2 size={14} className="text-cyan-400" />
+                Audio Track
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => setSelectedAudioIndex(null)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${selectedAudioIndex === null
+                    ? 'bg-cyan-400 text-black border-cyan-400 font-black'
+                    : 'liquid-glass-item text-gray-300 border-white/10'
+                    }`}
+                >
+                  Default
+                </button>
+                {audioTracks.map((tr) => (
+                  <button
+                    key={tr.index}
+                    onClick={() => setSelectedAudioIndex(tr.index)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${selectedAudioIndex === tr.index
+                      ? 'bg-cyan-400 text-black border-cyan-400 font-black'
+                      : 'liquid-glass-item text-gray-300 border-white/10'
+                      }`}
+                  >
+                    {tr.title || `Audio ${tr.index}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Volume Slider in mobile drawer */}
+            <div className="space-y-2 pt-2 border-t border-white/10">
+              <div className="flex items-center justify-between text-xs font-bold text-gray-300">
+                <span className="flex items-center gap-1.5">
+                  {isMuted || volume === 0 ? <VolumeX size={15} /> : <Volume2 size={15} />}
+                  Volume
+                </span>
+                <span className="font-mono text-[#ffd000]">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={isMuted ? 0 : volume}
+                onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                style={{
+                  background: `linear-gradient(to right, #ffd000 ${(isMuted ? 0 : volume) * 100}%, rgba(255, 255, 255, 0.25) ${(isMuted ? 0 : volume) * 100}%)`,
+                }}
+                className="w-full h-2 accent-[#ffd000] rounded-full appearance-none cursor-pointer bg-white/20"
+              />
+            </div>
+
+            {/* Picture in Picture */}
+            <button
+              onClick={() => {
+                togglePiP();
+                setMobilePlayerSettingsOpen(false);
+              }}
+              className="w-full py-2.5 rounded-xl liquid-glass-item flex items-center justify-center gap-2 text-xs font-bold text-gray-200 active:scale-95"
+            >
+              <span>Picture-in-Picture (PiP)</span>
+            </button>
+          </div>
+        </div>
+      )}
 
     </div>
   );
