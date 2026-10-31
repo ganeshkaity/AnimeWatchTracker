@@ -220,6 +220,8 @@ export default function MediaServerPlayer({
   const [mobilePlayerSettingsOpen, setMobilePlayerSettingsOpen] = useState(false);
   const lastActiveSubIndexRef = useRef(-1);
   const [scrubTime, setScrubTime] = useState(null);
+  const [hoverSeekTime, setHoverSeekTime] = useState(null);
+  const [hoverSeekPos, setHoverSeekPos] = useState(null);
   const isDraggingSeekRef = useRef(false);
 
   // Exit Theatre Mode on Escape key
@@ -1320,6 +1322,14 @@ export default function MediaServerPlayer({
     const targetTime = getSeekTimeFromClientX(clientX);
     if (targetTime !== null) {
       setScrubTime(targetTime);
+      if (progressBarRef.current) {
+        const rect = progressBarRef.current.getBoundingClientRect();
+        if (rect.width > 0) {
+          const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+          setHoverSeekTime(targetTime);
+          setHoverSeekPos(ratio * 100);
+        }
+      }
     }
 
     const onMove = (moveEvent) => {
@@ -1328,6 +1338,14 @@ export default function MediaServerPlayer({
       const t = getSeekTimeFromClientX(moveX);
       if (t !== null) {
         setScrubTime(t);
+        if (progressBarRef.current) {
+          const rect = progressBarRef.current.getBoundingClientRect();
+          if (rect.width > 0) {
+            const ratio = Math.max(0, Math.min(1, (moveX - rect.left) / rect.width));
+            setHoverSeekTime(t);
+            setHoverSeekPos(ratio * 100);
+          }
+        }
       }
     };
 
@@ -1345,6 +1363,8 @@ export default function MediaServerPlayer({
           }
           return null;
         });
+        setHoverSeekTime(null);
+        setHoverSeekPos(null);
       }
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onEnd);
@@ -1357,6 +1377,24 @@ export default function MediaServerPlayer({
     window.addEventListener('touchmove', onMove);
     window.addEventListener('touchend', onEnd);
   }, [getSeekTimeFromClientX, performSeek]);
+
+  // Hover preview modal over timeline (Image 2)
+  const handleTimelineMouseMove = useCallback((e) => {
+    if (!progressBarRef.current) return;
+    const rect = progressBarRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const targetDur = duration || metadataDurationRef.current || episode?.durationSeconds || 1;
+    setHoverSeekTime(ratio * targetDur);
+    setHoverSeekPos(ratio * 100);
+  }, [duration, episode?.durationSeconds]);
+
+  const handleTimelineMouseLeave = useCallback(() => {
+    if (!isDraggingSeekRef.current) {
+      setHoverSeekTime(null);
+      setHoverSeekPos(null);
+    }
+  }, []);
 
   // Volume slider
   const handleVolumeChange = (newVol) => {
@@ -2034,22 +2072,45 @@ export default function MediaServerPlayer({
                     ref={progressBarRef}
                     onMouseDown={handleSeekStart}
                     onTouchStart={handleSeekStart}
-                    className="relative group/timeline h-1 hover:h-1.5 bg-white/20 rounded-full cursor-pointer transition-all duration-150 flex items-center select-none py-1.5 -my-1.5"
+                    onMouseMove={handleTimelineMouseMove}
+                    onMouseLeave={handleTimelineMouseLeave}
+                    className="relative group/timeline py-2.5 -my-2.5 flex items-center cursor-pointer select-none"
                   >
-                    {/* Buffer Line */}
-                    <div
-                      className="absolute left-0 top-1.5 bottom-1.5 bg-white/40 rounded-full pointer-events-none"
-                      style={{ width: `${bufferPercent}%` }}
-                    />
-                    {/* Yellow Active Progress Line */}
-                    <div
-                      className="absolute left-0 top-1.5 bottom-1.5 bg-[#ffd000] rounded-full pointer-events-none shadow-[0_0_8px_rgba(255,208,0,0.8)]"
-                      style={{ width: `${progressPercent}%` }}
-                    />
+                    {/* Time Preview Tooltip (Image 2) */}
+                    {hoverSeekTime !== null && hoverSeekPos !== null && (
+                      <div
+                        className="absolute bottom-full mb-2 pointer-events-none z-30 transition-all duration-75 flex flex-col items-center select-none"
+                        style={{
+                          left: `${Math.max(1.5, Math.min(98.5, hoverSeekPos))}%`,
+                          transform: 'translateX(-50%)',
+                        }}
+                      >
+                        <div className="bg-white text-black px-2 py-0.5 rounded shadow-xl text-[11px] font-bold font-mono tracking-tight leading-tight">
+                          {formatTime(hoverSeekTime)}
+                        </div>
+                        {/* Downward triangle/arrow pointing to timeline */}
+                        <div className="w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-white -mt-0.5" />
+                      </div>
+                    )}
+
+                    {/* Thin Background Track */}
+                    <div className="w-full h-[3px] group-hover/timeline:h-[5px] bg-white/20 rounded-full relative transition-all duration-150 overflow-hidden">
+                      {/* Buffer Line */}
+                      <div
+                        className="absolute left-0 top-0 bottom-0 bg-white/40 rounded-full pointer-events-none"
+                        style={{ width: `${bufferPercent}%` }}
+                      />
+                      {/* Yellow Active Progress Line (Watched Section) */}
+                      <div
+                        className="absolute left-0 top-0 bottom-0 bg-[#ffd000] rounded-full pointer-events-none shadow-[0_0_8px_rgba(255,208,0,0.85)]"
+                        style={{ width: `${progressPercent}%` }}
+                      />
+                    </div>
+
                     {/* Scrubber Knob */}
                     <div
-                      className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-[#ffd000] rounded-full shadow-[0_0_6px_rgba(255,208,0,0.9)] cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
-                      style={{ left: `calc(${progressPercent}% - 5px)` }}
+                      className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-[#ffd000] rounded-full shadow-[0_0_6px_rgba(255,208,0,0.95)] cursor-grab active:cursor-grabbing hover:scale-125 transition-transform pointer-events-none"
+                      style={{ left: `calc(${progressPercent}% - 6px)` }}
                     />
                   </div>
 
