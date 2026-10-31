@@ -632,7 +632,16 @@ export default function Dashboard({ onSelectAnime }) {
     if (!animes || animes.length === 0) return [];
 
     const scored = animes.map((local) => {
-      const localCover = getAnimeFolderCover(local) || local.coverUrl || local.posterUrl || local.posterPath || (local.thumbnailBase64 || null) || '';
+      // Prioritize the current set poster of the anime from personal library:
+      const localCover =
+        local.posterUrl ||
+        local.coverUrl ||
+        local.posterPath ||
+        (local.thumbnailBase64 && (local.thumbnailBase64.startsWith('http') || local.thumbnailBase64.startsWith('data:')) ? local.thumbnailBase64 : null) ||
+        (local.thumbnailPath ? `/api/image?path=${encodeURIComponent(local.thumbnailPath)}` : null) ||
+        getAnimeFolderCover(local) ||
+        local.coverImage ||
+        '';
       const resolvedRating = getEffectiveRating(local);
       const userRating = resolvedRating?.source === 'manual' ? resolvedRating.numeric : (local.rating ? parseFloat(local.rating) : null);
       const numericRating = (userRating !== null && !isNaN(userRating) && userRating > 0)

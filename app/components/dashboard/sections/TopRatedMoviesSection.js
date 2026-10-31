@@ -53,9 +53,6 @@ export default function TopRatedMoviesSection({
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-start sm:items-center gap-3 min-w-0">
-          <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-md shrink-0 mt-0.5 sm:mt-0">
-            <Star size={18} className="fill-amber-400 text-amber-400" />
-          </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-base sm:text-lg md:text-xl font-extrabold text-white tracking-wide">

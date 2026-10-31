@@ -25,12 +25,14 @@ export async function GET(request) {
       );
     }
 
-    // Clean title from common suffixes like (2020), [Dual Audio], etc.
+    // Clean title from common suffixes and special characters like :, _, ;, -, etc.
     const cleanTitle = rawTitle
       .replace(/\s*\(\d{4}\).*/i, '')
       .replace(/\s*\[.*?\].*/g, '')
       .replace(/\s*-\s*Season\s*\d+.*/i, '')
       .replace(/\s*Season\s*\d+.*/i, '')
+      .replace(/[:_;,\-–—/\\|~#@!*?()[\]{}"]/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
 
     // Map types if appropriate

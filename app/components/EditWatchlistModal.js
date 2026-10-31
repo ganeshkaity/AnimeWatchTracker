@@ -7,6 +7,7 @@ import {
   Youtube, Play, Video
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import OmdbRefetchSection from './OmdbRefetchSection';
 
 const extractYoutubeId = (urlOrId) => {
   if (!urlOrId) return '';
@@ -54,6 +55,8 @@ export default function EditWatchlistModal({
   const [newProviderPlan, setNewProviderPlan] = useState('needPlan');
   const [newProviderUrl, setNewProviderUrl] = useState('');
   const [saving, setSaving] = useState(false);
+  const [omdb, setOmdb] = useState(null);
+  const [imdbId, setImdbId] = useState('');
 
   useEffect(() => {
     if (item && isOpen) {
@@ -67,6 +70,8 @@ export default function EditWatchlistModal({
       setBackdropUrl(item.backdropUrl || '');
       setLogoUrl(item.logoUrl || '');
       setStreamProviders(item.streamProviders || { needPlan: [], rent: [], buy: [], free: [] });
+      setOmdb(item.omdb || null);
+      setImdbId(item.imdbId || item.omdb?.imdbId || '');
       const initVideos = Array.isArray(item.videos) ? item.videos : [];
       setAvailableVideos(initVideos);
       const curYt = extractYoutubeId(item.youtubeId || item.youtubeUrl || item.trailerKey || item.trailerUrl || item.youtubeTrailer);
@@ -77,6 +82,16 @@ export default function EditWatchlistModal({
   }, [item, isOpen]);
 
   if (!isOpen || !item) return null;
+
+  const handleOmdbUpdated = (data) => {
+    if (data?.omdb) {
+      setOmdb(data.omdb);
+      if (data.imdbId) setImdbId(data.imdbId);
+      if (data.imdbRating && !rating) {
+        setRating(String(data.imdbRating));
+      }
+    }
+  };
 
   const handleFetchVideos = async () => {
     setFetchingVideos(true);
@@ -197,6 +212,14 @@ export default function EditWatchlistModal({
         youtubeUrl: chosenUrl || item.youtubeUrl || '',
         youtubeId: chosenKey || item.youtubeId || '',
         videos: updatedVideos,
+        omdb: omdb || item.omdb || null,
+        imdbId: imdbId || omdb?.imdbId || item.imdbId || item.omdb?.imdbId || null,
+        imdbRating: omdb?.imdbRating || item.imdbRating || item.omdb?.imdbRating || null,
+        imdbVotes: omdb?.imdbVotes || item.imdbVotes || item.omdb?.imdbVotes || null,
+        rottenTomatoes: omdb?.rottenTomatoes || item.rottenTomatoes || item.omdb?.rottenTomatoes || null,
+        metacritic: omdb?.metacritic || item.metacritic || item.omdb?.metacritic || null,
+        awards: omdb?.awards || item.awards || item.omdb?.awards || null,
+        boxOffice: omdb?.boxOffice || item.boxOffice || item.omdb?.boxOffice || null,
         updatedAt: new Date().toISOString(),
       };
 
@@ -491,6 +514,16 @@ export default function EditWatchlistModal({
               </button>
             </div>
           </div>
+
+          {/* OMDB Refetch & Metadata Section */}
+          <OmdbRefetchSection
+            title={title}
+            year={year}
+            imdbId={imdbId}
+            type={item.contentType || item.type || 'movie'}
+            currentOmdb={omdb}
+            onOmdbUpdated={handleOmdbUpdated}
+          />
 
           <div className="pt-2 flex justify-end gap-2 border-t border-white/10">
             <button

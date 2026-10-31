@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { NAMING_PATTERNS } from '../utils/parser';
+import OmdbRefetchSection from './OmdbRefetchSection';
 
 const GENRES_LIST = [
   "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary",
@@ -53,6 +54,8 @@ export default function EditWebseriesModal({
   const [watchStatus, setWatchStatus] = useState('Plan to Watch');
   const [genres, setGenres] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const [omdb, setOmdb] = useState(null);
+  const [imdbId, setImdbId] = useState('');
 
   useEffect(() => {
     if (webseries) {
@@ -70,6 +73,8 @@ export default function EditWebseriesModal({
       setWatchStatus(webseries.watchStatus || (webseries.completed ? 'Completed' : 'Plan to Watch'));
       setGenres(Array.isArray(webseries.genres) ? webseries.genres : []);
       setAvailableLogos(Array.isArray(webseries?.images?.logos) ? webseries.images.logos : []);
+      setOmdb(webseries.omdb || null);
+      setImdbId(webseries.imdbId || webseries.omdb?.imdbId || '');
 
       const initVideos = Array.isArray(webseries?.videos) ? webseries.videos : [];
       setAvailableVideos(initVideos);
@@ -90,6 +95,16 @@ export default function EditWebseriesModal({
   }, [webseries]);
 
   if (!isOpen || !webseries) return null;
+
+  const handleOmdbUpdated = (data) => {
+    if (data?.omdb) {
+      setOmdb(data.omdb);
+      if (data.imdbId) setImdbId(data.imdbId);
+      if (data.imdbRating && !rating) {
+        setRating(String(data.imdbRating));
+      }
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -121,6 +136,14 @@ export default function EditWebseriesModal({
         completed: watchStatus === 'Completed',
         watched: watchStatus === 'Completed',
         genres: genres.length > 0 ? genres : ['Drama'],
+        omdb: omdb || webseries.omdb || null,
+        imdbId: imdbId || omdb?.imdbId || webseries.imdbId || webseries.omdb?.imdbId || null,
+        imdbRating: omdb?.imdbRating || webseries.imdbRating || webseries.omdb?.imdbRating || null,
+        imdbVotes: omdb?.imdbVotes || webseries.imdbVotes || webseries.omdb?.imdbVotes || null,
+        rottenTomatoes: omdb?.rottenTomatoes || webseries.rottenTomatoes || webseries.omdb?.rottenTomatoes || null,
+        metacritic: omdb?.metacritic || webseries.metacritic || webseries.omdb?.metacritic || null,
+        awards: omdb?.awards || webseries.awards || webseries.omdb?.awards || null,
+        boxOffice: omdb?.boxOffice || webseries.boxOffice || webseries.omdb?.boxOffice || null,
         playableYoutubeId: parsedYtKey || null,
         playableYoutubeUrl: parsedYtKey ? `https://www.youtube.com/watch?v=${parsedYtKey}` : (customYoutubeInput.trim() || null),
         updatedAt: new Date().toISOString(),
@@ -447,6 +470,16 @@ export default function EditWebseriesModal({
                 </div>
               </div>
             )}
+
+            {/* OMDB Refetch & Metadata Section */}
+            <OmdbRefetchSection
+              title={title}
+              year={year}
+              imdbId={imdbId}
+              type="series"
+              currentOmdb={omdb}
+              onOmdbUpdated={handleOmdbUpdated}
+            />
           </form>
         </div>
 

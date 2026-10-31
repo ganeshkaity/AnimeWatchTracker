@@ -68,15 +68,17 @@ export const resolveHeroImg = (urlOrPath) => {
 
 export const getAnimeFolderCover = (a) => {
   if (!a) return '';
-  let cover = '';
-  if (a.thumbnailBase64) {
-    cover = (a.thumbnailBase64.startsWith('http') || a.thumbnailBase64.startsWith('data:'))
-      ? a.thumbnailBase64
-      : `/api/image?path=${encodeURIComponent(a.thumbnailBase64)}`;
-  } else if (a.thumbnailPath) {
-    cover = `/api/image?path=${encodeURIComponent(a.thumbnailPath)}`;
-  } else {
-    cover = a.coverImage || a.coverUrl || a.image || '';
+  let cover = a.posterUrl || a.posterPath || a.coverUrl || '';
+  if (!cover) {
+    if (a.thumbnailBase64) {
+      cover = (a.thumbnailBase64.startsWith('http') || a.thumbnailBase64.startsWith('data:'))
+        ? a.thumbnailBase64
+        : `/api/image?path=${encodeURIComponent(a.thumbnailBase64)}`;
+    } else if (a.thumbnailPath) {
+      cover = `/api/image?path=${encodeURIComponent(a.thumbnailPath)}`;
+    } else {
+      cover = a.coverImage || a.image || '';
+    }
   }
   return toFanartBigPreview(cover);
 };

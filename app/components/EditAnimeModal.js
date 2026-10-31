@@ -7,6 +7,7 @@ import {
   Trash2, Search, Check, Youtube, Play, Video, FolderTree
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import OmdbRefetchSection from './OmdbRefetchSection';
 
 const ANIME_GENRES = [
   "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror",
@@ -34,6 +35,8 @@ export default function EditAnimeModal({
   const [status, setStatus] = useState('Ongoing');
   const [genres, setGenres] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const [omdb, setOmdb] = useState(null);
+  const [imdbId, setImdbId] = useState('');
 
   // Online Search & Refetch State
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,10 +60,22 @@ export default function EditAnimeModal({
       setLogoUrl(anime.logoUrl || '');
       setStatus(anime.status || 'Ongoing');
       setGenres(Array.isArray(anime.genres) ? anime.genres : []);
+      setOmdb(anime.omdb || null);
+      setImdbId(anime.imdbId || anime.omdb?.imdbId || '');
     }
   }, [anime]);
 
   if (!isOpen || !anime) return null;
+
+  const handleOmdbUpdated = (data) => {
+    if (data?.omdb) {
+      setOmdb(data.omdb);
+      if (data.imdbId) setImdbId(data.imdbId);
+      if (data.imdbRating && !rating) {
+        setRating(String(data.imdbRating));
+      }
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -87,6 +102,14 @@ export default function EditAnimeModal({
         logoUrl: logoUrl.trim() || null,
         status,
         genres: genres.length > 0 ? genres : ['Anime'],
+        omdb: omdb || anime.omdb || null,
+        imdbId: imdbId || omdb?.imdbId || anime.imdbId || anime.omdb?.imdbId || null,
+        imdbRating: omdb?.imdbRating || anime.imdbRating || anime.omdb?.imdbRating || null,
+        imdbVotes: omdb?.imdbVotes || anime.imdbVotes || anime.omdb?.imdbVotes || null,
+        rottenTomatoes: omdb?.rottenTomatoes || anime.rottenTomatoes || anime.omdb?.rottenTomatoes || null,
+        metacritic: omdb?.metacritic || anime.metacritic || anime.omdb?.metacritic || null,
+        awards: omdb?.awards || anime.awards || anime.omdb?.awards || null,
+        boxOffice: omdb?.boxOffice || anime.boxOffice || anime.omdb?.boxOffice || null,
         updatedAt: new Date().toISOString(),
       };
 
@@ -504,6 +527,16 @@ export default function EditAnimeModal({
                 })}
               </div>
             </div>
+
+            {/* OMDB Refetch & Metadata Section */}
+            <OmdbRefetchSection
+              title={englishTitle || title}
+              year={year}
+              imdbId={imdbId}
+              type="series"
+              currentOmdb={omdb}
+              onOmdbUpdated={handleOmdbUpdated}
+            />
           </form>
         </div>
 

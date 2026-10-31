@@ -30,9 +30,6 @@ export default function ContinueWatchingSection({
       <section id="continue-watching" className="space-y-4 scroll-mt-24">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-[#7c5cff]/10 border border-[#7c5cff]/20 text-[#7c5cff]">
-              <Play size={20} />
-            </div>
             <div>
               <h2 className="text-xl font-extrabold tracking-wide text-white flex items-center gap-2">
                 <span>Continue Watching</span>

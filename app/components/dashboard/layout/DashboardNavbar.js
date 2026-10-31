@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -43,26 +43,55 @@ export default function DashboardNavbar({
 }) {
   const router = useRouter();
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const desktopSearchRef = useRef(null);
+  const mobileSearchRef = useRef(null);
   const actionModalTimerRef = useRef(null);
   const actionModalRef = useRef(null);
 
+  // Close search results dropdown/modal when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      const inDesktop = desktopSearchRef.current && desktopSearchRef.current.contains(e.target);
+      const inMobile = mobileSearchRef.current && mobileSearchRef.current.contains(e.target);
+      if (!inDesktop && !inMobile) {
+        setIsSearchOpen(false);
+      }
+    };
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsSearchOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   return (
     <header
-      className={`fixed top-0 left-0 right-0 z-50 px-4 md:px-8 py-3.5 flex items-center justify-between transition-all duration-500 ease-out ${isScrolled
+      className={`fixed top-0 left-0 right-0 z-50 px-3 sm:px-4 md:px-8 py-2.5 sm:py-3.5 flex items-center justify-between transition-all duration-500 ease-out ${isScrolled
         ? 'bg-[#07090f]/80 backdrop-blur-xl border-b border-white/10 shadow-lg shadow-black/30'
         : 'bg-transparent backdrop-blur-none border-b border-transparent shadow-none'
         }`}
     >
       {/* Left Brand */}
-      <div className={`flex items-center gap-6 ${mobileSearchOpen ? 'hidden' : 'flex'}`}>
-        <Link href="/" className="flex items-center gap-2.5 group">
+      <div className={`flex items-center gap-6 ${mobileSearchOpen ? 'hidden' : 'flex'} shrink-0 min-w-0`}>
+        <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group shrink-0">
           <img
             src="/logo.png"
             alt="AnimeWatch Logo"
-            className="h-10 w-auto group-hover:scale-105 transition-transform duration-300 drop-shadow-[0_0_10px_rgba(124,92,255,0.5)]"
+            className="h-8 sm:h-9 md:h-10 w-auto group-hover:scale-105 transition-transform duration-300 drop-shadow-[0_0_10px_rgba(124,92,255,0.5)] shrink-0"
           />
-          <div>
-            <span className="text-xl font-extrabold tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-white via-gray-100 to-gray-400">
+          <div className="shrink-0">
+            <span className="text-base sm:text-lg md:text-xl font-extrabold tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-white via-gray-100 to-gray-400 whitespace-nowrap">
               GANESH<span className="text-[#7c5cff]">SPACE</span>
             </span>
           </div>
@@ -79,29 +108,44 @@ export default function DashboardNavbar({
               className="h-9 w-auto"
             />
           </Link>
-          <div className="relative flex-1">
+          <div ref={mobileSearchRef} className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/80 pointer-events-none z-10" size={15} />
             <input
               type="text"
               autoFocus
               placeholder="Search titles or names..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => {
+                if (search.trim().length > 0) setIsSearchOpen(true);
+              }}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setIsSearchOpen(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && search.trim()) {
+                  router.push(`/results?filter=${encodeURIComponent(search.trim())}`);
+                  setIsSearchOpen(false);
+                }
+              }}
               className="w-full pl-9 pr-8 py-2 text-xs rounded-full bg-[#111827] border border-white/20 text-white placeholder-gray-400 focus:outline-none focus:border-[#7c5cff]"
             />
             {search.length > 0 && (
               <button
                 type="button"
-                onClick={() => setSearch('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-white/10 text-gray-300 hover:text-white"
+                onClick={() => {
+                  setSearch('');
+                  setIsSearchOpen(false);
+                }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-white/10 text-gray-300 hover:text-white cursor-pointer"
               >
                 <X size={12} />
               </button>
             )}
 
             {/* Mobile Search Results Dropdown */}
-            {search.trim().length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-[#111827] border border-white/15 rounded-2xl shadow-2xl z-50 max-h-[75vh] overflow-y-auto no-scrollbar">
+            {search.trim().length > 0 && isSearchOpen && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-[#0e131f]/95 backdrop-blur-xl border border-white/15 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.85)] z-50 max-h-[min(65dvh,calc(100dvh-4.5rem))] overflow-y-auto custom-scrollbar overscroll-contain">
                 {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 && autocompleteMovieMatches.length === 0 && autocompleteWebseriesMatches.length === 0 && autocompleteWatchlistMatches.length === 0 ? (
                   <div className="p-4 text-center text-xs text-gray-400">
                     No anime, manga, audio story, movie, webseries, or watchlist matches found
@@ -328,21 +372,36 @@ export default function DashboardNavbar({
       )}
 
       {/* Right Actions & Search */}
-      <div className={`items-center gap-3 ${mobileSearchOpen ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`items-center gap-1.5 sm:gap-2 md:gap-3 shrink-0 ${mobileSearchOpen ? 'hidden md:flex' : 'flex'}`}>
         {/* Quick Search Input with Liquid-Glass Effect */}
-        <div className="relative hidden md:block w-56 lg:w-72 group">
+        <div ref={desktopSearchRef} className="relative hidden md:block w-56 lg:w-72 group">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/80 group-hover:text-white group-focus-within:text-cyan-400 pointer-events-none z-10 transition-colors drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]" size={16} />
           <input
             type="text"
             placeholder="Search titles or names..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onFocus={() => {
+              if (search.trim().length > 0) setIsSearchOpen(true);
+            }}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setIsSearchOpen(true);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && search.trim()) {
+                router.push(`/results?filter=${encodeURIComponent(search.trim())}`);
+                setIsSearchOpen(false);
+              }
+            }}
             className="w-full pl-10 pr-9 py-2 text-xs rounded-full liquid-glass-search placeholder-gray-400/80 focus:w-80 transition-all duration-300"
           />
           {search.length > 0 && (
             <button
               type="button"
-              onClick={() => setSearch('')}
+              onClick={() => {
+                setSearch('');
+                setIsSearchOpen(false);
+              }}
               className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white transition cursor-pointer z-10"
               title="Clear search"
             >
@@ -350,8 +409,8 @@ export default function DashboardNavbar({
             </button>
           )}
           {/* Search Recommendations Dropdown */}
-          {search.trim().length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-[#111827]/95 backdrop-blur-md border border-white/10 rounded-2xl shadow-2xl z-50 max-h-96 overflow-y-auto no-scrollbar">
+          {search.trim().length > 0 && isSearchOpen && (
+            <div className="absolute top-full right-0 w-80 lg:w-96 mt-2 bg-[#0e131f]/95 backdrop-blur-xl border border-white/15 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.85)] z-50 max-h-[min(26rem,calc(100dvh-5.5rem))] overflow-y-auto custom-scrollbar overscroll-contain">
               {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 && autocompleteMovieMatches.length === 0 && autocompleteWebseriesMatches.length === 0 && autocompleteWatchlistMatches.length === 0 ? (
                 <div className="p-4 text-center text-xs text-gray-400">
                   No anime, manga, audio story, movie, webseries, or watchlist matches found
@@ -366,6 +425,7 @@ export default function DashboardNavbar({
                         onClick={() => {
                           router.push(`/watchlist/${item.id}`);
                           setSearch('');
+                          setIsSearchOpen(false);
                         }}
                         className="flex items-center gap-3 p-2 rounded-xl hover:bg-amber-950/40 border border-amber-500/20 transition cursor-pointer"
                       >
@@ -406,6 +466,7 @@ export default function DashboardNavbar({
                         onClick={() => {
                           router.push(`/webseries/${ws.id}`);
                           setSearch('');
+                          setIsSearchOpen(false);
                         }}
                         className="flex items-center gap-3 p-2 rounded-xl hover:bg-cyan-950/40 border border-cyan-500/20 transition cursor-pointer"
                       >
@@ -436,6 +497,7 @@ export default function DashboardNavbar({
                         onClick={() => {
                           router.push(`/movies/${mov.id}`);
                           setSearch('');
+                          setIsSearchOpen(false);
                         }}
                         className="flex items-center gap-3 p-2 rounded-xl hover:bg-amber-950/40 border border-amber-500/20 transition cursor-pointer"
                       >
@@ -466,6 +528,7 @@ export default function DashboardNavbar({
                         onClick={() => {
                           router.push(`/audio-story/${a.id}`);
                           setSearch('');
+                          setIsSearchOpen(false);
                         }}
                         className="flex items-center gap-3 p-2 rounded-xl hover:bg-cyan-950/40 border border-cyan-500/20 transition cursor-pointer"
                       >
@@ -496,6 +559,7 @@ export default function DashboardNavbar({
                         onClick={() => {
                           router.push(`/manga/${m.id}`);
                           setSearch('');
+                          setIsSearchOpen(false);
                         }}
                         className="flex items-center gap-3 p-2 rounded-xl hover:bg-purple-950/40 border border-purple-500/20 transition cursor-pointer"
                       >
@@ -527,6 +591,7 @@ export default function DashboardNavbar({
                         onClick={() => {
                           onSelectAnime(anime.id);
                           setSearch('');
+                          setIsSearchOpen(false);
                         }}
                         className="flex items-center gap-3 p-2 rounded-xl hover:bg-white/5 transition cursor-pointer"
                       >
@@ -901,10 +966,10 @@ export default function DashboardNavbar({
             if (quickActionsOpen) setQuickActionsOpen(false);
             if (mobileMenuOpen) setMobileMenuOpen(false);
           }}
-          className="p-2 rounded-lg bg-white/5 text-gray-300 hover:text-white transition cursor-pointer md:hidden"
+          className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer md:hidden active:scale-95 shrink-0"
           title="Search"
         >
-          <Search size={20} />
+          <Search size={16} />
         </button>
 
         {/* Quick Actions Dropdown Trigger for Mobile */}
@@ -914,11 +979,11 @@ export default function DashboardNavbar({
             if (mobileMenuOpen) setMobileMenuOpen(false);
             if (mobileSearchOpen) setMobileSearchOpen(false);
           }}
-          className={`p-2 rounded-lg bg-white/5 text-gray-300 hover:text-white transition cursor-pointer md:hidden relative ${quickActionsOpen ? 'text-[#7c5cff] bg-[#7c5cff]/10 border border-[#7c5cff]/30' : ''
+          className={`w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer md:hidden relative active:scale-95 shrink-0 ${quickActionsOpen ? 'text-[#7c5cff] bg-[#7c5cff]/10 border-[#7c5cff]/40' : ''
             }`}
           title="Quick Actions"
         >
-          {quickActionsOpen ? <X size={20} /> : <SlidersHorizontal size={20} />}
+          {quickActionsOpen ? <X size={16} /> : <SlidersHorizontal size={16} />}
         </button>
 
         {/* Hamburger Menu Trigger */}
@@ -928,10 +993,10 @@ export default function DashboardNavbar({
             if (quickActionsOpen) setQuickActionsOpen(false);
             if (mobileSearchOpen) setMobileSearchOpen(false);
           }}
-          className="p-2 rounded-lg bg-white/5 text-gray-300 hover:text-white transition cursor-pointer"
+          className="w-8 h-8 sm:w-9 sm:h-9 md:w-auto md:h-auto p-1.5 sm:p-2 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shrink-0"
           title="Menu"
         >
-          {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+          {mobileMenuOpen ? <X size={16} className="md:w-5 md:h-5" /> : <Menu size={16} className="md:w-5 md:h-5" />}
         </button>
       </div>
 
@@ -943,7 +1008,7 @@ export default function DashboardNavbar({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="absolute top-16 right-4 z-50 w-56 bg-[#0c101b] rounded-2xl p-4 shadow-2xl border border-white/15 flex flex-col gap-2.5 md:hidden"
+            className="absolute top-14 sm:top-16 right-3 sm:right-4 z-50 w-56 bg-[#0c101b] rounded-2xl p-4 shadow-2xl border border-white/15 flex flex-col gap-2.5 md:hidden"
           >
             <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Quick Actions</span>
 

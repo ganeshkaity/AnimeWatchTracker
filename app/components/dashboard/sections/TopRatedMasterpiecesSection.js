@@ -27,9 +27,6 @@ export default function TopRatedMasterpiecesSection({
     <section id="top-rated-masterpieces" ref={lazyTopRatedRef} className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
-            <Star size={20} className="fill-amber-400" />
-          </div>
           <div>
             <h2 className="text-xl font-extrabold tracking-wide text-white flex items-center gap-2">
               Top Rated Anime

@@ -29,9 +29,6 @@ export default function MoviesSection({
     <section id="movies" className="space-y-4 scroll-mt-24">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
-            <Film size={20} />
-          </div>
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-extrabold tracking-wide text-white">Movies</h2>

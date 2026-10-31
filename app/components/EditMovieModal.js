@@ -7,6 +7,7 @@ import {
   Trash2, Search, Check, Youtube, Play, Video
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import OmdbRefetchSection from './OmdbRefetchSection';
 
 const GENRES_LIST = [
   "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary",
@@ -58,6 +59,8 @@ export default function EditMovieModal({
   const [genres, setGenres] = useState([]);
   const [verifyingFile, setVerifyingFile] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [omdb, setOmdb] = useState(null);
+  const [imdbId, setImdbId] = useState('');
 
   useEffect(() => {
     if (movie) {
@@ -77,6 +80,8 @@ export default function EditMovieModal({
       setGenres(Array.isArray(movie.genres) ? movie.genres : []);
       setAvailableLogos(Array.isArray(movie?.images?.logos) ? movie.images.logos : []);
       setLogoFetchMsg('');
+      setOmdb(movie.omdb || null);
+      setImdbId(movie.imdbId || movie.omdb?.imdbId || '');
       const initVideos = Array.isArray(movie?.videos) ? movie.videos : [];
       setAvailableVideos(initVideos);
       const curYtKey = extractYoutubeId(movie.youtubeId || movie.youtubeUrl || movie.trailerKey || movie.trailerUrl || (movie.isYouTube ? movie.localFilePath : ''));
@@ -227,6 +232,16 @@ export default function EditMovieModal({
     setSelectedVideoKey(key || '');
   };
 
+  const handleOmdbUpdated = (data) => {
+    if (data?.omdb) {
+      setOmdb(data.omdb);
+      if (data.imdbId) setImdbId(data.imdbId);
+      if (data.imdbRating && !rating) {
+        setRating(String(data.imdbRating));
+      }
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -294,6 +309,14 @@ export default function EditMovieModal({
         completed: isCompleted,
         watchProgress: isCompleted ? 100 : (watchStatus === 'Not Started' ? 0 : movie.watchProgress),
         genres,
+        omdb: omdb || movie.omdb || null,
+        imdbId: imdbId || omdb?.imdbId || movie.imdbId || movie.omdb?.imdbId || null,
+        imdbRating: omdb?.imdbRating || movie.imdbRating || movie.omdb?.imdbRating || null,
+        imdbVotes: omdb?.imdbVotes || movie.imdbVotes || movie.omdb?.imdbVotes || null,
+        rottenTomatoes: omdb?.rottenTomatoes || movie.rottenTomatoes || movie.omdb?.rottenTomatoes || null,
+        metacritic: omdb?.metacritic || movie.metacritic || movie.omdb?.metacritic || null,
+        awards: omdb?.awards || movie.awards || movie.omdb?.awards || null,
+        boxOffice: omdb?.boxOffice || movie.boxOffice || movie.omdb?.boxOffice || null,
         updatedAt: new Date().toISOString(),
       };
 
@@ -815,6 +838,16 @@ export default function EditMovieModal({
                 })}
               </div>
             </div>
+
+            {/* OMDB Refetch & Metadata Section */}
+            <OmdbRefetchSection
+              title={title}
+              year={year}
+              imdbId={imdbId}
+              type="movie"
+              currentOmdb={omdb}
+              onOmdbUpdated={handleOmdbUpdated}
+            />
 
             {/* Buttons */}
             <div className="flex justify-end gap-3 pt-4 border-t border-white/10">

@@ -21,6 +21,7 @@ import {
 import MediaCard from '../components/dashboard/cards/MediaCard';
 import EditMovieModal from '../components/EditMovieModal';
 import OmdbRatingsBlock from '../components/OmdbRatingsBlock';
+import { cleanTitleForOmdb } from '../utils/omdbUtils';
 import { toFanartBigPreview } from '../lib/fanartUtils';
 import { getEffectiveRating } from '../utils/ratingUtils';
 
@@ -335,8 +336,14 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
     omdbFetchedRef.current = true;
     setOmdbLoading(true);
 
+    const cleanTitle = cleanTitleForOmdb(movie.title);
+    if (!cleanTitle && !movie.imdbId && !movie.imdb_id) {
+      setOmdbLoading(false);
+      return;
+    }
+
     const params = new URLSearchParams();
-    params.set('title', movie.title);
+    if (cleanTitle) params.set('title', cleanTitle);
     if (movie.year) params.set('year', String(movie.year));
     if (movie.imdbId || movie.imdb_id) params.set('imdbId', String(movie.imdbId || movie.imdb_id));
     params.set('type', 'movie');
@@ -710,7 +717,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
     }
 
     if (onBack) onBack();
-    else router.push('/');
+    else router.push('/movies');
   };
 
   const handleSaveEditedMovie = async (updated) => {
@@ -950,8 +957,8 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
         </p>
         <button
           type="button"
-          onClick={onBack || (() => router.push('/'))}
-          className="px-4 py-2 rounded-xl bg-amber-500 text-black text-xs font-bold"
+          onClick={onBack || (() => router.push('/movies'))}
+          className="px-4 py-2 rounded-xl bg-amber-500 text-black text-xs font-bold cursor-pointer"
         >
           Back to Movies
         </button>
@@ -991,11 +998,11 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
       <header className="relative z-30 h-14 md:h-16 px-4 md:px-8 flex items-center justify-between bg-transparent">
         <button
           type="button"
-          onClick={onBack || (() => router.push('/'))}
+          onClick={onBack || (() => router.push('/movies'))}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-200 hover:text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer shadow-lg"
         >
           <ChevronLeft size={16} />
-          <span>Dashboard</span>
+          <span>Movies</span>
         </button>
 
         {/* Desktop Action Buttons (sm and above) */}

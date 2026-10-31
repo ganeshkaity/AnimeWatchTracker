@@ -23,6 +23,7 @@ import EditWatchlistModal from '../components/EditWatchlistModal';
 import AddWatchlistModal from '../components/AddWatchlistModal';
 import TransferWatchlistModal from '../components/TransferWatchlistModal';
 import OmdbRatingsBlock from '../components/OmdbRatingsBlock';
+import { cleanTitleForOmdb } from '../utils/omdbUtils';
 import { getEffectiveRating } from '../utils/ratingUtils';
 
 function GalleryImageCard({
@@ -222,8 +223,14 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
     omdbFetchedRef.current = true;
     setOmdbLoading(true);
 
+    const cleanTitle = cleanTitleForOmdb(item.title || item.name || '');
+    if (!cleanTitle && !item.imdbId && !item.imdb_id) {
+      setOmdbLoading(false);
+      return;
+    }
+
     const params = new URLSearchParams();
-    params.set('title', item.title || item.name || '');
+    if (cleanTitle) params.set('title', cleanTitle);
     if (item.year) params.set('year', String(item.year));
     if (item.imdbId || item.imdb_id) params.set('imdbId', String(item.imdbId || item.imdb_id));
     if (item.contentType) params.set('type', item.contentType);

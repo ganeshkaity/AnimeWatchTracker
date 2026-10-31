@@ -56,21 +56,12 @@ export default function HiddenVaultView({ onExitVault, onSelectAnime }) {
             </button>
 
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-purple-600 via-indigo-600 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/30">
-                <Lock size={16} />
-              </div>
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
                     <span>Secret Vault</span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                      Hidden Shelf
-                    </span>
                   </h1>
                 </div>
-                <p className="text-[11px] text-gray-400 hidden sm:block">
-                  Protected personal content • Not visible on public shelves
-                </p>
               </div>
             </div>
           </div>

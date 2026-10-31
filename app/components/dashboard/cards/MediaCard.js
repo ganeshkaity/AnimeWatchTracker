@@ -61,14 +61,14 @@ export default function MediaCard({
 
         {/* Red YouTube Logo Badge if YouTube folder */}
         {isYouTube && (
-          <div className={`absolute top-2 ${onMobileMenuToggle ? 'right-9' : 'right-2'} z-10 p-1 bg-black/60 rounded-md flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md pointer-events-none`}>
+          <div className={`absolute top-2 ${onMobileMenuToggle ? 'right-9 md:right-2' : 'right-2'} z-10 p-1 bg-black/60 rounded-md flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md pointer-events-none`}>
             <YoutubeLogo size={14} />
           </div>
         )}
 
-        {/* 3-Dot Options Button with Glassmorphism Effect */}
+        {/* 3-Dot Options Button with Glassmorphism Effect (Mobile devices only) */}
         {onMobileMenuToggle && (
-          <div className="absolute top-2 right-2 z-20">
+          <div className="absolute top-2 right-2 z-20 md:hidden">
             <button
               type="button"
               onClick={(e) => {

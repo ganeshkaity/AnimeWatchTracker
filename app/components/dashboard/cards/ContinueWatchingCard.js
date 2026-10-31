@@ -67,9 +67,9 @@ export default function ContinueWatchingCard({
           </div>
         )}
 
-        {/* 3-Dot Options Button with Glassmorphism Effect */}
+        {/* 3-Dot Options Button with Glassmorphism Effect (Mobile devices only) */}
         {onMobileMenuToggle && (
-          <div className="absolute top-2 right-2 z-20">
+          <div className="absolute top-2 right-2 z-20 md:hidden">
             <button
               type="button"
               onClick={(e) => {

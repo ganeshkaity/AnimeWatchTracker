@@ -26,6 +26,7 @@ import { toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 import EditWebseriesModal from '../components/EditWebseriesModal';
 import AssignEpisodesModal from '../components/AssignEpisodesModal';
 import OmdbRatingsBlock from '../components/OmdbRatingsBlock';
+import { cleanTitleForOmdb } from '../utils/omdbUtils';
 import { getEffectiveRating } from '../utils/ratingUtils';
 import {
   processScannedFiles, sortEpisodes, getSubfolder, extractSeasonNumber,
@@ -485,8 +486,14 @@ export default function WebseriesDetail({ seriesId, onBack }) {
     omdbFetchedRef.current = true;
     setOmdbLoading(true);
 
+    const cleanTitle = cleanTitleForOmdb(series.title);
+    if (!cleanTitle && !series.imdbId && !series.imdb_id) {
+      setOmdbLoading(false);
+      return;
+    }
+
     const params = new URLSearchParams();
-    params.set('title', series.title);
+    if (cleanTitle) params.set('title', cleanTitle);
     if (series.year) params.set('year', String(series.year));
     if (series.imdbId || series.imdb_id) params.set('imdbId', String(series.imdbId || series.imdb_id));
     params.set('type', 'series');

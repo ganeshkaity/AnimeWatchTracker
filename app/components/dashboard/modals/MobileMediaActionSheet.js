@@ -14,10 +14,7 @@ import {
   Volume2,
   VolumeX,
   Star,
-  Wifi,
-  WifiOff,
 } from 'lucide-react';
-import { useOffline } from '../../../context/OfflineContext';
 import { getEffectiveRating } from '../../../utils/ratingUtils';
 
 export default function MobileMediaActionSheet({
@@ -43,8 +40,6 @@ export default function MobileMediaActionSheet({
   setEditingWatchlistItem,
   setTransferringWatchlistItem,
 }) {
-  const { isOffline, isManualOffline, setManualOffline } = useOffline();
-
   const [trailerKey, setTrailerKey] = useState(null);
   const [isPlayingTrailer, setIsPlayingTrailer] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
@@ -442,31 +437,6 @@ export default function MobileMediaActionSheet({
                 <span>Transfer to Active Library</span>
               </button>
             )}
-
-            {/* Offline / Online Mode Toggle */}
-            <button
-              type="button"
-              onClick={() => setManualOffline(!isManualOffline)}
-              className="w-full text-left px-3.5 py-2.5 rounded-2xl hover:bg-white/10 flex items-center justify-between text-sm font-semibold text-white transition active:scale-98 cursor-pointer"
-            >
-              <div className="flex items-center gap-3">
-                {isOffline ? (
-                  <WifiOff size={18} className="text-amber-400" />
-                ) : (
-                  <Wifi size={18} className="text-emerald-400" />
-                )}
-                <span>{isManualOffline ? 'Switch to Online Mode' : 'Switch to Offline Mode'}</span>
-              </div>
-              <span
-                className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                  isOffline
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                }`}
-              >
-                {isOffline ? 'Offline' : 'Online'}
-              </span>
-            </button>
 
             {/* View Full Details */}
             <button

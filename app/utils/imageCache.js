@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { isFanartUrl, toFanartBigPreview } from '../lib/fanartUtils';
+import { idbCacheMedia, idbGetCachedMedia } from './mediaIndexedDB';
 
 // In-memory cache map for instant 0ms access within the session
 const memoryBlobCache = new Map();
@@ -67,25 +68,84 @@ export async function getCachedImageUrl(src) {
         memoryBlobCache.set(src, blobUrl);
         return blobUrl;
       }
+    } catch (_) {}
+  }
 
-      // 3. Fetch from same-origin network and store in Cache Storage
-      const response = await fetch(src);
-
-      if (response.ok) {
-        // Clone response before consuming for cache
-        await cache.put(src, response.clone());
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        memoryBlobCache.set(src, blobUrl);
-        return blobUrl;
-      }
-    } catch (err) {
-      // Fallback gracefully to direct source
-      return src;
+  // 3. Check IndexedDB fallback (media_cache store)
+  try {
+    const idbCached = await idbGetCachedMedia(src);
+    if (idbCached) {
+      const blobUrl = typeof idbCached === 'string' && idbCached.startsWith('blob:')
+        ? idbCached
+        : (idbCached instanceof Blob ? URL.createObjectURL(idbCached) : idbCached);
+      memoryBlobCache.set(src, blobUrl);
+      return blobUrl;
     }
+  } catch (_) {}
+
+  // 4. Fetch from same-origin network and store in Cache Storage & IndexedDB
+  try {
+    const response = await fetch(src);
+    if (response.ok) {
+      if (isCacheStorageAvailable()) {
+        try {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(src, response.clone());
+        } catch (_) {}
+      }
+
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      memoryBlobCache.set(src, blobUrl);
+
+      // Persist blob copy in IndexedDB media_cache
+      idbCacheMedia(src, blob).catch(() => {});
+
+      return blobUrl;
+    }
+  } catch (err) {
+    // Fallback gracefully to direct source
+    return src;
   }
 
   return src;
+}
+
+/**
+ * Explicitly cache a poster image into Cache Storage & IndexedDB
+ */
+export async function cachePosterImage(url, blobOrDataUrl) {
+  if (!url || !blobOrDataUrl) return;
+
+  try {
+    // 1. Save to IndexedDB
+    await idbCacheMedia(url, blobOrDataUrl);
+
+    // 2. Save to Cache API if it's a Blob or Response
+    if (isCacheStorageAvailable() && (blobOrDataUrl instanceof Blob || blobOrDataUrl instanceof Response)) {
+      const cache = await caches.open(CACHE_NAME);
+      const res = blobOrDataUrl instanceof Response ? blobOrDataUrl : new Response(blobOrDataUrl);
+      await cache.put(url, res);
+    }
+
+    // 3. Save to memory cache
+    const blobUrl = blobOrDataUrl instanceof Blob ? URL.createObjectURL(blobOrDataUrl) : blobOrDataUrl;
+    memoryBlobCache.set(url, blobUrl);
+  } catch (err) {
+    console.warn('[imageCache] Failed to cache poster:', err);
+  }
+}
+
+/**
+ * Clear all cached poster images across Memory, Cache API, and IndexedDB
+ */
+export async function clearPosterCache() {
+  memoryBlobCache.clear();
+  if (isCacheStorageAvailable()) {
+    try {
+      await caches.delete(CACHE_NAME);
+    } catch (_) {}
+  }
 }
 
 /**

@@ -30,9 +30,6 @@ export default function AudioStoriesSection({
       <span id="audio-stories" className="sr-only" />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
-            <Headphones size={20} />
-          </div>
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-extrabold tracking-wide text-white">Audio Stories</h2>

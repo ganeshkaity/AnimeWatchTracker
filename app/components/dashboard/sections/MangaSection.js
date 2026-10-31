@@ -30,9 +30,6 @@ export default function MangaSection({
       <span id="manga-webtoons" className="sr-only" />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
-            <BookOpen size={20} />
-          </div>
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-extrabold tracking-wide text-white">Manga or Webtoons</h2>

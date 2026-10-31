@@ -20,6 +20,7 @@ import { toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 import EditAnimeModal from '../components/EditAnimeModal';
 import AssignEpisodesModal from '../components/AssignEpisodesModal';
 import OmdbRatingsBlock from '../components/OmdbRatingsBlock';
+import { cleanTitleForOmdb } from '../utils/omdbUtils';
 import { getEffectiveRating } from '../utils/ratingUtils';
 import { 
   ArrowLeft, Play, CheckCircle2, Bookmark, StickyNote, Star, AlertTriangle, 
@@ -2298,8 +2299,14 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     omdbFetchedRef.current = true;
     setOmdbLoading(true);
 
+    const cleanTitle = cleanTitleForOmdb(anime.englishTitle || anime.title);
+    if (!cleanTitle && !anime.imdbId && !anime.imdb_id) {
+      setOmdbLoading(false);
+      return;
+    }
+
     const params = new URLSearchParams();
-    params.set('title', anime.title);
+    if (cleanTitle) params.set('title', cleanTitle);
     if (anime.year) params.set('year', String(anime.year));
     if (anime.imdbId || anime.imdb_id) params.set('imdbId', String(anime.imdbId || anime.imdb_id));
     params.set('type', 'series');
