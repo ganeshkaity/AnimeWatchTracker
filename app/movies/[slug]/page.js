@@ -13,7 +13,7 @@ export default function MoviePage() {
     <div className="min-h-screen text-white bg-[#07090f]">
       <MovieDetail
         movieId={movieId}
-        onBack={() => router.push('/')}
+        onBack={() => router.push('/movies')}
         onPlayMovie={(movie, playerType) => {
           if (playerType === 'mediaserver' || !playerType) {
             router.push(`/player/mediaserver/${encodeURIComponent(movie.id)}?type=movie`);
