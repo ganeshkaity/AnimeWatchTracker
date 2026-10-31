@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   BookOpen,
@@ -14,6 +14,8 @@ import {
 import MangaCoverSearch from '../../MangaCoverSearch';
 import { toFanartPreview, toFanartFull } from '../../../lib/fanartUtils';
 import { GENRES_LIST } from '../utils/dashboardHelpers';
+import { checkDuplicateMedia } from '../../../utils/duplicateDetector';
+import DuplicateWarningBanner from '../../DuplicateWarningBanner';
 
 export default function AddMangaModal({
   showAddMangaModal,
@@ -65,6 +67,15 @@ export default function AddMangaModal({
   setMangaGenres,
   uploadToImgBB,
 }) {
+  const duplicateMatch = useMemo(() => {
+    if (!showAddMangaModal) return null;
+    const res = checkDuplicateMedia({
+      title: mangaTitle || mangaSearchQuery || '',
+      targetType: 'manga',
+    });
+    return res.isDuplicate ? res.match : null;
+  }, [showAddMangaModal, mangaTitle, mangaSearchQuery]);
+
   return (
     <>
       <AnimatePresence>
@@ -322,6 +333,11 @@ export default function AddMangaModal({
                       onChange={(e) => setMangaTitle(e.target.value)}
                       required
                     />
+                    {duplicateMatch && (
+                      <div className="mt-2">
+                        <DuplicateWarningBanner match={duplicateMatch} />
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">

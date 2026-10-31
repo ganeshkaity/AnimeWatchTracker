@@ -51,7 +51,7 @@ export default function WebseriesSection({
           </button>
 
           {sortedWebseries.length > 0 && (
-            <>
+            <div className="hidden sm:flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => scrollWebseries('left')}
@@ -68,7 +68,7 @@ export default function WebseriesSection({
               >
                 <ChevronRight size={18} />
               </button>
-            </>
+            </div>
           )}
         </div>
       </div>

@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_TMDB_KEY = '4e44d9029b1270a757cddc766a1bcb63';
-
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -16,7 +14,13 @@ export async function GET(request) {
       );
     }
 
-    const apiKey = process.env.TMDB_API_KEY || DEFAULT_TMDB_KEY;
+    const apiKey = process.env.TMDB_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { success: false, error: 'TMDB_API_KEY is not configured in environment variables' },
+        { status: 500 }
+      );
+    }
     // Use append_to_response=credits,images,videos,keywords to fetch everything in 1 single fast request
     const tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}?api_key=${apiKey}&language=en-US&include_image_language=en,null&append_to_response=credits,images,videos,keywords`;
 

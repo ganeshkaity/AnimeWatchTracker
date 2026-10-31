@@ -23,6 +23,7 @@ import EditWatchlistModal from '../components/EditWatchlistModal';
 import TransferWatchlistModal from '../components/TransferWatchlistModal';
 import MediaPreviewModal from '../components/MediaPreviewModal';
 import CachedImage from '../utils/imageCache';
+import { getEffectiveRating } from '../utils/ratingUtils';
 
 const ALL_GENRES = [
   "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary",
@@ -314,7 +315,9 @@ export default function WatchlistLibrary() {
         return (b.title || '').localeCompare(a.title || '');
       }
       if (sortBy === 'rating') {
-        return (b.rating || 0) - (a.rating || 0);
+        const rA = getEffectiveRating(a)?.numeric || (a.rating || 0);
+        const rB = getEffectiveRating(b)?.numeric || (b.rating || 0);
+        return rB - rA;
       }
       if (sortBy === 'year') {
         return (parseInt(b.year, 10) || 0) - (parseInt(a.year, 10) || 0);
@@ -645,10 +648,10 @@ export default function WatchlistLibrary() {
 
                     {/* Top Badges */}
                     <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
-                      {item.rating > 0 ? (
+                      {getEffectiveRating(item) ? (
                         <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
                           <Star size={10} className="fill-amber-400" />
-                          <span>{parseFloat(item.rating).toFixed(1)}</span>
+                          <span>{getEffectiveRating(item).value}</span>
                         </div>
                       ) : <span />}
 

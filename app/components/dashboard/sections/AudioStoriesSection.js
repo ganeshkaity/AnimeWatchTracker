@@ -42,7 +42,7 @@ export default function AudioStoriesSection({
 
         <div className="flex items-center gap-2">
           {sortedAudioStories.length > 0 && (
-            <>
+            <div className="hidden sm:flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => scrollAudioStory('left')}
@@ -59,7 +59,7 @@ export default function AudioStoriesSection({
               >
                 <ChevronRight size={18} />
               </button>
-            </>
+            </div>
           )}
         </div>
       </div>

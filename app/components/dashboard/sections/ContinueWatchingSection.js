@@ -64,7 +64,7 @@ export default function ContinueWatchingSection({
         </div>
 
         {/* Chevron Navigation Keys */}
-        <div className="flex items-center gap-2">
+        <div className="hidden sm:flex items-center gap-2">
           <button
             type="button"
             onClick={() => scrollContinue('left')}

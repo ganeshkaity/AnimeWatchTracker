@@ -31,6 +31,7 @@ export default function AnimePage() {
       <AnimeDetail
         animeId={animeId}
         onBack={() => router.push('/')}
+        onSelectAnime={(newId) => router.push(`/anime/${encodeURIComponent(newId)}`)}
         onPlayEpisode={(epId, epList, type = 'mediaserver', extraOpts = {}) => {
           const speed = extraOpts.speed || 1;
           const volume = Math.round((extraOpts.volume ?? 1) * 100);

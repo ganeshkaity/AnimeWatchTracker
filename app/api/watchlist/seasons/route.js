@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_TMDB_KEY = '4e44d9029b1270a757cddc766a1bcb63';
-
 // Helper to search TMDB TV
 async function searchTmdbTv(searchTerm, apiKey, isAnime) {
   if (!searchTerm || !searchTerm.trim()) return null;
@@ -100,7 +98,7 @@ export async function GET(request) {
     const originalTitle = (searchParams.get('originalTitle') || '').trim();
     const romajiTitle = (searchParams.get('romajiTitle') || '').trim();
 
-    const tmdbApiKey = process.env.TMDB_API_KEY || DEFAULT_TMDB_KEY;
+    const tmdbApiKey = process.env.TMDB_API_KEY || '';
 
     let targetTmdbId = '';
 

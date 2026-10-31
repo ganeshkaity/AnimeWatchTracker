@@ -6,7 +6,7 @@ import {
   SlidersHorizontal, X, Bookmark, Tv, Film, Headphones,
   BookOpen, Sparkles, Play, StickyNote,
   Compass, Settings, Plus, WifiOff, Wifi, RefreshCw,
-  FolderPlus, Layers
+  FolderPlus, Layers, Trophy, Keyboard, Lock
 } from 'lucide-react';
 import { GENRES_LIST } from '../utils/dashboardHelpers';
 import { getLocalMovieGroups } from '../../../utils/localStore';
@@ -21,6 +21,9 @@ export default function DashboardMobileMenu({
   setShowAddMovieModal,
   setShowAddWebseriesModal,
   setShowSettings,
+  onOpenVault,
+  onOpenAchievements,
+  onOpenShortcuts,
   isOffline,
   isSyncing,
 }) {
@@ -266,6 +269,30 @@ export default function DashboardMobileMenu({
                   >
                     <StickyNote size={15} className="text-emerald-400" /> Personal Notes
                   </Link>
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMenuOpen(false); if (onOpenAchievements) onOpenAchievements(); }}
+                    className="hover:text-yellow-400 p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition text-left cursor-pointer w-full"
+                  >
+                    <span className="flex items-center gap-2"><Trophy size={15} className="text-yellow-400" /> Achievements &amp; Badges</span>
+                    <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-2 py-0.5 rounded-full font-bold">Ranks</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMenuOpen(false); if (onOpenShortcuts) onOpenShortcuts(); }}
+                    className="hover:text-purple-400 p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition text-left cursor-pointer w-full"
+                  >
+                    <span className="flex items-center gap-2"><Keyboard size={15} className="text-purple-400" /> Keyboard Shortcuts</span>
+                    <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-mono font-bold">Ctrl+H</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMenuOpen(false); setShowSettings(true); }}
+                    className="hover:text-rose-400 p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition text-left cursor-pointer w-full"
+                  >
+                    <span className="flex items-center gap-2"><Lock size={15} className="text-rose-400" /> Secret Vault</span>
+                    <span className="text-[10px] bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-full font-bold">PIN</span>
+                  </button>
                 </nav>
               </div>
 
@@ -322,6 +349,14 @@ export default function DashboardMobileMenu({
                     className="w-full py-2 px-3 rounded-xl text-xs font-bold bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white flex items-center justify-center gap-2 cursor-pointer shadow-md"
                   >
                     <FolderPlus size={15} /> Create Movie Group
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMenuOpen(false); if (onOpenAchievements) onOpenAchievements(); }}
+                    className="w-full py-2 px-3 rounded-xl text-xs font-bold bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 flex items-center justify-center gap-2 transition cursor-pointer"
+                  >
+                    <Trophy size={15} /> Achievements &amp; Badges
                   </button>
 
                   <button

@@ -15,11 +15,14 @@ import { doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import {
-  getLocalMovie, upsertLocalMovie, deleteLocalMovie,
+  getLocalMovie, getLocalMovies, upsertLocalMovie, deleteLocalMovie,
   addToDirtyQueue, getUserId
 } from '../utils/localStore';
+import MediaCard from '../components/dashboard/cards/MediaCard';
 import EditMovieModal from '../components/EditMovieModal';
+import OmdbRatingsBlock from '../components/OmdbRatingsBlock';
 import { toFanartBigPreview } from '../lib/fanartUtils';
+import { getEffectiveRating } from '../utils/ratingUtils';
 
 // Custom VLC Icon matching AnimeDetail
 const VLCIcon = ({ className }) => (
@@ -186,6 +189,8 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
   const [artworkTargetImage, setArtworkTargetImage] = useState(null);
   const [artworkSaving, setArtworkSaving] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
+  const [omdbLoading, setOmdbLoading] = useState(false);
+  const omdbFetchedRef = useRef(false);
 
   const showToast = (msg) => {
     setToastMsg(msg);
@@ -214,6 +219,41 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
       videosScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
     }
   };
+
+  // Similar Titles in Your Library (Feature 7)
+  const similarScrollRef = useRef(null);
+  const scrollSimilar = (direction) => {
+    if (similarScrollRef.current) {
+      const { scrollLeft, clientWidth } = similarScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
+      similarScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  const similarMovies = useMemo(() => {
+    if (!movie) return [];
+    if (typeof window === 'undefined') return [];
+    const all = getLocalMovies() || [];
+    const currentGenres = (Array.isArray(movie.genres) ? movie.genres : []).map((g) =>
+      (typeof g === 'string' ? g : g.name || '').toLowerCase().trim()
+    );
+
+    const scored = all
+      .filter((m) => m && m.id !== movie.id)
+      .map((m) => {
+        const gList = (Array.isArray(m.genres) ? m.genres : []).map((g) =>
+          (typeof g === 'string' ? g : g.name || '').toLowerCase().trim()
+        );
+        let overlap = 0;
+        for (const cg of currentGenres) {
+          if (cg && gList.some((g) => g.includes(cg) || cg.includes(g))) overlap++;
+        }
+        return { item: m, score: overlap, rating: m.rating || 0 };
+      });
+
+    scored.sort((a, b) => b.score - a.score || b.rating - a.rating);
+    return scored.slice(0, 12).map((s) => s.item);
+  }, [movie]);
 
   const handleCopyPath = () => {
     if (!movie?.localFilePath) return;
@@ -286,6 +326,62 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
   }, [movieId, currentUser]);
+
+  // Auto-fetch OMDB ratings, awards & box-office if not yet fetched
+  useEffect(() => {
+    if (!movie?.title || omdbFetchedRef.current) return;
+    if (movie.omdb && (movie.omdb.imdbRating || movie.omdb.awards || movie.omdb.boxOffice)) return;
+
+    omdbFetchedRef.current = true;
+    setOmdbLoading(true);
+
+    const params = new URLSearchParams();
+    params.set('title', movie.title);
+    if (movie.year) params.set('year', String(movie.year));
+    if (movie.imdbId || movie.imdb_id) params.set('imdbId', String(movie.imdbId || movie.imdb_id));
+    params.set('type', 'movie');
+
+    fetch(`/api/omdb?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.omdb) {
+          setMovie((prev) => {
+            if (!prev) return prev;
+            const updated = {
+              ...prev,
+              omdb: data.omdb,
+              imdbId: data.omdb.imdbId || prev.imdbId || null,
+              imdbRating: data.omdb.imdbRating || prev.imdbRating || null,
+              imdbVotes: data.omdb.imdbVotes || prev.imdbVotes || null,
+              rottenTomatoes: data.omdb.rottenTomatoes || prev.rottenTomatoes || null,
+              metacritic: data.omdb.metacritic || prev.metacritic || null,
+              awards: data.omdb.awards || prev.awards || null,
+              boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
+              updatedAt: new Date().toISOString(),
+            };
+            upsertLocalMovie(updated);
+
+            const targetUserId = getUserId();
+            if (db && targetUserId) {
+              updateDoc(doc(db, 'users', targetUserId, 'movies', prev.id), {
+                omdb: data.omdb,
+                imdbId: data.omdb.imdbId || prev.imdbId || null,
+                imdbRating: data.omdb.imdbRating || prev.imdbRating || null,
+                imdbVotes: data.omdb.imdbVotes || prev.imdbVotes || null,
+                rottenTomatoes: data.omdb.rottenTomatoes || prev.rottenTomatoes || null,
+                metacritic: data.omdb.metacritic || prev.metacritic || null,
+                awards: data.omdb.awards || prev.awards || null,
+                boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
+                updatedAt: updated.updatedAt,
+              }).catch((e) => console.warn('[MovieDetail] updateDoc OMDB error:', e));
+            }
+            return updated;
+          });
+        }
+      })
+      .catch((err) => console.warn('[MovieDetail] OMDB fetch error:', err))
+      .finally(() => setOmdbLoading(false));
+  }, [movie?.title, movie?.id]);
 
   // Close preview modals on Escape key
   useEffect(() => {
@@ -880,7 +976,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
     <div className="min-h-screen bg-[#07090f] text-white flex flex-col relative pb-20 overflow-x-hidden">
       {/* ── Ambient Backdrop Image Layer (Extends from top-0 behind transparent header & hero) ── */}
       {backdrop && (
-        <div className="absolute top-0 inset-x-0 h-[460px] sm:h-[540px] pointer-events-none overflow-hidden z-0">
+        <div className="fixed top-0 inset-x-0 h-[460px] sm:h-[540px] pointer-events-none overflow-hidden z-0">
           <img
             src={backdrop}
             alt={movie.title}
@@ -953,34 +1049,49 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
       {/* ── Hero Content (Poster + Movie Details) ── */}
       <div className="relative z-10 max-w-6xl w-full mx-auto px-4 md:px-6 pt-2 pb-8 sm:pb-10 border-b border-white/5">
         <div className="flex flex-col sm:flex-row gap-6 md:gap-8 items-start">
-          {/* Movie Poster Card - Hidden on mobile / low-width devices */}
-          <div className="hidden sm:block relative w-44 sm:w-52 md:w-60 shrink-0 rounded-2xl sm:rounded-3xl overflow-hidden glass-card border border-white/15 shadow-2xl bg-[#0d1117] group">
-            {movie.posterUrl ? (
-              <img
-                src={movie.posterUrl}
-                alt={movie.title}
-                className="w-full h-auto aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500"
-              />
-            ) : (
-              <div className="w-full aspect-[2/3] flex flex-col items-center justify-center text-amber-400/80 bg-gradient-to-br from-amber-950/30 to-black gap-2">
-                <Film size={44} />
-                <span className="text-[10px] font-mono uppercase tracking-wider">No Poster</span>
+          {/* Movie Poster Card Column */}
+          <div className="hidden sm:flex flex-col gap-3 shrink-0 w-44 sm:w-52 md:w-60">
+            <div className="relative w-full rounded-2xl sm:rounded-3xl overflow-hidden glass-card border border-white/15 shadow-2xl bg-[#0d1117] group">
+              {movie.posterUrl ? (
+                <img
+                  src={movie.posterUrl}
+                  alt={movie.title}
+                  className="w-full h-auto aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500"
+                />
+              ) : (
+                <div className="w-full aspect-[2/3] flex flex-col items-center justify-center text-amber-400/80 bg-gradient-to-br from-amber-950/30 to-black gap-2">
+                  <Film size={44} />
+                  <span className="text-[10px] font-mono uppercase tracking-wider">No Poster</span>
+                </div>
+              )}
+
+              {/* Poster Badges */}
+              <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
+                {getEffectiveRating(movie) ? (
+                  <span className="px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md border border-white/15 text-amber-300 font-bold text-xs flex items-center gap-1 shadow">
+                    <Star size={11} className="fill-amber-400 text-amber-400" />
+                    {getEffectiveRating(movie).value}
+                  </span>
+                ) : null}
               </div>
-            )}
 
-            {/* Poster Badges */}
-            <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
-              {movie.rating ? (
-                <span className="px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md border border-white/15 text-amber-300 font-bold text-xs flex items-center gap-1 shadow">
-                  <Star size={11} className="fill-amber-400 text-amber-400" />
-                  {movie.rating}
-                </span>
-              ) : null}
+              <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-amber-500 text-black font-extrabold text-[9px] shadow uppercase tracking-wider">
+                {getEffectiveRating(movie)?.label || 'TMDB'}
+              </div>
             </div>
 
-            <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-amber-500 text-black font-extrabold text-[9px] shadow uppercase tracking-wider">
-              TMDB
-            </div>
+            {/* Ratings just below the content poster */}
+            <OmdbRatingsBlock
+              omdb={movie.omdb}
+              imdbId={movie.imdbId || movie.imdb_id}
+              imdbRating={movie.imdbRating}
+              imdbVotes={movie.imdbVotes}
+              rottenTomatoes={movie.rottenTomatoes}
+              metacritic={movie.metacritic}
+              loading={omdbLoading && !movie.omdb}
+              showRatings={true}
+              showAwards={false}
+            />
           </div>
 
           {/* Details & Action Header */}
@@ -991,10 +1102,10 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                 <span className="px-2.5 py-0.5 text-amber-300 text-[10px] font-bold uppercase tracking-wider">
                   | Movie
                 </span>
-                {movie.rating && (
+                {getEffectiveRating(movie) && (
                   <span className="px-2.5 py-0.5 text-amber-300 text-[10px] font-bold flex items-center gap-1 sm:hidden">
                     <Star size={11} className="fill-amber-400 text-amber-400" />
-                   | {movie.rating}
+                   | {getEffectiveRating(movie).value}
                   </span>
                 )}
                 {movie.year && (
@@ -1174,6 +1285,16 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
           <p className="text-sm sm:text-base md:text-lg text-gray-200/90 leading-relaxed font-normal max-w-4xl selection:bg-amber-500/30">
             {movie.overview || movie.description || movie.synopsis || "No overview available for this movie yet. Click 'Edit Details' to add a storyline summary or fetch from TMDB."}
           </p>
+
+          {/* Awards & Box Office below Overview & Storyline */}
+          <OmdbRatingsBlock
+            omdb={movie.omdb}
+            awards={movie.awards}
+            boxOffice={movie.boxOffice}
+            loading={omdbLoading && !movie.omdb}
+            showRatings={false}
+            showAwards={true}
+          />
         </section>
 
         {/* 2. Cast / Actors / Crew Section (Horizontally Scrollable) */}
@@ -1185,7 +1306,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                   <Users size={17} className="text-amber-400" /> Cast & Actors
                 </h2>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="hidden sm:flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => scrollCast('left')}
@@ -1255,7 +1376,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                   <Video size={17} className="text-rose-400" /> Videos & Trailers
                 </h2>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="hidden sm:flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => scrollVideos('left')}
@@ -1510,6 +1631,75 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
             </div>
           )}
         </section>
+
+        {/* 6.5 Similar Titles in Your Library (Feature 7) */}
+        {similarMovies.length > 0 && (
+          <section className="space-y-4 pt-4 border-t border-white/5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-md">
+                  <Film size={16} />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
+                    <span>More Like This in Your Library</span>
+                  </h2>
+                </div>
+              </div>
+
+              <div className="hidden sm:flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => scrollSimilar('left')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+                  title="Scroll left"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollSimilar('right')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+                  title="Scroll right"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+
+            <div
+              ref={similarScrollRef}
+              className="flex items-start gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2 scroll-smooth select-none"
+            >
+              {similarMovies.map((item) => {
+                const coverImg = item.posterUrl || item.posterPath || (item.thumbnailBase64 || null);
+                const rating = item.rating || item.score || null;
+                const isWatched = Boolean(
+                  item.watched || item.completed || item.watchStatus === 'Completed' || (item.watchProgress && item.watchProgress >= 95)
+                );
+                const pct = item.watchProgress || (item.duration ? Math.min(100, Math.round(((item.currentTime || 0) / item.duration) * 100)) : 0);
+                const movieYear = item.year || (item.releaseDate ? item.releaseDate.split('-')[0] : 'Movie');
+                const runtimeStr = item.runtime ? `${Math.floor(item.runtime / 60)}h ${item.runtime % 60}m` : 'Feature';
+
+                return (
+                  <MediaCard
+                    key={`similar-movie-${item.id}`}
+                    item={item}
+                    type="movie"
+                    coverImg={coverImg}
+                    rating={rating}
+                    isCompleted={isWatched}
+                    pct={pct}
+                    subLeft={movieYear}
+                    subRight={runtimeStr}
+                    accentBorder="hover:border-amber-400/50"
+                    onClick={() => router.push(`/movies/${item.id}`)}
+                  />
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {/* 7. TMDB Attribution */}
         <footer className="pt-6 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-3 text-gray-400 text-[11px]">

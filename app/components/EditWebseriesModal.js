@@ -111,6 +111,8 @@ export default function EditWebseriesModal({
         year: year ? String(year) : '',
         releaseDate: releaseDate || '',
         rating: rating ? parseFloat(rating) : 0,
+        userRating: rating ? parseFloat(rating) : (webseries.userRating || null),
+        isManualRating: Boolean(rating && !isNaN(parseFloat(rating)) && parseFloat(rating) > 0),
         overview: overview.trim(),
         posterUrl: posterUrl.trim(),
         backdropUrl: backdropUrl.trim(),

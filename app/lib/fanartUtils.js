@@ -41,3 +41,19 @@ export const toFanartFull = (url) => {
   if (!isFanartUrl(url)) return url;
   return url.replace(/\/(preview|bigpreview)\//gi, '/fanart/');
 };
+
+/**
+ * Transforms media poster URLs for fast search result dropdowns:
+ * - TMDB photos load in w200 format
+ * - Fanart photos load in preview format (not bigpreview)
+ */
+export const toSearchThumbnail = (url) => {
+  if (!url || typeof url !== 'string') return url;
+  if (isFanartUrl(url)) {
+    return toFanartPreview(url);
+  }
+  if (url.includes('image.tmdb.org')) {
+    return url.replace(/\/t\/p\/(?:w\d+|original)\//i, '/t/p/w200/');
+  }
+  return url;
+};

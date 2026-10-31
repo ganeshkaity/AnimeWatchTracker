@@ -2,6 +2,7 @@ import React from 'react';
 import { Star, Check, MoreVertical, Play, Film, Tv, BookOpen, Headphones } from 'lucide-react';
 import CachedImage from '../../../utils/imageCache';
 import { YoutubeLogo } from '../utils/dashboardHelpers';
+import { getEffectiveRating } from '../../../utils/ratingUtils';
 
 export default function MediaCard({
   item,
@@ -32,6 +33,9 @@ export default function MediaCard({
     }
   };
 
+  const effectiveRatingObj = getEffectiveRating(item);
+  const displayRating = effectiveRatingObj ? effectiveRatingObj.value : (rating && !isNaN(parseFloat(rating)) ? parseFloat(rating).toFixed(1) : null);
+
   return (
     <div
       onClick={onClick}
@@ -48,32 +52,33 @@ export default function MediaCard({
         />
 
         {/* Liquid Glass Rating Badge (Top-Left) */}
-        {rating && (
+        {displayRating && (
           <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 text-[10px] font-bold text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.5)] backdrop-saturate-150 pointer-events-none">
             <Star size={10} className="fill-amber-400 text-amber-400" />
-            <span className="leading-none">{parseFloat(rating).toFixed(1)}</span>
+            <span className="leading-none">{displayRating}</span>
           </div>
         )}
 
         {/* Red YouTube Logo Badge if YouTube folder */}
         {isYouTube && (
-          <div className="absolute top-2 right-2 z-10 p-1 bg-black/60 rounded-md flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md pointer-events-none">
+          <div className={`absolute top-2 ${onMobileMenuToggle ? 'right-9' : 'right-2'} z-10 p-1 bg-black/60 rounded-md flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md pointer-events-none`}>
             <YoutubeLogo size={14} />
           </div>
         )}
 
-        {/* Mobile 3-Dot Options Button */}
+        {/* 3-Dot Options Button with Glassmorphism Effect */}
         {onMobileMenuToggle && (
-          <div className="md:hidden absolute top-2 right-2 z-20">
+          <div className="absolute top-2 right-2 z-20">
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onMobileMenuToggle(e);
               }}
-              className="p-1 rounded-md bg-black/70 backdrop-blur-md text-white border border-white/20 shadow-lg active:scale-95 transition-transform"
+              className="p-1.5 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-xl border border-white/30 text-white shadow-[0_4px_16px_rgba(0,0,0,0.5)] backdrop-saturate-150 transition-all duration-200 active:scale-90 hover:scale-110 cursor-pointer"
+              title="Media Options"
             >
-              <MoreVertical size={12} />
+              <MoreVertical size={13} />
             </button>
           </div>
         )}

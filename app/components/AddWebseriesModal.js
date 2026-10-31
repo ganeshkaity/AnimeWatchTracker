@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Tv, X, Search, Loader2, Sparkles, CheckCircle2,
   HardDrive, ImagePlus, Star, Clock, AlertTriangle, ExternalLink,
@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { NAMING_PATTERNS, processScannedFiles, sortEpisodes, getSubfolder } from '../utils/parser';
+import { checkDuplicateMedia } from '../utils/duplicateDetector';
+import DuplicateWarningBanner from './DuplicateWarningBanner';
 
 const GENRES_LIST = [
   "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary",
@@ -95,6 +97,17 @@ export default function AddWebseriesModal({
 
   // Submitting
   const [submitting, setSubmitting] = useState(false);
+
+  // Duplicate Media Detection
+  const duplicateMatch = useMemo(() => {
+    if (!isOpen) return null;
+    const res = checkDuplicateMedia({
+      title: title || selectedTmdbSeries?.name || '',
+      tmdbId: selectedTmdbSeries?.id || null,
+      targetType: 'webseries',
+    });
+    return res.isDuplicate ? res.match : null;
+  }, [isOpen, title, selectedTmdbSeries]);
 
   // Reset fields on modal open
   useEffect(() => {
@@ -603,6 +616,11 @@ export default function AddWebseriesModal({
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white focus:outline-none focus:border-purple-400"
                 />
+                {duplicateMatch && (
+                  <div className="mt-2">
+                    <DuplicateWarningBanner match={duplicateMatch} />
+                  </div>
+                )}
               </div>
 
               <div>

@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_TMDB_KEY = '4e44d9029b1270a757cddc766a1bcb63';
-
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -13,7 +11,13 @@ export async function GET(request) {
       return NextResponse.json({ success: true, results: [] });
     }
 
-    const apiKey = process.env.TMDB_API_KEY || DEFAULT_TMDB_KEY;
+    const apiKey = process.env.TMDB_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { success: false, error: 'TMDB_API_KEY is not configured in environment variables' },
+        { status: 500 }
+      );
+    }
     const cleanQuery = query.trim();
 
     const tmdbUrl = `https://api.themoviedb.org/3/search/movie?api_key=${apiKey}&query=${encodeURIComponent(cleanQuery)}&include_adult=true&language=en-US&page=1`;

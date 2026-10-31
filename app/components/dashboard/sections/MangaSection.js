@@ -42,7 +42,7 @@ export default function MangaSection({
 
         <div className="flex items-center gap-2">
           {sortedMangas.length > 2 && (
-            <>
+            <div className="hidden sm:flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => scrollManga('left')}
@@ -59,7 +59,7 @@ export default function MangaSection({
               >
                 <ChevronRight size={18} />
               </button>
-            </>
+            </div>
           )}
         </div>
       </div>

@@ -20,7 +20,10 @@ import {
 } from '../utils/localStore';
 import { toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 import EditWatchlistModal from '../components/EditWatchlistModal';
+import AddWatchlistModal from '../components/AddWatchlistModal';
 import TransferWatchlistModal from '../components/TransferWatchlistModal';
+import OmdbRatingsBlock from '../components/OmdbRatingsBlock';
+import { getEffectiveRating } from '../utils/ratingUtils';
 
 function GalleryImageCard({
   img,
@@ -157,6 +160,115 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
       videosScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
     }
   };
+
+  // Internet Recommendations (Feature 7)
+  const [internetRecommendations, setInternetRecommendations] = useState([]);
+  const [loadingRecs, setLoadingRecs] = useState(false);
+  const [addedRecIds, setAddedRecIds] = useState(() => new Set());
+  const recScrollRef = useRef(null);
+
+  const scrollRecs = (direction) => {
+    if (recScrollRef.current) {
+      const { scrollLeft, clientWidth } = recScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
+      recScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  useEffect(() => {
+    if (!item) return;
+    let isMounted = true;
+    setLoadingRecs(true);
+    const tmdbId = item.tmdbId || item.id;
+    const q = item.title || item.originalTitle || '';
+    const type = item.contentType || 'movie';
+
+    fetch(`/api/watchlist/recommendations?tmdbId=${encodeURIComponent(tmdbId)}&type=${encodeURIComponent(type)}&q=${encodeURIComponent(q)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (isMounted && data.success && Array.isArray(data.recommendations)) {
+          setInternetRecommendations(data.recommendations);
+        }
+      })
+      .catch((err) => console.warn('Failed to fetch recommendations:', err))
+      .finally(() => {
+        if (isMounted) setLoadingRecs(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [item?.id, item?.tmdbId, item?.contentType]);
+
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addModalInitialSearch, setAddModalInitialSearch] = useState('');
+  const [addModalInitialType, setAddModalInitialType] = useState('movie');
+
+  const handleOpenAddModalForRec = (rec) => {
+    if (!rec) return;
+    setAddModalInitialSearch(rec.title || '');
+    setAddModalInitialType(rec.contentType || item?.contentType || 'movie');
+    setShowAddModal(true);
+  };
+
+  // OMDB ratings, awards & box-office auto-fetch
+  const omdbFetchedRef = useRef(false);
+  const [omdbLoading, setOmdbLoading] = useState(false);
+
+  useEffect(() => {
+    if (!item?.title || omdbFetchedRef.current) return;
+    if (item.omdb && (item.omdb.imdbRating || item.omdb.awards || item.omdb.boxOffice)) return;
+
+    omdbFetchedRef.current = true;
+    setOmdbLoading(true);
+
+    const params = new URLSearchParams();
+    params.set('title', item.title || item.name || '');
+    if (item.year) params.set('year', String(item.year));
+    if (item.imdbId || item.imdb_id) params.set('imdbId', String(item.imdbId || item.imdb_id));
+    if (item.contentType) params.set('type', item.contentType);
+
+    fetch(`/api/omdb?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.omdb) {
+          setItem((prev) => {
+            if (!prev) return prev;
+            const updated = {
+              ...prev,
+              omdb: data.omdb,
+              imdbId: data.omdb.imdbId || prev.imdbId || null,
+              imdbRating: data.omdb.imdbRating || prev.imdbRating || null,
+              imdbVotes: data.omdb.imdbVotes || prev.imdbVotes || null,
+              rottenTomatoes: data.omdb.rottenTomatoes || prev.rottenTomatoes || null,
+              metacritic: data.omdb.metacritic || prev.metacritic || null,
+              awards: data.omdb.awards || prev.awards || null,
+              boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
+              updatedAt: new Date().toISOString(),
+            };
+            upsertLocalWatchlist(updated);
+
+            const targetUserId = getUserId();
+            if (db && targetUserId) {
+              updateDoc(doc(db, 'users', targetUserId, 'watchlist', prev.id), {
+                omdb: data.omdb,
+                imdbId: data.omdb.imdbId || prev.imdbId || null,
+                imdbRating: data.omdb.imdbRating || prev.imdbRating || null,
+                imdbVotes: data.omdb.imdbVotes || prev.imdbVotes || null,
+                rottenTomatoes: data.omdb.rottenTomatoes || prev.rottenTomatoes || null,
+                metacritic: data.omdb.metacritic || prev.metacritic || null,
+                awards: data.omdb.awards || prev.awards || null,
+                boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
+                updatedAt: updated.updatedAt,
+              }).catch((e) => console.warn('[WatchlistDetail] updateDoc OMDB error:', e));
+            }
+            return updated;
+          });
+        }
+      })
+      .catch((err) => console.warn('[WatchlistDetail] OMDB fetch error:', err))
+      .finally(() => setOmdbLoading(false));
+  }, [item?.title, item?.id]);
 
   // Overview 400 chars expansion state
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
@@ -463,7 +575,7 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
     <div className="min-h-screen bg-[#07090f] text-white flex flex-col relative pb-20 overflow-x-hidden selection:bg-amber-500 selection:text-black">
       {/* ── Ambient Backdrop Image Layer ── */}
       {backdrop && (
-        <div className="absolute top-0 inset-x-0 h-[480px] sm:h-[560px] pointer-events-none overflow-hidden z-0">
+        <div className="fixed top-0 inset-x-0 h-[480px] sm:h-[560px] pointer-events-none overflow-hidden z-0">
           <img
             src={backdrop}
             alt={item.title}
@@ -509,30 +621,51 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
       {/* ── Hero Banner (Poster + Details) ── */}
       <div className="relative z-10 max-w-6xl w-full mx-auto px-4 md:px-6 pt-2 pb-8 sm:pb-10 border-b border-white/5">
         <div className="flex flex-col sm:flex-row gap-6 md:gap-8 items-start">
-          {/* Poster Card */}
-          <div className="hidden sm:block relative w-44 sm:w-52 md:w-60 shrink-0 rounded-2xl sm:rounded-3xl overflow-hidden glass-card border border-white/15 shadow-2xl bg-[#0d1117] group">
-            {item.posterUrl ? (
-              <img
-                src={item.posterUrl}
-                alt={item.title}
-                className="w-full h-auto aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500"
-              />
-            ) : (
-              <div className="w-full aspect-[2/3] flex flex-col items-center justify-center text-amber-400/80 bg-gradient-to-br from-amber-950/30 to-black gap-2">
-                <Bookmark size={44} />
-                <span className="text-[10px] font-mono uppercase tracking-wider">No Poster</span>
-              </div>
-            )}
+          {/* Poster Card Column */}
+          <div className="hidden sm:flex flex-col gap-3 shrink-0 w-44 sm:w-52 md:w-60">
+            <div className="relative w-full rounded-2xl sm:rounded-3xl overflow-hidden glass-card border border-white/15 shadow-2xl bg-[#0d1117] group">
+              {item.posterUrl ? (
+                <img
+                  src={item.posterUrl}
+                  alt={item.title}
+                  className="w-full h-auto aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500"
+                />
+              ) : (
+                <div className="w-full aspect-[2/3] flex flex-col items-center justify-center text-amber-400/80 bg-gradient-to-br from-amber-950/30 to-black gap-2">
+                  <Bookmark size={44} />
+                  <span className="text-[10px] font-mono uppercase tracking-wider">No Poster</span>
+                </div>
+              )}
 
-            {/* Poster Badges */}
-            <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
-              {item.rating > 0 && (
-                <span className="px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md border border-white/15 text-amber-300 font-bold text-xs flex items-center gap-1 shadow">
-                  <Star size={11} className="fill-amber-400 text-amber-400" />
-                  {item.rating}
-                </span>
+              {/* Poster Badges */}
+              <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
+                {getEffectiveRating(item) ? (
+                  <span className="px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md border border-white/15 text-amber-300 font-bold text-xs flex items-center gap-1 shadow">
+                    <Star size={11} className="fill-amber-400 text-amber-400" />
+                    {getEffectiveRating(item).value}
+                  </span>
+                ) : null}
+              </div>
+
+              {getEffectiveRating(item)?.label && (
+                <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-amber-500 text-black font-extrabold text-[9px] shadow uppercase tracking-wider">
+                  {getEffectiveRating(item).label}
+                </div>
               )}
             </div>
+
+            {/* Ratings just below the content poster */}
+            <OmdbRatingsBlock
+              omdb={item.omdb}
+              imdbId={item.imdbId || item.imdb_id}
+              imdbRating={item.imdbRating}
+              imdbVotes={item.imdbVotes}
+              rottenTomatoes={item.rottenTomatoes}
+              metacritic={item.metacritic}
+              loading={omdbLoading && !item.omdb}
+              showRatings={true}
+              showAwards={false}
+            />
           </div>
 
           {/* Details & Actions Area */}
@@ -740,6 +873,16 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
               </div>
             );
           })()}
+
+          {/* Awards & Box Office below Overview & Storyline */}
+          <OmdbRatingsBlock
+            omdb={item.omdb}
+            awards={item.awards}
+            boxOffice={item.boxOffice}
+            loading={omdbLoading && !item.omdb}
+            showRatings={false}
+            showAwards={true}
+          />
         </section>
 
         {/* 1.5. SEASONS & EPISODES SECTION */}
@@ -1310,9 +1453,156 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
             )}
           </div>
         </section>
+
+        {/* 7. More Like This From The Internet (Feature 7) */}
+        {(loadingRecs || internetRecommendations.length > 0) && (
+          <section className="space-y-4 pt-4 border-t border-white/5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-purple-500/20 to-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-md">
+                  <Globe size={16} />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
+                    <span>More Like This From The Web</span>
+                  </h2>
+                </div>
+              </div>
+
+              {internetRecommendations.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => scrollRecs('left')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+                    title="Scroll left"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollRecs('right')}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+                    title="Scroll right"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {loadingRecs ? (
+              <div className="flex items-center gap-2 overflow-x-auto py-2 no-scrollbar">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="flex-none w-32 sm:w-36 md:w-40 aspect-[2/3] rounded-2xl bg-white/5 animate-pulse" />
+                ))}
+              </div>
+            ) : (
+              <div
+                ref={recScrollRef}
+                className="flex items-start gap-2.5 sm:gap-3 overflow-x-auto no-scrollbar py-2 scroll-smooth select-none"
+              >
+                {internetRecommendations.map((rec) => {
+                  const isAdded = addedRecIds.has(rec.id);
+                  return (
+                    <div
+                      key={rec.id}
+                      onClick={() => {
+                        if (!isAdded) handleOpenAddModalForRec(rec);
+                      }}
+                      className="group relative flex-none w-32 sm:w-36 md:w-40 rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-cyan-400/50 hover:shadow-2xl hover:shadow-black/80 transition-all duration-300 flex flex-col cursor-pointer"
+                    >
+                      {/* Poster */}
+                      <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
+                        {rec.posterUrl ? (
+                          <img
+                            src={rec.posterUrl}
+                            alt={rec.title}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-gray-600">
+                            <Film size={28} />
+                          </div>
+                        )}
+
+                        {/* Liquid Rating Badge */}
+                        {rec.rating > 0 && (
+                          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 text-[10px] font-bold text-white flex items-center gap-1 shadow-lg pointer-events-none">
+                            <span className="text-amber-400">★</span>
+                            <span>{rec.rating}</span>
+                          </div>
+                        )}
+
+                        {/* Quick Add Button Overlay */}
+                        <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex justify-center">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!isAdded) handleOpenAddModalForRec(rec);
+                            }}
+                            disabled={isAdded}
+                            className={`w-full py-1.5 px-2 rounded-xl text-[10px] font-extrabold flex items-center justify-center gap-1 transition shadow-md active:scale-95 cursor-pointer ${
+                              isAdded
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 cursor-default'
+                                : 'bg-gradient-to-r from-cyan-600 to-purple-600 hover:from-cyan-500 hover:to-purple-500 text-white'
+                            }`}
+                          >
+                            {isAdded ? (
+                              <>
+                                <Check size={11} strokeWidth={3} />
+                                <span>In Watchlist</span>
+                              </>
+                            ) : (
+                              <>
+                                <Plus size={11} strokeWidth={3} />
+                                <span>Add Watchlist</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Title Info */}
+                      <div className="p-2.5 flex flex-col justify-between flex-1 bg-[#090d16]">
+                        <h4 className="text-xs font-bold text-white line-clamp-1 group-hover:text-cyan-300 transition-colors" title={rec.title}>
+                          {rec.title}
+                        </h4>
+                        <div className="flex items-center justify-between text-[10px] text-gray-400 font-medium mt-1">
+                          <span>{rec.year || 'Feature'}</span>
+                          <span className="uppercase text-[9px] text-cyan-400/90 font-mono">{rec.contentType === 'web-series' ? 'Series' : 'Movie'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
       </div>
 
       {/* ── Modals ── */}
+      <AddWatchlistModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        initialSearch={addModalInitialSearch}
+        initialType={addModalInitialType}
+        onAddWatchlist={(newItem) => {
+          if (newItem) {
+            setAddedRecIds((prev) => {
+              const next = new Set(prev);
+              if (newItem.id) next.add(newItem.id);
+              if (newItem.tmdbId) next.add(`rec-${newItem.tmdbId}`);
+              return next;
+            });
+          }
+          setShowAddModal(false);
+        }}
+      />
+
       <EditWatchlistModal
         isOpen={showEditModal}
         onClose={() => setShowEditModal(false)}

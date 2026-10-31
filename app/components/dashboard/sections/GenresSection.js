@@ -31,7 +31,7 @@ export default function GenresSection({
         </div>
 
         {/* Scroll Navigation Arrows */}
-        <div className="flex items-center gap-2">
+        <div className="hidden sm:flex items-center gap-2">
           <button
             type="button"
             onClick={() => scrollGenres('left')}

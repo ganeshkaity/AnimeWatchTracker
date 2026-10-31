@@ -43,6 +43,7 @@ import TransferWatchlistModal from '../components/TransferWatchlistModal';
 import MediaPreviewModal from '../components/MediaPreviewModal';
 import CachedImage from '../utils/imageCache';
 import { toFanartPreview, toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
+import { getEffectiveRating } from '../utils/ratingUtils';
 
 import {
   GRADIENTS,
@@ -77,6 +78,7 @@ import MangaSection from '../components/dashboard/sections/MangaSection';
 import AudioStoriesSection from '../components/dashboard/sections/AudioStoriesSection';
 import WatchlistSection from '../components/dashboard/sections/WatchlistSection';
 import TopRatedMasterpiecesSection from '../components/dashboard/sections/TopRatedMasterpiecesSection';
+import TopRatedMoviesSection from '../components/dashboard/sections/TopRatedMoviesSection';
 import PopularLanguagesSection from '../components/dashboard/sections/PopularLanguagesSection';
 import PopularGenresSection from '../components/dashboard/sections/PopularGenresSection';
 import EndlessGenreSections from '../components/dashboard/sections/EndlessGenreSections';
@@ -90,6 +92,9 @@ import SettingsModal from '../components/dashboard/modals/SettingsModal';
 import CustomAlertModal from '../components/dashboard/modals/CustomAlertModal';
 import MediaCompleteConfirmModal from '../components/dashboard/modals/MediaCompleteConfirmModal';
 import MobileMediaActionSheet from '../components/dashboard/modals/MobileMediaActionSheet';
+import HiddenVaultView from '../components/vault/HiddenVaultView';
+import AchievementsModal from '../components/AchievementsModal';
+import HelpShortcutsModal from '../components/HelpShortcutsModal';
 
 export default function Dashboard({ onSelectAnime }) {
   const router = useRouter();
@@ -128,6 +133,49 @@ export default function Dashboard({ onSelectAnime }) {
   // Dynamic Document Title
   useEffect(() => {
     document.title = "Ganeshspace - Anime, Movies & Web Series";
+  }, []);
+
+  // Secret Vault, Achievements & Shortcuts Modal States
+  const [isVaultOpen, setIsVaultOpen] = useState(false);
+  const [showAchievementsModal, setShowAchievementsModal] = useState(false);
+  const [showShortcutsModal, setShowShortcutsModal] = useState(false);
+
+  // Global Keyboard Shortcuts (Ctrl+N, Ctrl+M, Ctrl+W, Ctrl+L, Ctrl+H, Esc)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        const key = (e.key || '').toLowerCase();
+        if (key === 'n') {
+          e.preventDefault();
+          setShowAddModal(true);
+        } else if (key === 'm') {
+          e.preventDefault();
+          setShowAddMovieModal(true);
+        } else if (key === 'w') {
+          e.preventDefault();
+          setShowAddWebseriesModal(true);
+        } else if (key === 'l') {
+          e.preventDefault();
+          setShowAddWatchlistModal(true);
+        } else if (key === 'h') {
+          e.preventDefault();
+          setShowShortcutsModal((prev) => !prev);
+        }
+      } else if (e.key === 'Escape') {
+        setShowAddModal(false);
+        setShowAddMovieModal(false);
+        setShowAddWebseriesModal(false);
+        setShowAddWatchlistModal(false);
+        setShowAddMangaModal(false);
+        setShowAddAudioStoryModal(false);
+        setShowSettings(false);
+        setShowAchievementsModal(false);
+        setShowShortcutsModal(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('recent'); // recent, alpha, progress
@@ -579,102 +627,52 @@ export default function Dashboard({ onSelectAnime }) {
     return () => { isMounted = false; };
   }, [hasScrolledToTopRated]);
 
+  // Top Rated Anime - only personal library animes
   const topRatedWithLibrary = useMemo(() => {
-    const clean = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!animes || animes.length === 0) return [];
 
-    // 1. Process all external top-rated anime & match with local anime
-    const processedExternal = topRatedAnime.map((show) => {
-      const sTitle = clean(show.seriesTitle || show.animeTitle || show.title);
-      const sSub = clean(show.subTitle);
-
-      const matchingLocal = animes.find((a) => {
-        const aTitle = clean(a.title);
-        const aFolder = a.folderPath ? clean(a.folderPath.split(/[/\\]/).pop()) : '';
-        return (
-          (aTitle && (aTitle === sTitle || (sSub && aTitle === sSub))) ||
-          (aTitle && aTitle.length >= 4 && (sTitle.includes(aTitle) || aTitle.includes(sTitle))) ||
-          (aFolder && aFolder.length >= 4 && (sTitle.includes(aFolder) || aFolder.includes(sTitle)))
-        );
-      });
-
-      const localCover = matchingLocal ? getAnimeFolderCover(matchingLocal) : '';
-      const userRating = matchingLocal && matchingLocal.rating ? parseFloat(matchingLocal.rating) : null;
-      const externalRating = parseFloat(show.rating || 0);
-      const effectiveRating = userRating !== null && !isNaN(userRating) && userRating > 0
-        ? Math.max(userRating, externalRating).toFixed(1)
-        : (show.rating || '9.0');
-
-      const epName = show.episodeName || show.title || 'Top Episode';
-      const seriesName = show.seriesTitle || show.animeTitle || show.subTitle || 'Anime Series';
+    const scored = animes.map((local) => {
+      const localCover = getAnimeFolderCover(local) || local.coverUrl || local.posterUrl || local.posterPath || (local.thumbnailBase64 || null) || '';
+      const resolvedRating = getEffectiveRating(local);
+      const userRating = resolvedRating?.source === 'manual' ? resolvedRating.numeric : (local.rating ? parseFloat(local.rating) : null);
+      const numericRating = (userRating !== null && !isNaN(userRating) && userRating > 0)
+        ? userRating
+        : (resolvedRating ? resolvedRating.numeric : (parseFloat(local.rating) || 0));
+      const displayRating = (userRating !== null && !isNaN(userRating) && userRating > 0)
+        ? userRating.toFixed(1)
+        : (resolvedRating ? resolvedRating.value : (numericRating > 0 ? numericRating.toFixed(1) : null));
 
       return {
-        ...show,
-        title: epName,
-        episodeName: epName,
-        seriesTitle: seriesName,
-        animeTitle: seriesName,
-        image: (matchingLocal && localCover) ? localCover : show.image,
-        banner: (matchingLocal && localCover) ? localCover : (show.banner || show.image),
-        rating: effectiveRating,
-        numericRating: parseFloat(effectiveRating) || 0,
-        isUploaded: Boolean(matchingLocal),
-        uploadedAnimeId: matchingLocal?.id,
-        userCustomRating: userRating !== null && !isNaN(userRating) && userRating > 0 ? userRating.toFixed(1) : null
+        ...local,
+        id: local.id,
+        rawId: local.id,
+        title: local.title || 'Untitled Anime',
+        episodeName: local.title || 'Untitled Anime',
+        seriesTitle: local.title || 'Untitled Anime',
+        animeTitle: local.title || 'Untitled Anime',
+        subTitle: local.folderPath || '',
+        image: localCover || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop',
+        banner: localCover || '',
+        rating: displayRating,
+        numericRating: numericRating,
+        episodes: local.episodeCount ? `${local.episodeCount} Ep` : 'Series',
+        type: 'Local',
+        year: local.year || '',
+        genres: Array.isArray(local.genres) ? local.genres.slice(0, 3) : [],
+        isUploaded: true,
+        uploadedAnimeId: local.id,
+        userCustomRating: userRating !== null && !isNaN(userRating) && userRating > 0 ? userRating.toFixed(1) : null,
       };
     });
 
-    // 2. Also check if user has local animes with user rating that should compete in top 20
-    const localOnlyShows = [];
-    animes.forEach((local) => {
-      const isAlreadyInList = processedExternal.some(
-        (ext) => ext.isUploaded && ext.uploadedAnimeId === local.id
-      );
+    // Sort descending by rating
+    scored.sort((a, b) => (b.numericRating || 0) - (a.numericRating || 0));
 
-      const localRatingNum = local.rating ? parseFloat(local.rating) : 0;
-      if (!isAlreadyInList && localRatingNum > 0) {
-        const localCover = getAnimeFolderCover(local);
-        const totalSeasons = local.totalSeasons ? Number(local.totalSeasons) : 1;
-        const totalEpisodes = local.totalEpisodes ? Number(local.totalEpisodes) : (local.episodeCount || 0);
-        const watchedEp = local.lastWatchedEpisode || 1;
-        const epLabel = `Ep ${watchedEp}`;
-        const epName = `Ep ${watchedEp} - ${local.title || 'Episode'}`;
-
-        localOnlyShows.push({
-          id: `local-top-${local.id}`,
-          rawId: local.id,
-          title: epName,
-          episodeName: epName,
-          seriesTitle: local.title || 'Untitled Anime',
-          animeTitle: local.title || 'Untitled Anime',
-          subTitle: local.folderPath || '',
-          image: localCover || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop',
-          banner: localCover || '',
-          rating: localRatingNum.toFixed(1),
-          numericRating: localRatingNum,
-          episodes: epLabel,
-          type: 'Local',
-          year: local.year || '',
-          genres: Array.isArray(local.genres) ? local.genres.slice(0, 3) : [],
-          studio: local.studio || 'My Local Library',
-          isUploaded: true,
-          uploadedAnimeId: local.id,
-          userCustomRating: localRatingNum.toFixed(1),
-          description: local.notes || 'From your local tracked anime library'
-        });
-      }
-    });
-
-    // 3. Combine and sort by rating descending (user's higher rated anime gets top rank!)
-    const combined = [...processedExternal, ...localOnlyShows]
-      .sort((a, b) => (b.numericRating || 0) - (a.numericRating || 0))
-      .slice(0, 20)
-      .map((item, idx) => ({
-        ...item,
-        rank: idx + 1
-      }));
-
-    return combined;
-  }, [topRatedAnime, animes]);
+    return scored.slice(0, 20).map((item, idx) => ({
+      ...item,
+      rank: idx + 1
+    }));
+  }, [animes]);
 
   // Get dynamic lists from database animes, mangas, audio stories, movies and web series
   const heroSlides = useMemo(() => getHeroSlides(animes, mangas, audioStories, movies, webseriesList), [animes, mangas, audioStories, movies, webseriesList]);
@@ -3532,6 +3530,16 @@ export default function Dashboard({ onSelectAnime }) {
   const isHeroLoading = loading && loadingMovies && loadingWebseries && loadingManga;
   const isContinueLoading = loading && loadingMovies && loadingWebseries && loadingManga && loadingAudioStories;
 
+  // Secret Vault Full View on Home Page (No URL change, cannot redirect via /hidden)
+  if (isVaultOpen) {
+    return (
+      <HiddenVaultView
+        onExitVault={() => setIsVaultOpen(false)}
+        onSelectAnime={onSelectAnime}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-transparent text-white flex flex-col selection:bg-[#7c5cff] selection:text-white">
 
@@ -3563,6 +3571,8 @@ export default function Dashboard({ onSelectAnime }) {
         setShowAddWebseriesModal={setShowAddWebseriesModal}
         setShowAddWatchlistModal={setShowAddWatchlistModal}
         setShowSettings={setShowSettings}
+        onOpenAchievements={() => setShowAchievementsModal(true)}
+        onOpenShortcuts={() => setShowShortcutsModal(true)}
       />
 
       {/* 2. MOBILE MENU & QUICK ACTIONS */}
@@ -3591,6 +3601,9 @@ export default function Dashboard({ onSelectAnime }) {
         setShowAddMovieModal={setShowAddMovieModal}
         setShowAddWebseriesModal={setShowAddWebseriesModal}
         setShowSettings={setShowSettings}
+        onOpenVault={() => setIsVaultOpen(true)}
+        onOpenAchievements={() => setShowAchievementsModal(true)}
+        onOpenShortcuts={() => setShowShortcutsModal(true)}
         isOffline={isOffline}
         isSyncing={isSyncing}
       />
@@ -3708,11 +3721,20 @@ export default function Dashboard({ onSelectAnime }) {
         {/* Top Rated Anime */}
         <TopRatedMasterpiecesSection
           lazyTopRatedRef={lazyTopRatedRef}
-          loadingTopRated={loadingTopRated}
+          loadingTopRated={loading && animes.length === 0}
           hasScrolledToTopRated={hasScrolledToTopRated}
           topRatedWithLibrary={topRatedWithLibrary}
           onSelectAnime={onSelectAnime}
           handleAddAnimeToLibrary={handleAddAnimeToLibrary}
+        />
+
+        {/* Top Rated Movies (Image 2 style) */}
+        <TopRatedMoviesSection
+          movies={movies}
+          handleCardMouseEnter={handleCardMouseEnter}
+          handleCardMouseLeave={handleCardMouseLeave}
+          activeMobileMenu={activeMobileMenu}
+          setActiveMobileMenu={setActiveMobileMenu}
         />
 
         {/* Popular Languages (Image 1 & 2) */}
@@ -4137,12 +4159,26 @@ export default function Dashboard({ onSelectAnime }) {
         handleExportData={handleExportData}
         exporting={exporting}
         isOffline={isOffline}
+        onOpenVault={() => setIsVaultOpen(true)}
+        onOpenAchievements={() => setShowAchievementsModal(true)}
       />
 
       {/* Action Blocked Custom Alert Modal */}
       <CustomAlertModal
         alertMessage={alertMessage}
         onClose={() => setAlertMessage('')}
+      />
+
+      {/* Achievements Modal */}
+      <AchievementsModal
+        isOpen={showAchievementsModal}
+        onClose={() => setShowAchievementsModal(false)}
+      />
+
+      {/* Keyboard Shortcuts Help Modal */}
+      <HelpShortcutsModal
+        isOpen={showShortcutsModal}
+        onClose={() => setShowShortcutsModal(false)}
       />
 
       {/* Mobile 3-Dot Options Bottom Sheet */}

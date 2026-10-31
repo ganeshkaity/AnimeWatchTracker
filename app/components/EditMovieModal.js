@@ -279,6 +279,8 @@ export default function EditMovieModal({
         runtime: runtimeMinutes,
         duration: runtimeMinutes * 60,
         rating: rating ? parseFloat(rating) : movie.rating,
+        userRating: rating ? parseFloat(rating) : (movie.userRating || null),
+        isManualRating: Boolean(rating && !isNaN(parseFloat(rating)) && parseFloat(rating) > 0),
         overview: overview.trim(),
         posterUrl: posterUrl || movie.posterUrl,
         backdropUrl: backdropUrl || movie.backdropUrl,

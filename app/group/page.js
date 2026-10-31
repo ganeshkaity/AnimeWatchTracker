@@ -24,6 +24,7 @@ import {
   setLocalMovieGroups,
   getUserId
 } from '../utils/localStore';
+import { getResolvedSmartCollections } from '../utils/smartCollections';
 import MediaCard from '../components/dashboard/cards/MediaCard';
 import MediaPreviewModal from '../components/MediaPreviewModal';
 
@@ -33,6 +34,7 @@ export default function MovieGroupsOverviewPage() {
 
   const [movies, setMovies] = useState(() => (typeof window !== 'undefined' ? getLocalMovies() || [] : []));
   const [movieGroups, setMovieGroups] = useState(() => (typeof window !== 'undefined' ? getLocalMovieGroups() || [] : []));
+  const [activeTab, setActiveTab] = useState('custom'); // 'custom' | 'smart'
   const [activePreview, setActivePreview] = useState(null); // { item, type, rect }
   const [activeMobileMenu, setActiveMobileMenu] = useState(null);
 
@@ -117,6 +119,11 @@ export default function MovieGroupsOverviewPage() {
     });
   }, [movieGroups, movieMap]);
 
+  // Smart Collections resolved from user's movies (Feature 12)
+  const smartCollections = useMemo(() => {
+    return getResolvedSmartCollections(movies);
+  }, [movies]);
+
   // Horizontal scroll handler
   const scrollRow = (groupId, direction) => {
     const el = rowRefs.current[groupId];
@@ -166,36 +173,83 @@ export default function MovieGroupsOverviewPage() {
   return (
     <div className="min-h-screen bg-[#07090e] text-white">
       {/* Top Header */}
-      <header className="sticky top-0 z-30 bg-[#07090e]/90 backdrop-blur-xl border-b border-white/10 px-4 sm:px-6 lg:px-12 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => router.push('/movies')}
-              className="p-2 sm:p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-md"
-              title="Back to Movies Library"
-            >
-              <ArrowLeft size={18} />
-              <span className="hidden sm:inline">Library</span>
-            </button>
+      <header className="sticky top-0 z-30 bg-[#07090e]/90 backdrop-blur-xl border-b border-white/10 px-4 sm:px-6 lg:px-12 py-3 sm:py-4">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+          <div className="flex items-center justify-between sm:justify-start gap-3 w-full sm:w-auto">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <button
+                type="button"
+                onClick={() => router.push('/movies')}
+                className="p-2 sm:p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-md shrink-0"
+                title="Back to Movies Library"
+              >
+                <ArrowLeft size={18} />
+                <span className="hidden sm:inline">Library</span>
+              </button>
 
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-white tracking-tight flex items-center gap-2">
-                  <span>Movie Groups</span>
-                </h1>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-amber-500 to-rose-600 flex items-center justify-center text-white shadow-md shadow-amber-500/20 shrink-0">
+                    <Layers size={16} />
+                  </div>
+                  <h1 className="text-lg sm:text-2xl md:text-3xl font-extrabold text-white tracking-tight truncate">
+                    <span>Movie Groups</span>
+                  </h1>
+                </div>
+                <p className="text-xs text-gray-400 mt-0.5 hidden sm:block truncate">
+                  Sequential collections &amp; smart auto-generated shelves
+                </p>
               </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-2">
+            {/* Mobile Create Group Button */}
             <button
               type="button"
               onClick={() => router.push('/create-group')}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white font-bold text-xs sm:text-sm flex items-center gap-2 transition shadow-lg shadow-amber-600/20 cursor-pointer active:scale-95"
+              className="sm:hidden px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-lg shadow-amber-600/20 cursor-pointer active:scale-95 shrink-0"
+            >
+              <Plus size={15} />
+              <span>Create</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            {/* Tab Toggle: Custom Groups vs Smart Collections */}
+            <div className="grid grid-cols-2 sm:flex items-center bg-white/5 border border-white/10 p-1 rounded-xl text-xs font-bold w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => setActiveTab('custom')}
+                className={`px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                  activeTab === 'custom'
+                    ? 'bg-gradient-to-r from-amber-500 to-rose-600 text-white shadow-md'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Layers size={13} />
+                <span className="truncate">Custom ({groupsWithMovies.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('smart')}
+                className={`px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                  activeTab === 'smart'
+                    ? 'bg-gradient-to-r from-purple-600 to-cyan-500 text-white shadow-md'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Sparkles size={13} />
+                <span className="truncate">Smart Auto ({smartCollections.length})</span>
+              </button>
+            </div>
+
+            {/* Desktop Create Group Button */}
+            <button
+              type="button"
+              onClick={() => router.push('/create-group')}
+              className="hidden sm:flex px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white font-bold text-xs sm:text-sm items-center gap-2 transition shadow-lg shadow-amber-600/20 cursor-pointer active:scale-95 shrink-0"
             >
               <Plus size={16} />
-              <span>Create</span>
+              <span>Create Group</span>
             </button>
           </div>
         </div>
@@ -203,7 +257,91 @@ export default function MovieGroupsOverviewPage() {
 
       {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-12 py-6 sm:py-8 space-y-10">
-        {groupsWithMovies.length === 0 ? (
+        {activeTab === 'smart' ? (
+          /* Smart Auto-Generated Collections (Feature 12) */
+          <div className="space-y-10">
+            {smartCollections.length === 0 ? (
+              <div className="text-center py-20 text-gray-400">
+                <Sparkles size={36} className="mx-auto text-purple-400 mb-2" />
+                <h3 className="text-lg font-bold text-white">No Smart Collections Available</h3>
+                <p className="text-xs text-gray-400">Add movies to your library to populate smart collections automatically.</p>
+              </div>
+            ) : (
+              smartCollections.map((col) => (
+                <section key={col.id} className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-baseline gap-2.5 flex-wrap">
+                      <h2 className="text-xl sm:text-2xl font-extrabold tracking-wide text-white flex items-center gap-2">
+                        <span>{col.name}</span>
+                      </h2>
+                      <span className="text-xs text-purple-300 font-semibold px-2 py-0.5 rounded-full bg-purple-500/15 border border-purple-500/30">
+                        {col.badge} • {col.count} {col.count === 1 ? 'Movie' : 'Movies'}
+                      </span>
+                      <p className="text-xs text-gray-400 hidden md:inline truncate max-w-md">
+                        — {col.description}
+                      </p>
+                    </div>
+
+                    <div className="hidden sm:flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => scrollRow(col.id, 'left')}
+                        className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                        title="Scroll left"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => scrollRow(col.id, 'right')}
+                        className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                        title="Scroll right"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div
+                    ref={(el) => {
+                      if (el) rowRefs.current[col.id] = el;
+                    }}
+                    className="flex items-start gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2 scroll-smooth select-none"
+                  >
+                    {col.items.map((item) => {
+                      const coverImg = item.posterUrl || item.posterPath || (item.thumbnailBase64 || null);
+                      const rating = item.rating || item.score || null;
+                      const isWatched = Boolean(
+                        item.watched || item.completed || item.watchStatus === 'Completed' || (item.watchProgress && item.watchProgress >= 95)
+                      );
+                      const pct = item.watchProgress || item.progressPercent || 0;
+                      const movieYear = item.year || (item.releaseDate ? item.releaseDate.split('-')[0] : 'Movie');
+                      const runtimeStr = item.runtime ? `${Math.floor(item.runtime / 60)}h ${item.runtime % 60}m` : 'Feature';
+
+                      return (
+                        <MediaCard
+                          key={`${col.id}-${item.id}`}
+                          item={item}
+                          type="movie"
+                          coverImg={coverImg}
+                          rating={rating}
+                          isCompleted={isWatched}
+                          pct={pct}
+                          subLeft={movieYear}
+                          subRight={runtimeStr}
+                          accentBorder="hover:border-purple-400/50"
+                          onClick={() => router.push(`/movies/${item.id}`)}
+                          onMouseEnter={(e) => handleCardMouseEnter(item, 'movie', e)}
+                          onMouseLeave={handleCardMouseLeave}
+                        />
+                      );
+                    })}
+                  </div>
+                </section>
+              ))
+            )}
+          </div>
+        ) : groupsWithMovies.length === 0 ? (
           /* Empty state */
           <div className="flex flex-col items-center justify-center py-20 text-center px-4">
             <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-amber-500/20 to-purple-600/20 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-5 shadow-2xl">
@@ -249,23 +387,25 @@ export default function MovieGroupsOverviewPage() {
                         <ChevronRight size={14} />
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => scrollRow(group.id, 'left')}
-                        className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
-                        title="Scroll left"
-                      >
-                        <ChevronLeft size={16} />
-                      </button>
+                      <div className="hidden sm:flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => scrollRow(group.id, 'left')}
+                          className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                          title="Scroll left"
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => scrollRow(group.id, 'right')}
-                        className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
-                        title="Scroll right"
-                      >
-                        <ChevronRight size={16} />
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => scrollRow(group.id, 'right')}
+                          className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                          title="Scroll right"
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                      </div>
                     </div>
                   </div>
 

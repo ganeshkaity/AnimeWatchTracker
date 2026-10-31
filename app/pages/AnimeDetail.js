@@ -7,10 +7,11 @@ import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { useOffline } from '../context/OfflineContext';
 import {
-  getLocalAnime, upsertLocalAnime, deleteLocalAnime,
+  getLocalAnime, getLocalAnimes, upsertLocalAnime, deleteLocalAnime,
   getLocalEpisodes, upsertLocalEpisode, setLocalEpisodes, deleteLocalEpisode,
   addToDirtyQueue, getUserId
 } from '../utils/localStore';
+import MediaCard from '../components/dashboard/cards/MediaCard';
 import {
   sortEpisodes, getSubfolder, getSafeDocId, processScannedFiles,
   extractSeasonNumber, NAMING_PATTERNS
@@ -18,6 +19,8 @@ import {
 import { toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 import EditAnimeModal from '../components/EditAnimeModal';
 import AssignEpisodesModal from '../components/AssignEpisodesModal';
+import OmdbRatingsBlock from '../components/OmdbRatingsBlock';
+import { getEffectiveRating } from '../utils/ratingUtils';
 import { 
   ArrowLeft, Play, CheckCircle2, Bookmark, StickyNote, Star, AlertTriangle, 
   Sparkles, History, RotateCcw, X, Heart, EyeOff, Film, Clock, Search,
@@ -326,6 +329,76 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   // Note Modal state
   const [editingEp, setEditingEp] = useState(null);
   const [noteText, setNoteText] = useState('');
+
+  // Similar Anime in Your Library (Feature 7)
+  const similarScrollRef = useRef(null);
+  const scrollSimilar = (direction) => {
+    if (similarScrollRef.current) {
+      const { scrollLeft, clientWidth } = similarScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
+      similarScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  const [libraryAnimes, setLibraryAnimes] = useState(() => (typeof window !== 'undefined' ? getLocalAnimes() || [] : []));
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setLibraryAnimes(getLocalAnimes() || []);
+    }
+    const handleSync = () => setLibraryAnimes(getLocalAnimes() || []);
+    window.addEventListener('local_anime_updated', handleSync);
+    window.addEventListener('storage', handleSync);
+
+    const targetUserId = currentUser?.uid || (typeof getUserId === 'function' ? getUserId() : null);
+    let unsub = null;
+    if (db && targetUserId) {
+      unsub = onSnapshot(collection(db, 'users', targetUserId, 'anime'), (snap) => {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (list.length > 0) setLibraryAnimes(list);
+      });
+    }
+
+    return () => {
+      window.removeEventListener('local_anime_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
+      if (unsub) unsub();
+    };
+  }, [currentUser]);
+
+  const similarAnimes = useMemo(() => {
+    if (!anime) return [];
+    const all = libraryAnimes.length > 0 ? libraryAnimes : (typeof window !== 'undefined' ? getLocalAnimes() || [] : []);
+
+    const parseGenres = (raw) => {
+      if (!raw) return [];
+      if (Array.isArray(raw)) {
+        return raw.map(g => (typeof g === 'string' ? g : g.name || '').toLowerCase().trim()).filter(Boolean);
+      }
+      if (typeof raw === 'string') {
+        return raw.split(',').map(s => s.toLowerCase().trim()).filter(Boolean);
+      }
+      return [];
+    };
+
+    const currentGenres = parseGenres(anime.genres);
+
+    const scored = all
+      .filter((a) => a && a.id !== anime.id)
+      .map((a) => {
+        const gList = parseGenres(a.genres);
+        let overlap = 0;
+        for (const cg of currentGenres) {
+          if (cg && gList.some((g) => g.includes(cg) || cg.includes(g))) overlap++;
+        }
+        const effective = getEffectiveRating(a);
+        const numRating = effective ? effective.numeric : (parseFloat(a.rating || a.score) || 0);
+        return { item: a, score: overlap, rating: numRating };
+      });
+
+    scored.sort((a, b) => b.score - a.score || b.rating - a.rating);
+    return scored.slice(0, 12).map((s) => s.item);
+  }, [anime, libraryAnimes]);
   
   // Flags Modal state
   const [flaggingEp, setFlaggingEp] = useState(null);
@@ -555,11 +628,11 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   const handleSaveRating = async (newRating) => {
     if (!anime || !animeId) return;
     const ratingStr = String(newRating);
-    const update = { id: animeId, rating: ratingStr, updatedAt: new Date().toISOString() };
+    const update = { id: animeId, rating: ratingStr, userRating: ratingStr, isManualRating: true, updatedAt: new Date().toISOString() };
     
     // Update local cache
     upsertLocalAnime(update);
-    setAnime(prev => prev ? { ...prev, rating: ratingStr } : prev);
+    setAnime(prev => prev ? { ...prev, rating: ratingStr, userRating: ratingStr, isManualRating: true } : prev);
     
     // Update remote Firestore database
     if (!isOffline && db && currentUser) {
@@ -2214,6 +2287,65 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     };
   }, [anime?.title]);
 
+  // OMDB ratings, awards & box-office auto-fetch
+  const omdbFetchedRef = useRef(false);
+  const [omdbLoading, setOmdbLoading] = useState(false);
+
+  useEffect(() => {
+    if (!anime?.title || omdbFetchedRef.current) return;
+    if (anime.omdb && (anime.omdb.imdbRating || anime.omdb.awards)) return;
+
+    omdbFetchedRef.current = true;
+    setOmdbLoading(true);
+
+    const params = new URLSearchParams();
+    params.set('title', anime.title);
+    if (anime.year) params.set('year', String(anime.year));
+    if (anime.imdbId || anime.imdb_id) params.set('imdbId', String(anime.imdbId || anime.imdb_id));
+    params.set('type', 'series');
+
+    fetch(`/api/omdb?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.omdb) {
+          setAnime((prev) => {
+            if (!prev) return prev;
+            const updated = {
+              ...prev,
+              omdb: data.omdb,
+              imdbId: data.omdb.imdbId || prev.imdbId || null,
+              imdbRating: data.omdb.imdbRating || prev.imdbRating || null,
+              imdbVotes: data.omdb.imdbVotes || prev.imdbVotes || null,
+              rottenTomatoes: data.omdb.rottenTomatoes || prev.rottenTomatoes || null,
+              metacritic: data.omdb.metacritic || prev.metacritic || null,
+              awards: data.omdb.awards || prev.awards || null,
+              boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
+              updatedAt: new Date().toISOString(),
+            };
+            upsertLocalAnime(updated);
+
+            const targetUserId = getUserId();
+            if (db && targetUserId) {
+              updateDoc(doc(db, 'users', targetUserId, 'anime', animeId), {
+                omdb: data.omdb,
+                imdbId: data.omdb.imdbId || prev.imdbId || null,
+                imdbRating: data.omdb.imdbRating || prev.imdbRating || null,
+                imdbVotes: data.omdb.imdbVotes || prev.imdbVotes || null,
+                rottenTomatoes: data.omdb.rottenTomatoes || prev.rottenTomatoes || null,
+                metacritic: data.omdb.metacritic || prev.metacritic || null,
+                awards: data.omdb.awards || prev.awards || null,
+                boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
+                updatedAt: updated.updatedAt,
+              }).catch((e) => console.warn('[AnimeDetail] updateDoc OMDB error:', e));
+            }
+            return updated;
+          });
+        }
+      })
+      .catch((err) => console.warn('[AnimeDetail] OMDB fetch error:', err))
+      .finally(() => setOmdbLoading(false));
+  }, [anime?.title, animeId]);
+
   // Horizontal scroll helpers for Cast & Videos carousels
   const scrollCast = (direction) => {
     if (castScrollRef.current) {
@@ -2662,7 +2794,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     <div className="min-h-screen bg-[#07090f] text-white flex flex-col relative pb-20 overflow-x-hidden">
       {/* ── Ambient Backdrop Image Layer (Extends from top-0 behind transparent header & hero) ── */}
       {backdrop && (
-        <div className="absolute top-0 inset-x-0 h-[460px] sm:h-[540px] pointer-events-none overflow-hidden z-0">
+        <div className="fixed top-0 inset-x-0 h-[460px] sm:h-[540px] pointer-events-none overflow-hidden z-0">
           <img
             src={backdrop}
             alt={anime?.title}
@@ -2747,34 +2879,49 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
       {anime && (
         <div className="relative z-10 max-w-7xl w-full mx-auto px-4 md:px-8 pt-2 pb-8 sm:pb-10 border-b border-white/5">
           <div className="flex flex-col sm:flex-row gap-6 md:gap-8 items-start">
-            {/* Poster Card */}
-            <div className="hidden sm:block relative w-44 sm:w-52 md:w-60 shrink-0 rounded-2xl sm:rounded-3xl overflow-hidden glass-card border border-white/15 shadow-2xl bg-[#0d1117] group">
-              {posterUrl ? (
-                <img
-                  src={posterUrl}
-                  alt={anime.title}
-                  className="w-full h-auto aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500"
-                />
-              ) : (
-                <div className="w-full aspect-[2/3] flex flex-col items-center justify-center text-[#7c5cff]/80 bg-gradient-to-br from-purple-950/30 to-black gap-2">
-                  <Tv size={44} />
-                  <span className="text-[10px] font-mono uppercase tracking-wider">No Poster</span>
-                </div>
-              )}
-
-              {/* Poster Badges */}
-              <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
-                {animeRating && (
-                  <span className="px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md border border-white/15 text-amber-300 font-bold text-xs flex items-center gap-1 shadow">
-                    <Star size={11} className="fill-amber-400 text-amber-400" />
-                    {formatRatingDisplay(animeRating)}
-                  </span>
+            {/* Poster Card Column */}
+            <div className="hidden sm:flex flex-col gap-3 shrink-0 w-44 sm:w-52 md:w-60">
+              <div className="relative w-full rounded-2xl sm:rounded-3xl overflow-hidden glass-card border border-white/15 shadow-2xl bg-[#0d1117] group">
+                {posterUrl ? (
+                  <img
+                    src={posterUrl}
+                    alt={anime.title}
+                    className="w-full h-auto aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                ) : (
+                  <div className="w-full aspect-[2/3] flex flex-col items-center justify-center text-[#7c5cff]/80 bg-gradient-to-br from-purple-950/30 to-black gap-2">
+                    <Tv size={44} />
+                    <span className="text-[10px] font-mono uppercase tracking-wider">No Poster</span>
+                  </div>
                 )}
+
+                {/* Poster Badges */}
+                <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
+                  {(getEffectiveRating(anime) || animeRating) && (
+                    <span className="px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md border border-white/15 text-amber-300 font-bold text-xs flex items-center gap-1 shadow">
+                      <Star size={11} className="fill-amber-400 text-amber-400" />
+                      {getEffectiveRating(anime)?.value || formatRatingDisplay(animeRating)}
+                    </span>
+                  )}
+                </div>
+
+                <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-[#7c5cff] text-white font-extrabold text-[9px] shadow uppercase tracking-wider">
+                  {getEffectiveRating(anime)?.label || 'ANIME'}
+                </div>
               </div>
 
-              <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-[#7c5cff] text-white font-extrabold text-[9px] shadow uppercase tracking-wider">
-                ANIME
-              </div>
+              {/* Ratings just below the content poster */}
+              <OmdbRatingsBlock
+                omdb={anime.omdb}
+                imdbId={anime.imdbId || anime.imdb_id}
+                imdbRating={anime.imdbRating}
+                imdbVotes={anime.imdbVotes}
+                rottenTomatoes={anime.rottenTomatoes}
+                metacritic={anime.metacritic}
+                loading={omdbLoading && !anime.omdb}
+                showRatings={true}
+                showAwards={false}
+              />
             </div>
 
             {/* Details & Action Header */}
@@ -2964,7 +3111,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
       )}
 
       {/* Main Content (Two-column layout on desktop, right column at bottom on mobile) */}
-      <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 grid grid-cols-1 lg:grid-cols-4 gap-8">
+      <div className="relative z-10 max-w-7xl mx-auto px-4 md:px-8 py-8 grid grid-cols-1 lg:grid-cols-4 gap-8">
         
         {/* Left column: Seasons, Episodes, Storyline, Cast, Trailers, Artworks */}
         <div className="lg:col-span-3 space-y-8">
@@ -3676,6 +3823,16 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                   </button>
                 )}
               </div>
+
+              {/* Awards & Box Office below Storyline & Overview */}
+              <OmdbRatingsBlock
+                omdb={anime.omdb}
+                awards={anime.awards}
+                boxOffice={anime.boxOffice}
+                loading={omdbLoading && !anime.omdb}
+                showRatings={false}
+                showAwards={true}
+              />
             </section>
           )}
 
@@ -4279,8 +4436,86 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
             )}
           </div>
         </div>
-
       </div>
+
+      {/* Similar Anime in Your Library (Feature 7) */}
+      {similarAnimes.length > 0 && (
+        <div className="relative z-10 max-w-7xl mx-auto px-4 md:px-8 pb-12 w-full">
+          <section className="space-y-4 pt-6 border-t border-white/10">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start sm:items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400 shadow-md shrink-0 mt-0.5 sm:mt-0">
+                  <Sparkles size={18} />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base sm:text-lg md:text-xl font-extrabold text-white tracking-wide">
+                      Similar Anime in Your Library
+                    </h2>
+                  </div>
+                </div>
+              </div>
+
+              <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => scrollSimilar('left')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                  title="Scroll left"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollSimilar('right')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition cursor-pointer active:scale-95 shadow-sm"
+                  title="Scroll right"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+
+            <div
+              ref={similarScrollRef}
+              className="flex items-start gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2 scroll-smooth select-none"
+            >
+              {similarAnimes.map((item) => {
+                const coverImg = item.coverUrl || item.posterUrl || item.posterPath || (item.thumbnailBase64 || null);
+                const rating = item.rating || item.score || null;
+                const isWatched = Boolean(
+                  item.watched || item.completed || item.isWatched || (item.progressPercent && item.progressPercent >= 100)
+                );
+                const pct = item.progressPercent || 0;
+                const yearStr = item.year || (item.releaseDate ? item.releaseDate.split('-')[0] : 'Anime');
+                const epStr = item.episodeCount || item.totalEpisodes ? `${item.episodeCount || item.totalEpisodes} Ep` : 'Series';
+
+                return (
+                  <MediaCard
+                    key={`similar-anime-${item.id}`}
+                    item={item}
+                    type="anime"
+                    coverImg={coverImg}
+                    rating={rating}
+                    isCompleted={isWatched}
+                    pct={pct}
+                    subLeft={yearStr}
+                    subRight={epStr}
+                    accentBorder="hover:border-purple-400/50"
+                    onClick={() => {
+                      if (onSelectAnime) {
+                        onSelectAnime(item.id);
+                      } else {
+                        router.push(`/anime/${encodeURIComponent(item.id)}`);
+                      }
+                    }}
+                  />
+                );
+              })}
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* Note Editor Modal */}
       <AnimatePresence>

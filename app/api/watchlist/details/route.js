@@ -3,9 +3,6 @@ import { toFanartBigPreview, toFanartPreview, toFanartFull } from '../../../lib/
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_TMDB_KEY = '4e44d9029b1270a757cddc766a1bcb63';
-const DEFAULT_FANART_KEY = 'd2d31f9ecabea050fc7d68aa3146015f';
-
 // Helper to extract TMDB Watch Providers by country preference (IN, then US, then GB, then first available)
 function parseWatchProviders(results) {
   if (!results || typeof results !== 'object') {
@@ -44,8 +41,8 @@ export async function GET(request) {
       );
     }
 
-    const tmdbApiKey = process.env.TMDB_API_KEY || DEFAULT_TMDB_KEY;
-    const fanartApiKey = process.env.FANART_API_KEY || DEFAULT_FANART_KEY;
+    const tmdbApiKey = process.env.TMDB_API_KEY || '';
+    const fanartApiKey = process.env.FANART_API_KEY || '';
 
     // ── 1. MOVIE: ONLY FETCH FROM TMDB ──
     if (type === 'movie') {

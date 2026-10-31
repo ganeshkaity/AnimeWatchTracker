@@ -736,7 +736,7 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
   const handleSaveRating = async (newRating) => {
     if (!manga || !mangaId) return;
     const ratingStr = parseFloat(newRating).toFixed(1);
-    const updated = { ...manga, rating: ratingStr, updatedAt: new Date().toISOString() };
+    const updated = { ...manga, rating: ratingStr, userRating: ratingStr, isManualRating: true, updatedAt: new Date().toISOString() };
     setManga(updated);
     upsertLocalManga(updated);
 
@@ -744,6 +744,8 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
       try {
         await updateDoc(doc(db, 'users', getUserId(), 'mangas', mangaId), {
           rating: ratingStr,
+          userRating: ratingStr,
+          isManualRating: true,
           updatedAt: new Date().toISOString()
         });
       } catch (err) {

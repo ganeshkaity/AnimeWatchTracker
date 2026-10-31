@@ -17,13 +17,16 @@ import { doc, getDoc, updateDoc, deleteDoc, setDoc, collection, getDocs, writeBa
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import {
-  getLocalWebseriesItem, upsertLocalWebseries, deleteLocalWebseries,
+  getLocalWebseriesItem, getLocalWebseries, upsertLocalWebseries, deleteLocalWebseries,
   getLocalWebseriesEpisodes, setLocalWebseriesEpisodes,
   getUserId
 } from '../utils/localStore';
+import MediaCard from '../components/dashboard/cards/MediaCard';
 import { toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 import EditWebseriesModal from '../components/EditWebseriesModal';
 import AssignEpisodesModal from '../components/AssignEpisodesModal';
+import OmdbRatingsBlock from '../components/OmdbRatingsBlock';
+import { getEffectiveRating } from '../utils/ratingUtils';
 import {
   processScannedFiles, sortEpisodes, getSubfolder, extractSeasonNumber,
   NAMING_PATTERNS
@@ -407,6 +410,40 @@ export default function WebseriesDetail({ seriesId, onBack }) {
     showToast(shouldComplete ? 'Marked as Completed!' : 'Marked as Watching');
   };
 
+  const similarScrollRef = useRef(null);
+  const scrollSimilar = (direction) => {
+    if (similarScrollRef.current) {
+      const { scrollLeft, clientWidth } = similarScrollRef.current;
+      const scrollAmount = direction === 'left' ? scrollLeft - clientWidth * 0.75 : scrollLeft + clientWidth * 0.75;
+      similarScrollRef.current.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  const similarWebseries = useMemo(() => {
+    if (!series) return [];
+    if (typeof window === 'undefined') return [];
+    const all = getLocalWebseries() || [];
+    const currentGenres = (Array.isArray(series.genres) ? series.genres : []).map((g) =>
+      (typeof g === 'string' ? g : g.name || '').toLowerCase().trim()
+    );
+
+    const scored = all
+      .filter((s) => s && s.id !== series.id)
+      .map((s) => {
+        const gList = (Array.isArray(s.genres) ? s.genres : []).map((g) =>
+          (typeof g === 'string' ? g : g.name || '').toLowerCase().trim()
+        );
+        let overlap = 0;
+        for (const cg of currentGenres) {
+          if (cg && gList.some((g) => g.includes(cg) || cg.includes(g))) overlap++;
+        }
+        return { item: s, score: overlap, rating: s.rating || 0 };
+      });
+
+    scored.sort((a, b) => b.score - a.score || b.rating - a.rating);
+    return scored.slice(0, 12).map((s) => s.item);
+  }, [series]);
+
   // Background auto-enrich if missing images or cast and has tmdbId
   useEffect(() => {
     if (!seriesId) return;
@@ -436,6 +473,65 @@ export default function WebseriesDetail({ seriesId, onBack }) {
         .catch(err => console.warn('Background webseries enrich error:', err));
     }
   }, [seriesId]);
+
+  // OMDB ratings, awards & box-office auto-fetch
+  const omdbFetchedRef = useRef(false);
+  const [omdbLoading, setOmdbLoading] = useState(false);
+
+  useEffect(() => {
+    if (!series?.title || omdbFetchedRef.current) return;
+    if (series.omdb && (series.omdb.imdbRating || series.omdb.awards)) return;
+
+    omdbFetchedRef.current = true;
+    setOmdbLoading(true);
+
+    const params = new URLSearchParams();
+    params.set('title', series.title);
+    if (series.year) params.set('year', String(series.year));
+    if (series.imdbId || series.imdb_id) params.set('imdbId', String(series.imdbId || series.imdb_id));
+    params.set('type', 'series');
+
+    fetch(`/api/omdb?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.omdb) {
+          setSeries((prev) => {
+            if (!prev) return prev;
+            const updated = {
+              ...prev,
+              omdb: data.omdb,
+              imdbId: data.omdb.imdbId || prev.imdbId || null,
+              imdbRating: data.omdb.imdbRating || prev.imdbRating || null,
+              imdbVotes: data.omdb.imdbVotes || prev.imdbVotes || null,
+              rottenTomatoes: data.omdb.rottenTomatoes || prev.rottenTomatoes || null,
+              metacritic: data.omdb.metacritic || prev.metacritic || null,
+              awards: data.omdb.awards || prev.awards || null,
+              boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
+              updatedAt: new Date().toISOString(),
+            };
+            upsertLocalWebseries(updated);
+
+            const targetUserId = getUserId();
+            if (db && targetUserId) {
+              updateDoc(doc(db, 'users', targetUserId, 'webseries', seriesId), {
+                omdb: data.omdb,
+                imdbId: data.omdb.imdbId || prev.imdbId || null,
+                imdbRating: data.omdb.imdbRating || prev.imdbRating || null,
+                imdbVotes: data.omdb.imdbVotes || prev.imdbVotes || null,
+                rottenTomatoes: data.omdb.rottenTomatoes || prev.rottenTomatoes || null,
+                metacritic: data.omdb.metacritic || prev.metacritic || null,
+                awards: data.omdb.awards || prev.awards || null,
+                boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
+                updatedAt: updated.updatedAt,
+              }).catch((e) => console.warn('[WebseriesDetail] updateDoc OMDB error:', e));
+            }
+            return updated;
+          });
+        }
+      })
+      .catch((err) => console.warn('[WebseriesDetail] OMDB fetch error:', err))
+      .finally(() => setOmdbLoading(false));
+  }, [series?.title, seriesId]);
 
   // Gallery Memos
   const allImages = useMemo(() => {
@@ -1142,7 +1238,7 @@ export default function WebseriesDetail({ seriesId, onBack }) {
     <div className="min-h-screen bg-[#07090f] text-white flex flex-col relative pb-20 overflow-x-hidden selection:bg-amber-500 selection:text-black">
       {/* ── Ambient Backdrop Image Layer (Extends from top-0 behind transparent header & hero) ── */}
       {backdrop && (
-        <div className="absolute top-0 inset-x-0 h-[480px] sm:h-[560px] pointer-events-none overflow-hidden z-0">
+        <div className="fixed top-0 inset-x-0 h-[480px] sm:h-[560px] pointer-events-none overflow-hidden z-0">
           <img
             src={backdrop}
             alt={series.title}
@@ -1226,34 +1322,49 @@ export default function WebseriesDetail({ seriesId, onBack }) {
       {/* ── Hero Content (Poster + Details - Image 1 exact UI) ── */}
       <div className="relative z-10 max-w-6xl w-full mx-auto px-4 md:px-6 pt-2 pb-8 sm:pb-10 border-b border-white/5">
         <div className="flex flex-col sm:flex-row gap-6 md:gap-8 items-start">
-          {/* Poster Card */}
-          <div className="hidden sm:block relative w-44 sm:w-52 md:w-60 shrink-0 rounded-2xl sm:rounded-3xl overflow-hidden glass-card border border-white/15 shadow-2xl bg-[#0d1117] group">
-            {series.posterUrl ? (
-              <img
-                src={series.posterUrl}
-                alt={series.title}
-                className="w-full h-auto aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500"
-              />
-            ) : (
-              <div className="w-full aspect-[2/3] flex flex-col items-center justify-center text-amber-400/80 bg-gradient-to-br from-amber-950/30 to-black gap-2">
-                <Tv size={44} />
-                <span className="text-[10px] font-mono uppercase tracking-wider">No Poster</span>
-              </div>
-            )}
-
-            {/* Poster Badges */}
-            <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
-              {series.rating > 0 && (
-                <span className="px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md border border-white/15 text-amber-300 font-bold text-xs flex items-center gap-1 shadow">
-                  <Star size={11} className="fill-amber-400 text-amber-400" />
-                  {formatRating(series.rating)}
-                </span>
+          {/* Poster Card Column */}
+          <div className="hidden sm:flex flex-col gap-3 shrink-0 w-44 sm:w-52 md:w-60">
+            <div className="relative w-full rounded-2xl sm:rounded-3xl overflow-hidden glass-card border border-white/15 shadow-2xl bg-[#0d1117] group">
+              {series.posterUrl ? (
+                <img
+                  src={series.posterUrl}
+                  alt={series.title}
+                  className="w-full h-auto aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500"
+                />
+              ) : (
+                <div className="w-full aspect-[2/3] flex flex-col items-center justify-center text-amber-400/80 bg-gradient-to-br from-amber-950/30 to-black gap-2">
+                  <Tv size={44} />
+                  <span className="text-[10px] font-mono uppercase tracking-wider">No Poster</span>
+                </div>
               )}
+
+              {/* Poster Badges */}
+              <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
+                {getEffectiveRating(series) ? (
+                  <span className="px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-md border border-white/15 text-amber-300 font-bold text-xs flex items-center gap-1 shadow">
+                    <Star size={11} className="fill-amber-400 text-amber-400" />
+                    {getEffectiveRating(series).value}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-amber-500 text-black font-extrabold text-[9px] shadow uppercase tracking-wider">
+                {getEffectiveRating(series)?.label || 'TMDB'}
+              </div>
             </div>
 
-            <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-amber-500 text-black font-extrabold text-[9px] shadow uppercase tracking-wider">
-              TMDB
-            </div>
+            {/* Ratings just below the content poster */}
+            <OmdbRatingsBlock
+              omdb={series.omdb}
+              imdbId={series.imdbId || series.imdb_id}
+              imdbRating={series.imdbRating}
+              imdbVotes={series.imdbVotes}
+              rottenTomatoes={series.rottenTomatoes}
+              metacritic={series.metacritic}
+              loading={omdbLoading && !series.omdb}
+              showRatings={true}
+              showAwards={false}
+            />
           </div>
 
           {/* Details & Action Header */}
@@ -1264,10 +1375,10 @@ export default function WebseriesDetail({ seriesId, onBack }) {
                 <span className="px-2.5 py-0.5 text-amber-300 text-[10px] font-bold uppercase tracking-wider">
                   | WEBSERIES
                 </span>
-                {series.rating > 0 && (
+                {getEffectiveRating(series) && (
                   <span className="px-2.5 py-0.5 text-amber-300 text-[10px] font-bold flex items-center gap-1 sm:hidden">
                     <Star size={11} className="fill-amber-400 text-amber-400" />
-                    | {formatRating(series.rating)}
+                    | {getEffectiveRating(series).value}
                   </span>
                 )}
                 {series.year && (
@@ -1474,6 +1585,16 @@ export default function WebseriesDetail({ seriesId, onBack }) {
               </div>
             );
           })()}
+
+          {/* Awards & Box Office below Overview & Storyline */}
+          <OmdbRatingsBlock
+            omdb={series.omdb}
+            awards={series.awards}
+            boxOffice={series.boxOffice}
+            loading={omdbLoading && !series.omdb}
+            showRatings={false}
+            showAwards={true}
+          />
         </section>
 
         {/* 2. SEASONS & EPISODES SECTION ───────────────────────────────────── */}
@@ -2349,6 +2470,75 @@ export default function WebseriesDetail({ seriesId, onBack }) {
             </div>
           )}
         </section>
+
+        {/* Similar Web-series in Your Library (Feature 7) */}
+        {similarWebseries.length > 0 && (
+          <section className="space-y-4 pt-4 border-t border-white/5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-md">
+                  <Tv size={16} />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
+                    <span>More Like This in Your Library</span>
+                  </h2>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => scrollSimilar('left')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+                  title="Scroll left"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollSimilar('right')}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+                  title="Scroll right"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+
+            <div
+              ref={similarScrollRef}
+              className="flex items-start gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2 scroll-smooth select-none"
+            >
+              {similarWebseries.map((item) => {
+                const coverImg = item.posterUrl || item.posterPath || (item.thumbnailBase64 || null);
+                const rating = item.rating || item.score || null;
+                const isWatched = Boolean(
+                  item.watched || item.isWatched || item.watchStatus === 'Completed' || (item.progressPercent && item.progressPercent >= 100)
+                );
+                const pct = item.progressPercent || 0;
+                const yearStr = item.year || (item.releaseDate ? item.releaseDate.split('-')[0] : 'Series');
+                const epStr = item.episodesCount ? `${item.episodesCount} Ep` : (item.seasonsCount ? `${item.seasonsCount} S` : 'Series');
+
+                return (
+                  <MediaCard
+                    key={`similar-series-${item.id}`}
+                    item={item}
+                    type="webseries"
+                    coverImg={coverImg}
+                    rating={rating}
+                    isCompleted={isWatched}
+                    pct={pct}
+                    subLeft={yearStr}
+                    subRight={epStr}
+                    accentBorder="hover:border-cyan-400/50"
+                    onClick={() => router.push(`/webseries/${item.id}`)}
+                  />
+                );
+              })}
+            </div>
+          </section>
+        )}
       </div>
 
       {/* ── RESCAN RESULTS MODAL (IMAGE 2 EXACT IMPLEMENTATION) ──────────────── */}

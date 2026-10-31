@@ -58,7 +58,7 @@ export default function AnimeSection({
           </button>
 
           {topTrackedAnimes.length > 0 && (
-            <>
+            <div className="hidden sm:flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => scrollAnime('left')}
@@ -75,7 +75,7 @@ export default function AnimeSection({
               >
                 <ChevronRight size={18} />
               </button>
-            </>
+            </div>
           )}
         </div>
       </div>

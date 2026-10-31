@@ -51,7 +51,7 @@ export default function MoviesSection({
           </button>
 
           {sortedMovies.length > 0 && (
-            <>
+            <div className="hidden sm:flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => scrollMovie('left')}
@@ -68,7 +68,7 @@ export default function MoviesSection({
               >
                 <ChevronRight size={18} />
               </button>
-            </>
+            </div>
           )}
         </div>
       </div>

@@ -21,6 +21,7 @@ import AnimeCoverSearch from '../components/AnimeCoverSearch';
 import MediaPreviewModal from '../components/MediaPreviewModal';
 import CachedImage from '../utils/imageCache';
 import { toFanartPreview, toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
+import { getEffectiveRating } from '../utils/ratingUtils';
 
 const GENRES_LIST = [
   "All", "Action", "Adventure", "Comedy", "Crime", "Demons", "Detective", "Drama",
@@ -633,7 +634,9 @@ export default function AnimesLibrary() {
         }
 
         if (sortBy === 'rating') {
-          return parseFloat(b.rating || 0) - parseFloat(a.rating || 0);
+          const rA = getEffectiveRating(a)?.numeric || parseFloat(a.rating || 0);
+          const rB = getEffectiveRating(b)?.numeric || parseFloat(b.rating || 0);
+          return rB - rA;
         }
 
         if (sortBy === 'year') {
@@ -921,7 +924,7 @@ export default function AnimesLibrary() {
               const pct = getAnimeProgressPercent(anime);
               const isWatched = Boolean(anime.watched || anime.isWatched || anime.status === 'completed' || pct >= 100);
               const coverImg = anime.posterUrl || anime.posterPath || anime.coverUrl || (anime.thumbnailBase64 ? toFanartBigPreview(anime.thumbnailBase64) : (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null));
-              const rating = getDeterministicRating(anime.id, anime.rating);
+              const rating = getEffectiveRating(anime)?.value || getDeterministicRating(anime.id, anime.rating);
               const subLeft = anime.lastWatchedEpisode ? `EP ${anime.lastWatchedEpisode}` : (anime.year || (anime.totalSeasons ? `S${anime.totalSeasons}` : 'Anime'));
               const subRight = anime.totalEpisodes
                 ? (anime.episodeCount && anime.episodeCount !== Number(anime.totalEpisodes)

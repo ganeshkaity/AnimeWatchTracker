@@ -38,7 +38,7 @@ export default function TopRatedMasterpiecesSection({
         </div>
 
         {/* Arrow navigation controls */}
-        <div className="flex items-center gap-2">
+        <div className="hidden sm:flex items-center gap-2">
           <button
             type="button"
             onClick={() => scrollLocalTopRated('left')}
@@ -62,7 +62,7 @@ export default function TopRatedMasterpiecesSection({
         <TopRatedSkeleton count={7} />
       ) : topRatedWithLibrary.length === 0 ? (
         <div className="p-8 rounded-2xl glass-panel text-center text-xs text-gray-400 border border-white/10">
-          No top-rated anime data available at the moment.
+          No top-rated anime in your library yet.
         </div>
       ) : (
         <div
@@ -75,13 +75,8 @@ export default function TopRatedMasterpiecesSection({
               show={show}
               index={idx}
               onClick={() => {
-                if (show.isUploaded && show.uploadedAnimeId) {
-                  onSelectAnime(show.uploadedAnimeId);
-                } else if (show.id && !show.id.startsWith('ext-') && !show.id.startsWith('top-rated-')) {
-                  onSelectAnime(show.id);
-                } else if (handleAddAnimeToLibrary) {
-                  handleAddAnimeToLibrary(null, show);
-                }
+                const targetId = show.uploadedAnimeId || show.id;
+                if (targetId) onSelectAnime(targetId);
               }}
             />
           ))}

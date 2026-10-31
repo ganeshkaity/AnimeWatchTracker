@@ -214,36 +214,36 @@ export default function SingleGroupDetailsPage() {
   return (
     <div className="min-h-screen bg-[#07090e] text-white">
       {/* Top Header / Hero */}
-      <header className="sticky top-0 z-30 bg-[#07090e]/90 backdrop-blur-xl border-b border-white/10 px-4 sm:px-6 lg:px-12 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+      <header className="sticky top-0 z-30 bg-[#07090e]/90 backdrop-blur-xl border-b border-white/10 px-4 sm:px-6 lg:px-12 py-3.5 sm:py-4">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 sm:gap-4">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
             <button
               type="button"
               onClick={() => router.push('/group')}
-              className="p-2 sm:p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-md"
+              className="p-2 sm:p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-md shrink-0"
               title="Back to All Groups"
             >
               <ArrowLeft size={18} />
               <span className="hidden sm:inline">All Groups</span>
             </button>
 
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-white tracking-tight">
+                <h1 className="text-lg sm:text-2xl md:text-3xl font-extrabold text-white tracking-tight truncate max-w-[200px] xs:max-w-xs sm:max-w-none">
                   {targetGroup.name}
                 </h1>
-                <span className="text-xs sm:text-sm font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <span className="text-[10px] sm:text-xs font-semibold px-2 sm:px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">
                   {orderedMovies.length} {orderedMovies.length === 1 ? 'Movie' : 'Movies'}
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => router.push(`/create-group?edit=${encodeURIComponent(targetGroup.id)}`)}
-              className="px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 hover:text-white font-bold text-xs sm:text-sm flex items-center gap-2 transition cursor-pointer active:scale-95"
+              className="px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 hover:text-white font-bold text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 transition cursor-pointer active:scale-95 shadow-md"
             >
               <Edit3 size={15} />
               <span>Edit</span>

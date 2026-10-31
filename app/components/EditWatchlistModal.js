@@ -183,6 +183,8 @@ export default function EditWatchlistModal({
         originalTitle: originalTitle.trim(),
         year: year.trim(),
         rating: rating ? Number(rating) : 0,
+        userRating: rating ? Number(rating) : (item.userRating || null),
+        isManualRating: Boolean(rating && !isNaN(Number(rating)) && Number(rating) > 0),
         status,
         overview: overview.trim(),
         posterUrl: posterUrl.trim(),

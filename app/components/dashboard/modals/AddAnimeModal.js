@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Youtube,
@@ -21,6 +21,8 @@ import AnimeCoverSearch from '../../AnimeCoverSearch';
 import { NAMING_PATTERNS } from '../../../utils/parser';
 import { toFanartPreview, toFanartFull } from '../../../lib/fanartUtils';
 import { GENRES_LIST } from '../utils/dashboardHelpers';
+import { checkDuplicateMedia } from '../../../utils/duplicateDetector';
+import DuplicateWarningBanner from '../../DuplicateWarningBanner';
 
 export default function AddAnimeModal({
   showAddModal,
@@ -92,6 +94,15 @@ export default function AddAnimeModal({
   toggleVideoSelection,
   handleImportYouTubePlaylist,
 }) {
+  const duplicateMatch = useMemo(() => {
+    if (!showAddModal) return null;
+    const res = checkDuplicateMedia({
+      title: animeTitle || '',
+      targetType: 'anime',
+    });
+    return res.isDuplicate ? res.match : null;
+  }, [showAddModal, animeTitle]);
+
   return (
     <AnimatePresence>
       {showAddModal && (
@@ -405,6 +416,11 @@ export default function AddAnimeModal({
                       onChange={(e) => setAnimeTitle(e.target.value)}
                       required
                     />
+                    {duplicateMatch && (
+                      <div className="mt-2">
+                        <DuplicateWarningBanner match={duplicateMatch} />
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">

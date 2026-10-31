@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { toFanartBigPreview, toFanartFull } from '../../../lib/fanartUtils';
 import HeroSkeleton from '../skeletons/HeroSkeleton';
+import { getEffectiveRating } from '../../../utils/ratingUtils';
 
 export default function DashboardHero({
   heroSlides = [],
@@ -176,7 +177,7 @@ export default function DashboardHero({
                 <div className="flex flex-wrap items-center gap-2.5 md:gap-4 text-xs font-bold text-gray-400">
                   <span className="flex items-center gap-1">
                     <Star size={14} className="fill-amber-400 text-amber-400" />
-                    <span className="text-amber-400 font-extrabold">{currentHero.rating}</span>
+                    <span className="text-amber-400 font-extrabold">{getEffectiveRating(currentHero)?.value || currentHero.rating}</span>
                   </span>
                   {currentHero.isMovie ? (
                     <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-amber-300">

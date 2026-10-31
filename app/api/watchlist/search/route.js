@@ -3,9 +3,6 @@ import { toFanartBigPreview } from '../../../lib/fanartUtils';
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_TMDB_KEY = '4e44d9029b1270a757cddc766a1bcb63';
-const DEFAULT_FANART_KEY = 'd2d31f9ecabea050fc7d68aa3146015f';
-
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -16,8 +13,8 @@ export async function GET(request) {
       return NextResponse.json({ success: true, results: [] });
     }
 
-    const tmdbApiKey = process.env.TMDB_API_KEY || DEFAULT_TMDB_KEY;
-    const fanartApiKey = process.env.FANART_API_KEY || DEFAULT_FANART_KEY;
+    const tmdbApiKey = process.env.TMDB_API_KEY || '';
+    const fanartApiKey = process.env.FANART_API_KEY || '';
 
     // ── 1. Movies & Web-Series: FETCH ONLY FROM TMDB ──
     if (type === 'movie') {

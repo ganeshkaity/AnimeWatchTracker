@@ -73,7 +73,7 @@ export default function WatchlistSection({
           </button>
 
           {sortedWatchlist.length > 2 && (
-            <>
+            <div className="hidden sm:flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => scrollWatchlist('left')}
@@ -90,7 +90,7 @@ export default function WatchlistSection({
               >
                 <ChevronRight size={18} />
               </button>
-            </>
+            </div>
           )}
         </div>
       </div>

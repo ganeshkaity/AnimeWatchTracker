@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Film, X, Search, Loader2, Sparkles, CheckCircle2,
   HardDrive, ImagePlus, Star, Clock, AlertTriangle, ExternalLink,
   Users, Video, Layers, Check, Image as ImageIcon, Youtube
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { checkDuplicateMedia } from '../utils/duplicateDetector';
+import DuplicateWarningBanner from './DuplicateWarningBanner';
 
 const GENRES_LIST = [
   "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary",
@@ -89,6 +91,17 @@ export default function AddMovieModal({
   // Custom Movie Logo
   const [enableCustomLogo, setEnableCustomLogo] = useState(false);
   const [logoUrl, setLogoUrl] = useState('');
+
+  // Duplicate Media Detection
+  const duplicateMatch = useMemo(() => {
+    if (!isOpen) return null;
+    const res = checkDuplicateMedia({
+      title: title || selectedTmdbMovie?.title || '',
+      tmdbId: selectedTmdbMovie?.id || null,
+      targetType: 'movie',
+    });
+    return res.isDuplicate ? res.match : null;
+  }, [isOpen, title, selectedTmdbMovie]);
 
   // TMDB Extended Extras (Credits, Images, Videos) via append_to_response
   const [cast, setCast] = useState([]);
@@ -725,6 +738,11 @@ export default function AddMovieModal({
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                 />
+                {duplicateMatch && (
+                  <div className="mt-2">
+                    <DuplicateWarningBanner match={duplicateMatch} />
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1 font-bold">

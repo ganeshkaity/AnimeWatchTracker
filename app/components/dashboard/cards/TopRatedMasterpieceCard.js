@@ -1,12 +1,16 @@
 import React from 'react';
 import { Star } from 'lucide-react';
 import CachedImage from '../../../utils/imageCache';
+import { getEffectiveRating } from '../../../utils/ratingUtils';
 
 export default function TopRatedMasterpieceCard({
   show,
   index,
   onClick,
 }) {
+  const effectiveRatingObj = getEffectiveRating(show);
+  const displayRating = effectiveRatingObj ? effectiveRatingObj.value : (show.rating && !isNaN(parseFloat(show.rating)) ? parseFloat(show.rating).toFixed(1) : null);
+
   return (
     <div
       onClick={onClick}
@@ -22,17 +26,10 @@ export default function TopRatedMasterpieceCard({
         />
 
         {/* Liquid Glass Rating Badge (Top-Right) */}
-        {show.rating && (
+        {displayRating && (
           <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 text-[10px] font-bold text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.5)] backdrop-saturate-150 pointer-events-none">
             <Star size={10} className="fill-amber-400 text-amber-400" />
-            <span className="leading-none">{parseFloat(show.rating).toFixed(1)}</span>
-          </div>
-        )}
-
-        {/* In Library Badge if uploaded */}
-        {show.isUploaded && (
-          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded-md bg-emerald-500/90 text-white font-extrabold text-[8px] uppercase tracking-wider backdrop-blur-md shadow pointer-events-none">
-            In Library
+            <span className="leading-none">{displayRating}</span>
           </div>
         )}
       </div>

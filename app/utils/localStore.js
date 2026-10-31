@@ -23,6 +23,8 @@ const KEYS = {
   WEBSERIES_EPISODES: (seriesId) => `watchanime_webseries_episodes_${seriesId}`,
   WATCHLIST: 'watchanime_watchlist',
   MOVIE_GROUPS: 'watchanime_movie_groups',
+  VAULT_PIN: 'watchanime_vault_pin',
+  VAULT_ITEMS: 'watchanime_vault_items',
   NOTES: 'watchanime_notes',
   DIRTY_QUEUE: 'watchanime_dirty_queue',
 };
@@ -37,29 +39,102 @@ function read(key) {
   } catch { return null; }
 }
 
-function sanitizeItemForStorage(item) {
+function sanitizeItemForStorage(item, isAggressive = false) {
   if (!item || typeof item !== 'object') return item;
   const copy = { ...item };
+
   // Drop large data URI base64 strings if a remote URL exists, to stay well below localStorage limits
   for (const k of Object.keys(copy)) {
-    if (typeof copy[k] === 'string' && copy[k].startsWith('data:image/') && copy[k].length > 10000) {
-      if (copy.posterUrl || copy.posterPath || copy.coverUrl || copy.backdropUrl || copy.thumbnailPath) {
+    if (typeof copy[k] === 'string' && copy[k].startsWith('data:')) {
+      if (copy[k].length > 1000 && (copy.posterUrl || copy.posterPath || copy.coverUrl || copy.backdropUrl || copy.thumbnailPath)) {
+        delete copy[k];
+      } else if (copy[k].length > 50000 || isAggressive) {
         delete copy[k];
       }
     }
   }
+
+  // Compress seasons array for watchlist items in localStorage so thousands of episodes don't blow up quota
+  if (Array.isArray(copy.seasons)) {
+    if (isAggressive) {
+      delete copy.seasons;
+    } else {
+      copy.seasons = copy.seasons.map(s => ({
+        id: s.id,
+        name: s.name,
+        seasonNumber: s.seasonNumber,
+        episodeCount: s.episodes?.length || s.episodeCount || 0,
+        airDate: s.airDate,
+        posterUrl: s.posterUrl,
+      }));
+    }
+  }
+
+  // Limit cast array in localStorage summary
+  if (Array.isArray(copy.cast)) {
+    if (isAggressive) {
+      delete copy.cast;
+    } else if (copy.cast.length > 8) {
+      copy.cast = copy.cast.slice(0, 8).map(c => ({
+        id: c.id,
+        name: c.name,
+        character: c.character,
+        profileUrl: c.profileUrl || c.profile_path,
+      }));
+    }
+  }
+
+  // Limit images gallery array in localStorage summary
+  if (copy.images && typeof copy.images === 'object') {
+    if (isAggressive) {
+      delete copy.images;
+    } else {
+      copy.images = {
+        backdrops: Array.isArray(copy.images.backdrops) ? copy.images.backdrops.slice(0, 3) : [],
+        posters: Array.isArray(copy.images.posters) ? copy.images.posters.slice(0, 3) : [],
+        logos: Array.isArray(copy.images.logos) ? copy.images.logos.slice(0, 2) : [],
+        artworks: Array.isArray(copy.images.artworks) ? copy.images.artworks.slice(0, 2) : [],
+      };
+    }
+  }
+
+  // Drop large video trailers list in summary
+  if (Array.isArray(copy.videos) && (isAggressive || copy.videos.length > 3)) {
+    copy.videos = copy.videos.slice(0, 2);
+  }
+
+  if (isAggressive && copy.overview && copy.overview.length > 300) {
+    copy.overview = copy.overview.slice(0, 300) + '...';
+  }
+
   return copy;
 }
 
-function sanitizeForStorage(val) {
+function sanitizeForStorage(val, isAggressive = false) {
   if (!val) return val;
   if (Array.isArray(val)) {
-    return val.map(sanitizeItemForStorage);
+    return val.map(i => sanitizeItemForStorage(i, isAggressive));
   }
   if (typeof val === 'object') {
-    return sanitizeItemForStorage(val);
+    return sanitizeItemForStorage(val, isAggressive);
   }
   return val;
+}
+
+function clearTemporaryCaches() {
+  if (typeof window === 'undefined') return;
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('cached_omdb_') || k.startsWith('cached_top_rated_') || k.startsWith('watchanime_img_cache_'))) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach(k => {
+      try { localStorage.removeItem(k); } catch (_) {}
+    });
+  } catch (_) {}
 }
 
 function write(key, value) {
@@ -67,23 +142,31 @@ function write(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (e) {
-    // If quota exceeded, sanitize large base64 strings and retry
+    // If quota exceeded, clean disposable caches and retry with sanitization
     if (e && (e.name === 'QuotaExceededError' || e.code === 22 || e.number === -2147024882 || String(e).includes('quota'))) {
+      clearTemporaryCaches();
       try {
-        const sanitized = sanitizeForStorage(value);
+        const sanitized = sanitizeForStorage(value, false);
         localStorage.setItem(key, JSON.stringify(sanitized));
         return;
       } catch (retryErr) {
-        // If still failing and value is a long array, save the latest 100 items
+        // Retry with aggressive sanitization
         try {
-          if (Array.isArray(value) && value.length > 50) {
-            const trimmed = sanitizeForStorage(value.slice(0, 50));
-            localStorage.setItem(key, JSON.stringify(trimmed));
-            return;
-          }
-        } catch (_) {}
-        console.warn('localStore quota exceeded, unable to persist key:', key);
-        return;
+          const aggressive = sanitizeForStorage(value, true);
+          localStorage.setItem(key, JSON.stringify(aggressive));
+          return;
+        } catch (aggErr) {
+          // If still failing and value is a long array, save the latest 30 items
+          try {
+            if (Array.isArray(value) && value.length > 20) {
+              const trimmed = sanitizeForStorage(value.slice(0, 30), true);
+              localStorage.setItem(key, JSON.stringify(trimmed));
+              return;
+            }
+          } catch (_) {}
+          console.warn('localStore quota exceeded, unable to persist key:', key);
+          return;
+        }
       }
     }
     console.error('localStore write error:', e);
@@ -422,7 +505,7 @@ export function getLocalWatchlist() {
 }
 
 export function setLocalWatchlist(items) {
-  write(KEYS.WATCHLIST, items);
+  write(KEYS.WATCHLIST, sanitizeForStorage(items, false));
 }
 
 export function getLocalWatchlistItem(id) {
@@ -432,11 +515,12 @@ export function getLocalWatchlistItem(id) {
 
 export function upsertLocalWatchlist(item) {
   const items = getLocalWatchlist();
+  const sanitizedItem = sanitizeItemForStorage(item, false);
   const idx = items.findIndex(m => m.id === item.id || (item.tmdbId && m.tmdbId === item.tmdbId && m.contentType === item.contentType));
   if (idx >= 0) {
-    items[idx] = { ...items[idx], ...item };
+    items[idx] = { ...items[idx], ...sanitizedItem };
   } else {
-    items.unshift(item);
+    items.unshift(sanitizedItem);
   }
   setLocalWatchlist(items);
 }
@@ -478,6 +562,74 @@ export function upsertLocalMovieGroup(group) {
 export function deleteLocalMovieGroup(groupId) {
   const groups = getLocalMovieGroups().filter(g => g.id !== groupId && g.slug !== groupId);
   setLocalMovieGroups(groups);
+}
+
+// ─── Secret Vault / Hidden Shelf ───────────────────────────────────────────────
+
+export function getVaultPin() {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(KEYS.VAULT_PIN) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setVaultPin(pin) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!pin) {
+      localStorage.removeItem(KEYS.VAULT_PIN);
+    } else {
+      localStorage.setItem(KEYS.VAULT_PIN, String(pin).trim());
+    }
+    window.dispatchEvent(new CustomEvent('vault_pin_updated'));
+  } catch (err) {
+    console.error('Failed to set vault pin:', err);
+  }
+}
+
+export function getVaultItems() {
+  return read(KEYS.VAULT_ITEMS) || [];
+}
+
+export function setVaultItems(items) {
+  write(KEYS.VAULT_ITEMS, items || []);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('vault_items_updated'));
+  }
+}
+
+export function isItemInVault(itemId) {
+  if (!itemId) return false;
+  const items = getVaultItems();
+  return items.some(it => it.id === itemId);
+}
+
+export function toggleVaultItem(item) {
+  if (!item || !item.id) return false;
+  const items = getVaultItems();
+  const exists = items.some(it => it.id === item.id);
+  let updated;
+  if (exists) {
+    updated = items.filter(it => it.id !== item.id);
+  } else {
+    updated = [
+      ...items,
+      {
+        id: item.id,
+        mediaType: item.mediaType || item.type || item.contentType || 'movie',
+        title: item.title || item.name || 'Untitled',
+        posterUrl: item.posterUrl || item.posterPath || item.coverUrl || item.thumbnailBase64 || null,
+        rating: item.rating || item.score || null,
+        year: item.year || (item.releaseDate ? item.releaseDate.split('-')[0] : ''),
+        runtime: item.runtime || null,
+        addedAt: new Date().toISOString(),
+      }
+    ];
+  }
+  setVaultItems(updated);
+  return !exists;
 }
 
 // ─── Dirty Queue (pending Firestore writes) ────────────────────────────────────

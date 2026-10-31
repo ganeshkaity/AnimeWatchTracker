@@ -13,7 +13,7 @@ import { collection, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/fire
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import {
-  getLocalMovies, upsertLocalMovie, deleteLocalMovie,
+  getLocalMovies, setLocalMovies, upsertLocalMovie, deleteLocalMovie,
   addToDirtyQueue, getUserId
 } from '../utils/localStore';
 import AddMovieModal from '../components/AddMovieModal';
@@ -21,6 +21,7 @@ import EditMovieModal from '../components/EditMovieModal';
 import MediaPreviewModal from '../components/MediaPreviewModal';
 import MediaCardSkeleton from '../components/dashboard/skeletons/MediaCardSkeleton';
 import CachedImage from '../utils/imageCache';
+import { getEffectiveRating } from '../utils/ratingUtils';
 
 const YoutubeLogo = ({ size = 16, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
@@ -204,8 +205,18 @@ export default function MoviesLibrary() {
       const remoteMovies = [];
       snap.forEach(d => remoteMovies.push({ id: d.id, ...d.data() }));
       if (remoteMovies.length > 0) {
-        setMovies(remoteMovies);
-        remoteMovies.forEach(m => upsertLocalMovie(m));
+        const local = getLocalMovies() || [];
+        const movieMap = new Map();
+        local.forEach(m => { if (m.id) movieMap.set(m.id, m); });
+        remoteMovies.forEach(m => {
+          if (m.id) {
+            const existing = movieMap.get(m.id) || {};
+            movieMap.set(m.id, { ...existing, ...m });
+          }
+        });
+        const merged = Array.from(movieMap.values());
+        setMovies(merged);
+        setLocalMovies(merged);
       }
       setLoading(false);
     }, (err) => {
@@ -362,7 +373,9 @@ export default function MoviesLibrary() {
         }
 
         if (sortBy === 'rating') {
-          return parseFloat(b.rating || 0) - parseFloat(a.rating || 0);
+          const rA = getEffectiveRating(a)?.numeric || parseFloat(a.rating || 0);
+          const rB = getEffectiveRating(b)?.numeric || parseFloat(b.rating || 0);
+          return rB - rA;
         }
 
         if (sortBy === 'year') {
@@ -400,13 +413,13 @@ export default function MoviesLibrary() {
       (entries) => {
         if (entries[0].isIntersecting && !isLoadingMore) {
           setIsLoadingMore(true);
-          setTimeout(() => {
-            setVisibleCount((prev) => prev + getMovieInitialScreenCount());
+          requestAnimationFrame(() => {
+            setVisibleCount((prev) => prev + Math.max(24, getMovieInitialScreenCount()));
             setIsLoadingMore(false);
-          }, 300);
+          });
         }
       },
-      { rootMargin: '300px' }
+      { rootMargin: '600px' }
     );
 
     observer.observe(target);
@@ -667,10 +680,10 @@ export default function MoviesLibrary() {
 
                     {/* Top Badges */}
                     <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
-                      {movie.rating ? (
+                      {getEffectiveRating(movie) ? (
                         <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
                           <Star size={10} className="fill-amber-400" />
-                          <span>{parseFloat(movie.rating).toFixed(1)}</span>
+                          <span>{getEffectiveRating(movie).value}</span>
                         </div>
                       ) : <span />}
 
@@ -727,24 +740,14 @@ export default function MoviesLibrary() {
               );
             })}
 
-            {/* Infinite Scroll Sentinel */}
+            {/* Infinite Scroll Sentinel - Pure Skeleton Loader */}
             {visibleCount < filteredAndSortedMovies.length && (
-              <div ref={loadMoreRef} className="col-span-full py-6 space-y-4">
-                <div className="flex justify-center items-center">
-                  <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 text-xs text-gray-400 backdrop-blur-md">
-                    <Loader2 size={15} className="animate-spin text-amber-400" />
-                    <span>Loading more movies...</span>
-                  </div>
+              <div ref={loadMoreRef} className="col-span-full py-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-5 pt-2">
+                  {Array.from({ length: 6 }).map((_, idx) => (
+                    <MediaCardSkeleton key={`more-movie-skel-${idx}`} className="w-full" />
+                  ))}
                 </div>
-
-                {/* Skeletons while loading next screen batch */}
-                {isLoadingMore && (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-5 pt-2">
-                    {Array.from({ length: 6 }).map((_, idx) => (
-                      <MediaCardSkeleton key={`more-movie-skel-${idx}`} className="w-full" />
-                    ))}
-                  </div>
-                )}
               </div>
             )}
           </div>

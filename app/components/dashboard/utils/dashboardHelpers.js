@@ -1,6 +1,7 @@
 import React from 'react';
 import { getLocalEpisodes } from '../../../utils/localStore';
 import { toFanartBigPreview } from '../../../lib/fanartUtils';
+import { getEffectiveRating } from '../../../utils/ratingUtils';
 
 export const GRADIENTS = [
   "from-violet-600 to-indigo-700",
@@ -139,7 +140,10 @@ export const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList
       logoUrl: anime.logoUrl || null,
       poster: animePoster,
       banner: animeBanner,
-      rating: getDeterministicRating(anime.id, anime.rating),
+      rating: getEffectiveRating(anime)?.value || getDeterministicRating(anime.id, anime.rating),
+      imdbRating: anime.imdbRating || anime.omdb?.imdbRating || null,
+      userRating: anime.userRating || null,
+      isManualRating: Boolean(anime.isManualRating),
       episodes: epDisplay,
       totalSeasons: totalSeasons,
       totalEpisodes: totalEpisodes,
@@ -275,7 +279,10 @@ export const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList
       logoUrl: movie.logoUrl || null,
       poster: moviePoster,
       banner: movieBanner,
-      rating: movie.rating ? parseFloat(movie.rating).toFixed(1) : getDeterministicRating(movie.id, 8.5),
+      rating: getEffectiveRating(movie)?.value || (movie.rating ? parseFloat(movie.rating).toFixed(1) : getDeterministicRating(movie.id, 8.5)),
+      imdbRating: movie.imdbRating || movie.omdb?.imdbRating || null,
+      userRating: movie.userRating || null,
+      isManualRating: Boolean(movie.isManualRating),
       episodes: runtimeStr,
       totalSeasons: 0,
       totalEpisodes: 1,
@@ -333,7 +340,10 @@ export const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList
       logoUrl: series.logoUrl || null,
       poster: seriesPoster,
       banner: seriesBanner,
-      rating: series.rating ? parseFloat(series.rating).toFixed(1) : getDeterministicRating(series.id, 8.8),
+      rating: getEffectiveRating(series)?.value || (series.rating ? parseFloat(series.rating).toFixed(1) : getDeterministicRating(series.id, 8.8)),
+      imdbRating: series.imdbRating || series.omdb?.imdbRating || null,
+      userRating: series.userRating || null,
+      isManualRating: Boolean(series.isManualRating),
       episodes: epDisplay,
       totalSeasons: totalSeasons,
       totalEpisodes: totalEpisodes || scannedCount,

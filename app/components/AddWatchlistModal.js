@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Bookmark, X, Search, Loader2, Sparkles, CheckCircle2,
   ImagePlus, Star, Clock, AlertTriangle, ExternalLink,
@@ -15,6 +15,8 @@ import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { upsertLocalWatchlist, getUserId } from '../utils/localStore';
 import { toFanartBigPreview, toFanartPreview } from '../lib/fanartUtils';
+import { checkDuplicateMedia } from '../utils/duplicateDetector';
+import DuplicateWarningBanner from './DuplicateWarningBanner';
 
 const CONTENT_TYPES = [
   { id: 'movie', label: 'Movie', icon: Film, color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/30' },
@@ -59,6 +61,8 @@ export default function AddWatchlistModal({
   isOpen,
   onClose,
   onAddWatchlist,
+  initialSearch = '',
+  initialType = 'movie',
 }) {
   const { currentUser } = useAuth();
   const [contentType, setContentType] = useState('movie');
@@ -110,9 +114,72 @@ export default function AddWatchlistModal({
 
   const [submitting, setSubmitting] = useState(false);
 
-  // Reset form when modal closes
+  // Duplicate Media Detection
+  const duplicateMatch = useMemo(() => {
+    if (!isOpen) return null;
+    const res = checkDuplicateMedia({
+      title: title || selectedItem?.title || '',
+      tmdbId: selectedItem?.tmdbId || selectedItem?.id || null,
+      targetType: 'watchlist',
+    });
+    return res.isDuplicate ? res.match : null;
+  }, [isOpen, title, selectedItem]);
+
+  // Search logic supporting explicit query and type
+  const performSearch = async (queryText, targetType) => {
+    const q = (queryText !== undefined ? queryText : searchQuery).trim();
+    const type = targetType || contentType;
+    if (!q) return;
+
+    setSearching(true);
+    setSearchError('');
+    setHasSearched(true);
+    setSelectedItem(null);
+
+    try {
+      const res = await fetch(`/api/watchlist/search?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.results)) {
+        setSearchResults(data.results);
+        if (data.results.length === 0) {
+          setSearchError(`No ${type} found matching "${q}".`);
+        }
+      } else {
+        setSearchError(data.error || 'Failed to search media.');
+      }
+    } catch (err) {
+      console.error('[AddWatchlistModal] Search error:', err);
+      setSearchError('Network error while searching media.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  // Reset or pre-fill form when modal opens/closes
   useEffect(() => {
-    if (!isOpen) {
+    if (isOpen) {
+      let resolvedType = 'movie';
+      if (initialType) {
+        resolvedType =
+          initialType === 'tv' || initialType === 'series' || initialType === 'webseries'
+            ? 'web-series'
+            : initialType === 'audioStory' || initialType === 'audio'
+            ? 'audio-stories'
+            : initialType;
+        setContentType(resolvedType);
+      }
+      if (initialSearch && initialSearch.trim()) {
+        const query = initialSearch.trim();
+        setSearchQuery(query);
+        performSearch(query, resolvedType);
+      } else {
+        setSearchQuery('');
+        setSearchResults([]);
+        setHasSearched(false);
+        setSearchError('');
+        setSelectedItem(null);
+      }
+    } else {
       setSearchQuery('');
       setSearchResults([]);
       setSearching(false);
@@ -144,38 +211,14 @@ export default function AddWatchlistModal({
       setFetchingSeasons(false);
       setSubmitting(false);
     }
-  }, [isOpen]);
+  }, [isOpen, initialSearch, initialType]);
 
   if (!isOpen) return null;
 
   // ── 1. Search Media ────────────────────────────────────────────────────────
-  const handleSearch = async (e) => {
+  const handleSearch = (e) => {
     if (e) e.preventDefault();
-    const q = searchQuery.trim();
-    if (!q) return;
-
-    setSearching(true);
-    setSearchError('');
-    setHasSearched(true);
-    setSelectedItem(null);
-
-    try {
-      const res = await fetch(`/api/watchlist/search?q=${encodeURIComponent(q)}&type=${encodeURIComponent(contentType)}`);
-      const data = await res.json();
-      if (data.success && Array.isArray(data.results)) {
-        setSearchResults(data.results);
-        if (data.results.length === 0) {
-          setSearchError(`No ${contentType} found matching "${q}".`);
-        }
-      } else {
-        setSearchError(data.error || 'Failed to search media.');
-      }
-    } catch (err) {
-      console.error('[AddWatchlistModal] Search error:', err);
-      setSearchError('Network error while searching media.');
-    } finally {
-      setSearching(false);
-    }
+    performSearch(searchQuery, contentType);
   };
 
   // ── 2. Select Result & Auto-Fetch Complete Details ─────────────────────────
@@ -376,7 +419,9 @@ export default function AddWatchlistModal({
         updatedAt: new Date().toISOString(),
       };
 
-      await onAddWatchlist(watchlistItem);
+      if (typeof onAddWatchlist === 'function') {
+        await onAddWatchlist(watchlistItem);
+      }
 
       // Persist to localStore immediately
       upsertLocalWatchlist(watchlistItem);
@@ -623,6 +668,11 @@ export default function AddWatchlistModal({
                   placeholder="e.g., Inception"
                   className="w-full px-3.5 py-2 bg-white/5 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500/50"
                 />
+                {duplicateMatch && (
+                  <div className="mt-2">
+                    <DuplicateWarningBanner match={duplicateMatch} />
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-[11px] text-gray-400 font-semibold mb-1">Original / Native Title</label>
