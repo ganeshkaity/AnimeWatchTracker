@@ -2118,23 +2118,23 @@ export default function MediaServerPlayer({
                   <div className="flex items-center justify-between text-white">
 
                     {/* Left Controls: Play/Pause, Volume, Time (01:36 / 23:39) */}
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 sm:gap-2.5">
                       <button
                         onClick={togglePlay}
-                        className="p-1 text-white hover:text-[#ffd000] transition cursor-pointer"
+                        className="p-1 text-white hover:text-[#ffd000] transition cursor-pointer flex items-center justify-center"
                         title={playerState === 'playing' ? 'Pause' : 'Play'}
                       >
-                        {playerState === 'playing' ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
+                        {playerState === 'playing' ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
                       </button>
 
                       {/* Vertical Volume with Hover Slider */}
                       <div className="relative group/vol flex items-center justify-center">
                         <button
                           onClick={toggleMute}
-                          className="p-1 text-white hover:text-[#ffd000] transition cursor-pointer"
+                          className="p-1 text-white hover:text-[#ffd000] transition cursor-pointer flex items-center justify-center"
                           title={isMuted ? "Unmute" : "Mute"}
                         >
-                          {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                          {isMuted || volume === 0 ? <VolumeX size={15} /> : <Volume2 size={15} />}
                         </button>
 
                         {/* Vertical Popover Slider appearing on Hover */}
@@ -2161,24 +2161,24 @@ export default function MediaServerPlayer({
                         </div>
                       </div>
 
-                      {/* Accurate Video Duration: 01:36 / 23:39 */}
-                      <div className="font-mono text-xs sm:text-sm font-semibold tracking-wider text-gray-300 ml-1">
+                      {/* Accurate Video Duration */}
+                      <div className="font-mono text-[11px] sm:text-xs font-semibold tracking-normal text-gray-300 ml-0.5">
                         <span>{formatTime(displayCurrentTime)}</span>
-                        <span className="text-gray-500 mx-1.5">/</span>
+                        <span className="text-gray-500 mx-1">/</span>
                         <span className="text-gray-400">{formatTime(effectiveDuration)}</span>
                       </div>
                     </div>
 
                     {/* Right Controls: Rewind 10, Forward 10, Speed Menu, CC, Sub Settings, Theatre, PiP, Settings, Fullscreen */}
-                    <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="flex items-center gap-1.5 sm:gap-2.5">
                       {/* Rewind 10s */}
                       <button
                         onClick={() => seekRelative(-10)}
                         className="hidden sm:flex p-1 text-gray-300 hover:text-[#ffd000] transition cursor-pointer items-center justify-center relative"
                         title="Rewind 10s (ArrowLeft / J)"
                       >
-                        <RotateCcw size={19} />
-                        <span className="absolute text-[8px] font-black top-2">10</span>
+                        <RotateCcw size={14} />
+                        <span className="absolute text-[7px] font-black top-[6px]">10</span>
                       </button>
 
                       {/* Forward 10s */}
@@ -2187,21 +2187,21 @@ export default function MediaServerPlayer({
                         className="hidden sm:flex p-1 text-gray-300 hover:text-[#ffd000] transition cursor-pointer items-center justify-center relative"
                         title="Forward 10s (ArrowRight / L)"
                       >
-                        <RotateCw size={19} />
-                        <span className="absolute text-[8px] font-black top-2">10</span>
+                        <RotateCw size={14} />
+                        <span className="absolute text-[7px] font-black top-[6px]">10</span>
                       </button>
 
                       {/* Speed Selector (Presets with 0.5 gap + Slider) */}
                       <div className="relative group/speedmenu hidden sm:block">
                         <button
                           onClick={() => setSpeedMenuOpen((prev) => !prev)}
-                          className={`px-2 py-0.5 rounded text-xs font-mono font-bold border transition cursor-pointer flex items-center gap-1 ${playbackSpeed !== 1.0
-                            ? 'bg-amber-400 text-black border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)] font-black'
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border transition cursor-pointer flex items-center gap-1 ${playbackSpeed !== 1.0
+                            ? 'bg-amber-400 text-black border-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.5)] font-black'
                             : 'bg-transparent text-gray-300 border-white/20 hover:text-white hover:border-white/40'
                             }`}
                           title="Playback Speed (Presets & Slider)"
                         >
-                          <Gauge size={13} className={playbackSpeed !== 1.0 ? 'text-black' : 'text-amber-400'} />
+                          <Gauge size={11} className={playbackSpeed !== 1.0 ? 'text-black' : 'text-amber-400'} />
                           <span>{playbackSpeed}x</span>
                         </button>
 
@@ -2286,7 +2286,7 @@ export default function MediaServerPlayer({
                             setSelectedSubtitleIndex(target);
                           }
                         }}
-                        className={`hidden sm:inline-flex px-1.5 py-0.5 rounded text-[11px] font-black border transition cursor-pointer ${selectedSubtitleIndex !== -1
+                        className={`hidden sm:inline-flex px-1.5 py-0.5 rounded text-[9.5px] font-black border transition cursor-pointer h-[18px] items-center justify-center leading-none ${selectedSubtitleIndex !== -1
                           ? 'bg-[#ffd000] text-black border-[#ffd000]'
                           : 'bg-transparent text-gray-300 border-white/20 hover:text-white'
                           }`}
@@ -2302,13 +2302,13 @@ export default function MediaServerPlayer({
                             setSubSettingsOpen((prev) => !prev);
                             setSpeedMenuOpen(false);
                           }}
-                          className={`p-1 transition cursor-pointer rounded ${subSettingsOpen
+                          className={`p-1 transition cursor-pointer rounded flex items-center justify-center ${subSettingsOpen
                             ? 'text-[#ffd000] bg-white/10'
                             : 'text-gray-300 hover:text-[#ffd000]'
                             }`}
                           title="Subtitle Settings (Size, Colour, Opacity, Outline, Sync)"
                         >
-                          <SlidersHorizontal size={18} />
+                          <SlidersHorizontal size={14} />
                         </button>
 
                         {subSettingsOpen && (
@@ -2513,10 +2513,10 @@ export default function MediaServerPlayer({
                       {/* Theatre Mode Toggle (Desktop) */}
                       <button
                         onClick={() => setTheatreMode((prev) => !prev)}
-                        className={`hidden sm:flex p-1 transition cursor-pointer ${theatreMode ? 'text-[#f472b6]' : 'text-gray-300 hover:text-[#ffd000]'}`}
+                        className={`hidden sm:flex p-1 transition cursor-pointer items-center justify-center ${theatreMode ? 'text-[#f472b6]' : 'text-gray-300 hover:text-[#ffd000]'}`}
                         title={theatreMode ? "Exit Theatre Mode" : "Theatre Mode"}
                       >
-                        <Maximize2 size={19} />
+                        <Maximize2 size={14} />
                       </button>
 
                       {/* Picture-in-Picture (Real PiP SVG Icon) */}
@@ -2525,7 +2525,7 @@ export default function MediaServerPlayer({
                         className="p-1 text-gray-300 hover:text-[#ffd000] transition cursor-pointer hidden sm:flex items-center justify-center"
                         title="Picture in Picture"
                       >
-                        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <rect x="2" y="4" width="20" height="16" rx="2" />
                           <rect x="12" y="10" width="8" height="7" rx="1" fill="currentColor" fillOpacity="0.35" />
                         </svg>
@@ -2534,19 +2534,19 @@ export default function MediaServerPlayer({
                       {/* Mobile-Only Settings Button (Requirement 5) */}
                       <button
                         onClick={() => setMobilePlayerSettingsOpen(true)}
-                        className="flex sm:hidden p-1 text-gray-300 hover:text-[#ffd000] transition cursor-pointer"
+                        className="flex sm:hidden p-1 text-gray-300 hover:text-[#ffd000] transition cursor-pointer items-center justify-center"
                         title="Settings"
                       >
-                        <Settings size={19} />
+                        <Settings size={14} />
                       </button>
 
                       {/* Fullscreen (Anime video only!) */}
                       <button
                         onClick={toggleFullscreen}
-                        className="p-1 text-gray-300 hover:text-[#ffd000] transition cursor-pointer"
+                        className="p-1 text-gray-300 hover:text-[#ffd000] transition cursor-pointer flex items-center justify-center"
                         title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen (F)'}
                       >
-                        {isFullscreen ? <Minimize size={19} /> : <Maximize size={19} />}
+                        {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
                       </button>
                     </div>
 
