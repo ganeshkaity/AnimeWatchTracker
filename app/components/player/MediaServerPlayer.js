@@ -127,6 +127,8 @@ export default function MediaServerPlayer({
   onEpisodeChange,
   initialSpeed = 1,
   initialVolume = 1,
+  theatreMode: externalTheatreMode,
+  onTheatreModeChange,
 }) {
   const { currentUser } = useAuth();
 
@@ -216,24 +218,50 @@ export default function MediaServerPlayer({
   });
   const [autoPlay, setAutoPlay] = useState(true);
   const [autoNext, setAutoNext] = useState(true);
-  const [theatreMode, setTheatreMode] = useState(false);
+  const [internalTheatreMode, setInternalTheatreMode] = useState(false);
+  const theatreMode = externalTheatreMode !== undefined ? externalTheatreMode : internalTheatreMode;
+
+  const toggleTheatreMode = useCallback((desiredState) => {
+    const next = typeof desiredState === 'boolean' ? desiredState : !theatreMode;
+
+    if (onTheatreModeChange) {
+      onTheatreModeChange(next);
+    } else {
+      setInternalTheatreMode(next);
+    }
+
+    if (typeof document !== 'undefined') {
+      if (next) {
+        // Request fullscreen on documentElement (like F11 browser full screen)
+        if (!document.fullscreenElement) {
+          const docEl = document.documentElement;
+          const requestFs = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.mozRequestFullScreen || docEl.msRequestFullscreen;
+          if (requestFs) {
+            requestFs.call(docEl).catch((err) => {
+              console.warn('Native fullscreen request ignored/failed:', err);
+            });
+          }
+        }
+      } else {
+        // Exit native fullscreen if active
+        if (document.fullscreenElement) {
+          const exitFs = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+          if (exitFs) {
+            exitFs.call(document).catch((err) => {
+              console.warn('Native exit fullscreen failed:', err);
+            });
+          }
+        }
+      }
+    }
+  }, [theatreMode, onTheatreModeChange]);
+
   const [mobilePlayerSettingsOpen, setMobilePlayerSettingsOpen] = useState(false);
   const lastActiveSubIndexRef = useRef(-1);
   const [scrubTime, setScrubTime] = useState(null);
   const [hoverSeekTime, setHoverSeekTime] = useState(null);
   const [hoverSeekPos, setHoverSeekPos] = useState(null);
   const isDraggingSeekRef = useRef(false);
-
-  // Exit Theatre Mode on Escape key
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape' && theatreMode) {
-        setTheatreMode(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [theatreMode]);
 
   const toggleAmbientMode = () => {
     setAmbientMode((prev) => {
@@ -582,14 +610,42 @@ export default function MediaServerPlayer({
     });
   }, [folderGroups, selectedFolderKey, epSearch]);
 
-  // ── 2. Fullscreen Listener on Document (Only fullscreens video wrapper) ────
+  // ── 2. Fullscreen Listener on Document (Handles Video & Theatre Fullscreen) ────
   useEffect(() => {
     const handleFsChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isVideoFs = !!videoWrapperRef.current && document.fullscreenElement === videoWrapperRef.current;
+      setIsFullscreen(isVideoFs);
+
+      // If theatre mode was on and native browser fullscreen is exited (e.g. F11 or Esc):
+      if (theatreMode && !document.fullscreenElement) {
+        if (onTheatreModeChange) {
+          onTheatreModeChange(false);
+        } else {
+          setInternalTheatreMode(false);
+        }
+      }
     };
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && theatreMode) {
+        toggleTheatreMode(false);
+      }
+    };
+
     document.addEventListener('fullscreenchange', handleFsChange);
-    return () => document.removeEventListener('fullscreenchange', handleFsChange);
-  }, []);
+    document.addEventListener('webkitfullscreenchange', handleFsChange);
+    document.addEventListener('mozfullscreenchange', handleFsChange);
+    document.addEventListener('MSFullscreenChange', handleFsChange);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFsChange);
+      document.removeEventListener('webkitfullscreenchange', handleFsChange);
+      document.removeEventListener('mozfullscreenchange', handleFsChange);
+      document.removeEventListener('MSFullscreenChange', handleFsChange);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [theatreMode, onTheatreModeChange, toggleTheatreMode]);
 
   // ── 3. Resolve Media ID on Windows Server ──────────────────────────────────
   useEffect(() => {
@@ -1764,18 +1820,6 @@ export default function MediaServerPlayer({
             ? "fixed inset-0 z-50 bg-black flex items-center justify-center p-6 sm:p-10 md:p-14 overflow-hidden"
             : "relative w-full aspect-video"
           }>
-            {/* Exit Theatre Mode Floating Button */}
-            {theatreMode && (
-              <button
-                onClick={() => setTheatreMode(false)}
-                className="absolute top-4 right-4 z-40 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/15 backdrop-blur-md transition flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95"
-                title="Exit Theatre Mode (Esc)"
-              >
-                <Minimize2 size={13} />
-                <span>Exit Theatre</span>
-              </button>
-            )}
-
             <div className={theatreMode ? "relative w-full max-w-6xl aspect-video max-h-[calc(100vh-6rem)] flex items-center justify-center" : "relative w-full h-full"}>
               {/* Ambient Glow Canvas Backdrop (YouTube Style Two-Layer Ping-Pong Crossfade) */}
               {ambientMode && (
@@ -1962,9 +2006,9 @@ export default function MediaServerPlayer({
                 </div>
               )}
 
-              {/* Top Bar Vignette: File Name, Prev/Next Ep, Mark Complete (Hidden on mobile per request) */}
+              {/* Top Bar Vignette: File Name, Prev/Next Ep, Mark Complete (Hidden on mobile and in Theatre Mode) */}
               <div
-                className={`hidden sm:flex absolute top-0 inset-x-0 pt-3 pb-8 px-3 sm:px-5 bg-gradient-to-b from-black/20 via-black/5 to-transparent transition-opacity duration-300 z-30 items-center justify-between gap-3 pointer-events-none ${showControls || playerState === 'paused' || playerState === 'idle'
+                className={`hidden sm:flex absolute top-0 inset-x-0 pt-3 pb-8 px-3 sm:px-5 bg-gradient-to-b from-black/20 via-black/5 to-transparent transition-opacity duration-300 z-30 items-center justify-between gap-3 pointer-events-none ${(showControls || playerState === 'paused' || playerState === 'idle') && !theatreMode
                   ? 'opacity-100'
                   : 'opacity-0'
                   }`}
@@ -2512,11 +2556,11 @@ export default function MediaServerPlayer({
 
                       {/* Theatre Mode Toggle (Desktop) */}
                       <button
-                        onClick={() => setTheatreMode((prev) => !prev)}
+                        onClick={() => toggleTheatreMode()}
                         className={`hidden sm:flex p-1 transition cursor-pointer items-center justify-center ${theatreMode ? 'text-[#f472b6]' : 'text-gray-300 hover:text-[#ffd000]'}`}
-                        title={theatreMode ? "Exit Theatre Mode" : "Theatre Mode"}
+                        title={theatreMode ? "Exit Theatre Mode (Esc)" : "Theatre Mode"}
                       >
-                        <Maximize2 size={14} />
+                        {theatreMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                       </button>
 
                       {/* Picture-in-Picture (Real PiP SVG Icon) */}
@@ -2612,7 +2656,7 @@ export default function MediaServerPlayer({
 
               {/* Theatre Mode Toggle (Replaced Auto Skip Intro) */}
               <button
-                onClick={() => setTheatreMode(prev => !prev)}
+                onClick={() => toggleTheatreMode()}
                 className="flex items-center gap-1.5 hover:text-white transition cursor-pointer font-medium"
               >
                 <Maximize2 size={14} className={theatreMode ? 'text-[#f472b6]' : 'text-gray-400'} />
@@ -3104,6 +3148,20 @@ export default function MediaServerPlayer({
                 className="w-full h-2 accent-[#ffd000] rounded-full appearance-none cursor-pointer bg-white/20"
               />
             </div>
+
+            {/* Theatre Mode (F11 Fullscreen) */}
+            <button
+              onClick={() => {
+                toggleTheatreMode();
+                setMobilePlayerSettingsOpen(false);
+              }}
+              className="w-full py-2.5 rounded-xl liquid-glass-item flex items-center justify-center gap-2 text-xs font-bold text-gray-200 active:scale-95"
+            >
+              {theatreMode ? <Minimize2 size={15} className="text-[#f472b6]" /> : <Maximize2 size={15} className="text-gray-400" />}
+              <span className={theatreMode ? 'text-[#f472b6]' : 'text-gray-200'}>
+                {theatreMode ? 'Exit Theatre Mode' : 'Theatre Mode'}
+              </span>
+            </button>
 
             {/* Picture in Picture */}
             <button
