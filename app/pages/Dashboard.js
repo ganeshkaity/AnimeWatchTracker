@@ -1523,6 +1523,34 @@ export default function Dashboard({ onSelectAnime }) {
         });
       }
 
+      // Trigger notification for added anime with cinematic banner
+      if (typeof window !== 'undefined') {
+        const notifAnimeTitle = animeTitle.trim();
+        const notifAnimeId = animeId;
+        const notifBackdrop = animeBannerUrl || coverUrl || '';
+        const notifPoster = coverUrl || '';
+        const notifLogo = enableAnimeLogo ? (animeLogoUrl || null) : null;
+        const notifGenres = addGenres || [];
+        const notifYear = animeYear || new Date().getFullYear().toString();
+        const notifDuration = sortedEps.length ? `${sortedEps.length} Episodes` : '';
+        const notifOverview = animeOverview || '';
+
+        import('../utils/notifications').then(({ triggerAppEventNotification }) => {
+          triggerAppEventNotification('anime_added', {
+            title: notifAnimeTitle,
+            id: notifAnimeId,
+            url: `/anime/${notifAnimeId}`,
+            backdropUrl: notifBackdrop,
+            posterUrl: notifPoster,
+            logoUrl: notifLogo,
+            genres: notifGenres,
+            year: notifYear,
+            duration: notifDuration,
+            overview: notifOverview,
+          });
+        }).catch((err) => console.warn('[Notification] Anime notify error:', err));
+      }
+
       setShowAddModal(false);
       setFolderPath('');
       setAnimeTitle('');
@@ -1977,6 +2005,34 @@ export default function Dashboard({ onSelectAnime }) {
         });
       }
 
+      // Trigger notification for added manga with cinematic banner
+      if (typeof window !== 'undefined') {
+        const notifMangaTitle = mangaTitle.trim();
+        const notifMangaId = mangaId;
+        const notifBackdrop = mangaBannerUrl || mangaCoverUrl || '';
+        const notifPoster = mangaCoverUrl || '';
+        const notifLogo = enableMangaLogo ? (mangaLogoUrl || null) : null;
+        const notifGenres = mangaGenres || [];
+        const notifYear = mangaYear || '';
+        const notifDuration = parsedChapters.length ? `${parsedChapters.length} Chapters` : '';
+        const notifOverview = mangaDescription || '';
+
+        import('../utils/notifications').then(({ triggerAppEventNotification }) => {
+          triggerAppEventNotification('manga_added', {
+            title: notifMangaTitle,
+            id: notifMangaId,
+            url: `/manga/${notifMangaId}`,
+            backdropUrl: notifBackdrop,
+            posterUrl: notifPoster,
+            logoUrl: notifLogo,
+            genres: notifGenres,
+            year: notifYear,
+            duration: notifDuration,
+            overview: notifOverview,
+          });
+        }).catch((err) => console.warn('[Notification] Manga notify error:', err));
+      }
+
       setShowAddModal(false);
       setShowAddMangaModal(false);
       setMangaFolderPath('');
@@ -2329,6 +2385,29 @@ export default function Dashboard({ onSelectAnime }) {
           dedupeKey: `SET_AUDIO_TRACKS_BATCH_${storyId}`,
           payload: { storyId, storyUserId: getUserId(), tracks: parsedTracks },
         });
+      }
+
+      // Trigger notification for added audio story / audiobook with banner
+      if (typeof window !== 'undefined') {
+        const notifStoryTitle = storyTitle.trim();
+        const notifStoryId = storyId;
+        const notifCover = audioStoryCoverUrl || '';
+        const notifGenres = audioStoryGenres || [];
+        const notifDuration = parsedTracks.length ? `${parsedTracks.length} Tracks` : '';
+        const notifOverview = audioStoryDescription || '';
+
+        import('../utils/notifications').then(({ triggerAppEventNotification }) => {
+          triggerAppEventNotification('audio_story_added', {
+            title: notifStoryTitle,
+            id: notifStoryId,
+            url: `/audio-story/${notifStoryId}`,
+            backdropUrl: notifCover,
+            posterUrl: notifCover,
+            genres: notifGenres,
+            duration: notifDuration,
+            overview: notifOverview,
+          });
+        }).catch((err) => console.warn('[Notification] Audio story notify error:', err));
       }
 
       setShowAddAudioStoryModal(false);

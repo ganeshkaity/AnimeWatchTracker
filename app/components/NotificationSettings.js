@@ -232,6 +232,7 @@ export default function NotificationSettings({ isCompact = false }) {
         title: testTitle || 'Movie Tracker Alert',
         message: testMessage || 'New activity synced from your local PC!',
         url: '/',
+        image: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1280&q=80',
       });
 
       if (res.success) {

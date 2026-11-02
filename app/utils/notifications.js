@@ -306,7 +306,7 @@ export function getActiveScheduledReminders() {
 /**
  * Triggers a contextual notification based on an application event.
  * Dispatches a local notification AND broadcasts to subscribed remote devices (Vercel PWA)
- * via the local server broadcaster.
+ * via the local server broadcaster, attaching a cinematic generated banner uploaded to ImgBB.
  */
 export async function triggerAppEventNotification(eventType, eventData = {}) {
   const prefs = getNotificationPreferences();
@@ -328,8 +328,41 @@ export async function triggerAppEventNotification(eventType, eventData = {}) {
     case 'movie_added':
       if (prefs.newReleases) {
         title = 'New Movie Added';
-        body = `"${eventData.title || 'Movie'}" was added to your local library.`;
-        url = eventData.url || '/movies';
+        body = `"${eventData.title || 'Movie'}" was added to your local movie library.`;
+        url = eventData.url || (eventData.id ? `/movies/${eventData.id}` : '/movies');
+      }
+      break;
+
+    case 'anime_added':
+      if (prefs.newReleases) {
+        title = 'New Anime Added';
+        body = `"${eventData.title || 'Anime'}" was added to your personal anime library.`;
+        url = eventData.url || (eventData.id ? `/anime/${eventData.id}` : '/animes');
+      }
+      break;
+
+    case 'webseries_added':
+      if (prefs.newReleases) {
+        title = 'New Web-Series Added';
+        body = `"${eventData.title || 'Series'}" was added to your TV series library.`;
+        url = eventData.url || (eventData.id ? `/webseries/${eventData.id}` : '/webseries');
+      }
+      break;
+
+    case 'manga_added':
+      if (prefs.newReleases) {
+        title = 'New Manga Added';
+        body = `"${eventData.title || 'Manga'}" is ready to read in your manga library.`;
+        url = eventData.url || (eventData.id ? `/manga/${eventData.id}` : '/manga');
+      }
+      break;
+
+    case 'audio_story_added':
+    case 'audiobook_added':
+      if (prefs.newReleases) {
+        title = 'New Audiobook Added';
+        body = `"${eventData.title || 'Audio Story'}" was added to your audio stories.`;
+        url = eventData.url || (eventData.id ? `/audio-story/${eventData.id}` : '/audio-player');
       }
       break;
 
@@ -356,11 +389,50 @@ export async function triggerAppEventNotification(eventType, eventData = {}) {
 
   if (!body) return;
 
-  // 1. Show local notification on current device
+  // Generate cinematic banner (matching Image 1) and upload to ImgBB
+  let bannerImage = eventData.image || null;
+  if (!bannerImage && typeof window !== 'undefined') {
+    const hasBackdrop =
+      eventData.backdropUrl ||
+      eventData.backdropPath ||
+      eventData.banner ||
+      eventData.coverUrl ||
+      eventData.posterUrl ||
+      eventData.posterPath;
+
+    if (hasBackdrop) {
+      try {
+        const { generateCinematicBanner } = await import('./mediaBannerGenerator');
+        bannerImage = await generateCinematicBanner({
+          title: eventData.title || title,
+          backdropUrl:
+            eventData.backdropUrl ||
+            eventData.backdropPath ||
+            eventData.banner ||
+            eventData.coverUrl ||
+            eventData.posterUrl,
+          posterUrl: eventData.posterUrl || eventData.coverUrl,
+          logoUrl: eventData.logoUrl || null,
+          genres: eventData.genres || [],
+          rating: eventData.rating,
+          duration: eventData.duration || eventData.runtime,
+          year: eventData.year || eventData.releaseDate,
+          ageRating: eventData.ageRating,
+          overview: eventData.overview || eventData.description || '',
+          mediaType: eventType.replace('_added', ''),
+        });
+      } catch (err) {
+        console.warn('[Notifications] Banner generation warning:', err);
+      }
+    }
+  }
+
+  // 1. Show local notification on current device with generated banner
   await showLocalNotification({
     title,
     body,
     url,
+    image: bannerImage,
     tag: `app-event-${eventType}`,
   });
 
@@ -372,8 +444,9 @@ export async function triggerAppEventNotification(eventType, eventData = {}) {
           title,
           message: body,
           url,
+          image: bannerImage,
           eventType,
-          data: eventData,
+          data: { ...eventData, image: bannerImage },
         }).catch(() => {});
       })
       .catch(() => {});

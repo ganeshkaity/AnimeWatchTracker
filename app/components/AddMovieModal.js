@@ -444,6 +444,14 @@ export default function AddMovieModal({
             title: movieData.title,
             id: movieData.id,
             url: `/movies/${movieData.id}`,
+            backdropUrl: movieData.backdropUrl || movieData.posterUrl,
+            posterUrl: movieData.posterUrl,
+            logoUrl: movieData.logoUrl || null,
+            genres: movieData.genres || [],
+            rating: movieData.rating,
+            duration: movieData.runtime ? `${Math.floor(movieData.runtime / 60)}h ${movieData.runtime % 60}m` : '',
+            year: movieData.year || (movieData.releaseDate ? movieData.releaseDate.split('-')[0] : ''),
+            overview: movieData.overview || '',
           });
         }).catch(() => {});
       }

@@ -441,7 +441,18 @@ export default function AddWatchlistModal({
       // Notify local and remote devices (Vercel PWA)
       if (typeof window !== 'undefined') {
         import('../utils/notifications').then(({ triggerAppEventNotification }) => {
-          triggerAppEventNotification('watchlist_added', { title: watchlistItem.title, id: watchlistItem.id });
+          triggerAppEventNotification('watchlist_added', {
+            title: watchlistItem.title,
+            id: watchlistItem.id,
+            backdropUrl: watchlistItem.backdropUrl || watchlistItem.posterUrl,
+            posterUrl: watchlistItem.posterUrl,
+            logoUrl: watchlistItem.logoUrl || null,
+            genres: watchlistItem.genres || [],
+            rating: watchlistItem.rating,
+            year: watchlistItem.year || watchlistItem.releaseDate,
+            duration: watchlistItem.duration || '',
+            overview: watchlistItem.overview || '',
+          });
         }).catch(() => {});
       }
 

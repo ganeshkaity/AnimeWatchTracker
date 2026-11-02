@@ -379,6 +379,26 @@ export default function AddWebseriesModal({
       };
 
       await onAddWebseries(seriesDoc, finalEpisodes);
+
+      // Trigger local alert and broadcast to remote Vercel PWA with banner
+      if (typeof window !== 'undefined') {
+        import('../utils/notifications').then(({ triggerAppEventNotification }) => {
+          triggerAppEventNotification('webseries_added', {
+            title: seriesDoc.title,
+            id: seriesDoc.id,
+            url: `/webseries/${seriesDoc.id}`,
+            backdropUrl: seriesDoc.backdropUrl || seriesDoc.backdropPath,
+            posterUrl: seriesDoc.posterUrl || seriesDoc.posterPath,
+            logoUrl: seriesDoc.logoUrl || null,
+            genres: seriesDoc.genres || [],
+            rating: seriesDoc.rating || seriesDoc.voteAverage,
+            year: seriesDoc.year || seriesDoc.firstAirDate,
+            duration: finalEpisodes.length ? `${finalEpisodes.length} Episodes` : null,
+            overview: seriesDoc.overview || seriesDoc.description || '',
+          });
+        }).catch(() => {});
+      }
+
       onClose();
     } catch (err) {
       console.error('[AddWebseriesModal] Save error:', err);

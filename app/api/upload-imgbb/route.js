@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-const IMGBB_API_KEY = process.env.IMGBB_API_KEY || 'f836d90a7d863714c3ebfd67412a5cbf';
+const IMGBB_API_KEY = process.env.NEXT_SECRET_IMGBB_API_KEY || process.env.IMGBB_API_KEY || 'f836d90a7d863714c3ebfd67412a5cbf';
 
 export async function POST(request) {
   try {

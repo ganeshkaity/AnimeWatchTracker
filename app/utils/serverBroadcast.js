@@ -11,6 +11,7 @@ export async function broadcastToDevices({
   title = 'WatchAnime Alert',
   message = '',
   url = '/',
+  image,
   eventType = 'general',
   data = {},
 } = {}) {
@@ -23,9 +24,10 @@ export async function broadcastToDevices({
         title,
         message,
         url,
+        image,
         eventType,
         userId,
-        data: { ...data, eventType, timestamp: Date.now() },
+        data: { ...data, image, eventType, timestamp: Date.now() },
       }),
     });
 

@@ -178,6 +178,7 @@ export async function POST(req) {
                 icon: String(icon),
                 badge: String(badge),
                 tag: String(tag),
+                ...(image ? { image: String(image) } : {}),
                 ...Object.fromEntries(
                   Object.entries(data).map(([k, v]) => [k, String(v)])
                 ),

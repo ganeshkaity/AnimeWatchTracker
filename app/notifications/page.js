@@ -20,16 +20,10 @@ export default function NotificationsPage() {
           </Link>
 
           <div className="flex items-center gap-2">
-            <div className="p-2 rounded-xl bg-purple-500/20 text-[#a855f7]">
-              <Bell size={18} />
-            </div>
             <div>
               <h1 className="text-base font-extrabold text-white flex items-center gap-1.5">
-                Notifications Hub <Sparkles size={14} className="text-amber-400" />
+                Notifications Hub
               </h1>
-              <p className="text-[11px] text-gray-400">
-                Configure local &amp; remote push notification delivery
-              </p>
             </div>
           </div>
         </div>
