@@ -157,8 +157,26 @@ export default function YtDlpPlayer({
     return initialVolume;
   });
   const [isMuted, setIsMuted] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(initialSpeed);
-  const [customSpeedInput, setCustomSpeedInput] = useState(String(initialSpeed));
+  const [playbackSpeed, setPlaybackSpeed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('watchanime_media_player_speed');
+      if (saved !== null) {
+        const parsed = parseFloat(saved);
+        if (!isNaN(parsed) && parsed >= 0.25 && parsed <= 10.0) return parsed;
+      }
+    }
+    return initialSpeed;
+  });
+  const [customSpeedInput, setCustomSpeedInput] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('watchanime_media_player_speed');
+      if (saved !== null) {
+        const parsed = parseFloat(saved);
+        if (!isNaN(parsed) && parsed >= 0.25 && parsed <= 10.0) return String(parsed);
+      }
+    }
+    return String(initialSpeed);
+  });
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -927,6 +945,11 @@ export default function YtDlpPlayer({
     const clamped = Math.max(0.25, Math.min(10.0, Math.round((parseFloat(speed) || 1.0) * 100) / 100));
     setPlaybackSpeed(clamped);
     setCustomSpeedInput(String(clamped));
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('watchanime_media_player_speed', String(clamped));
+      } catch (_) {}
+    }
     if (videoRef.current) {
       videoRef.current.playbackRate = clamped;
     }
@@ -1311,7 +1334,7 @@ export default function YtDlpPlayer({
               setSpeedMenuOpen(false);
             }
           }}
-          className="relative flex-1 flex items-center justify-center bg-black overflow-hidden group"
+          className={`relative flex-1 flex items-center justify-center bg-black overflow-hidden group ${(!showControls && playerState === 'playing') ? 'cursor-none [&_*]:!cursor-none' : ''}`}
           style={{ minHeight: isFullscreen ? '100vh' : '58vh' }}
         >
           <video

@@ -151,8 +151,26 @@ export default function MediaServerPlayer({
     return initialVolume;
   });
   const [isMuted, setIsMuted] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(initialSpeed);
-  const [customSpeedInput, setCustomSpeedInput] = useState(String(initialSpeed));
+  const [playbackSpeed, setPlaybackSpeed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('watchanime_media_player_speed');
+      if (saved !== null) {
+        const parsed = parseFloat(saved);
+        if (!isNaN(parsed) && parsed >= 0.25 && parsed <= 10.0) return parsed;
+      }
+    }
+    return initialSpeed;
+  });
+  const [customSpeedInput, setCustomSpeedInput] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('watchanime_media_player_speed');
+      if (saved !== null) {
+        const parsed = parseFloat(saved);
+        if (!isNaN(parsed) && parsed >= 0.25 && parsed <= 10.0) return String(parsed);
+      }
+    }
+    return String(initialSpeed);
+  });
   const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
@@ -222,6 +240,37 @@ export default function MediaServerPlayer({
   const [showUpNext, setShowUpNext] = useState(false);
   const [upNextCountdown, setUpNextCountdown] = useState(10);
   const upNextDismissedRef = useRef(false);
+  const [upNextTimingSeconds, setUpNextTimingSeconds] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('watchanime_up_next_timing');
+      if (saved !== null) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    }
+    return 60; // Default 60s before video ends
+  });
+  const [customUpNextTimingInput, setCustomUpNextTimingInput] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('watchanime_up_next_timing');
+      if (saved !== null) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed > 0) return String(parsed);
+      }
+    }
+    return '60';
+  });
+
+  const handleUpNextTimingChange = useCallback((secs) => {
+    const val = Math.max(5, Math.min(600, parseInt(secs, 10) || 60));
+    setUpNextTimingSeconds(val);
+    setCustomUpNextTimingInput(String(val));
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('watchanime_up_next_timing', String(val));
+      } catch (_) {}
+    }
+  }, []);
   const [internalTheatreMode, setInternalTheatreMode] = useState(false);
   const theatreMode = externalTheatreMode !== undefined ? externalTheatreMode : internalTheatreMode;
 
@@ -527,10 +576,10 @@ export default function MediaServerPlayer({
   const prevEpisode = currentIndex > 0 ? localEpisodes[currentIndex - 1] : null;
   const nextEpisode = currentIndex >= 0 && currentIndex < localEpisodes.length - 1 ? localEpisodes[currentIndex + 1] : null;
 
-  // ── Up Next 10s Auto-Play Timer & Controls ────────────────────────
+  // ── Up Next 10s Auto-Play Timer & Controls (Pauses on video pause) ──
   useEffect(() => {
     let timer = null;
-    if (showUpNext && upNextCountdown > 0) {
+    if (showUpNext && upNextCountdown > 0 && playerState === 'playing') {
       timer = setInterval(() => {
         setUpNextCountdown((prev) => {
           if (prev <= 1) {
@@ -547,7 +596,7 @@ export default function MediaServerPlayer({
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [showUpNext, upNextCountdown, nextEpisode, onEpisodeChange]);
+  }, [showUpNext, upNextCountdown, playerState, nextEpisode, onEpisodeChange]);
 
   // Reset Up Next states on episode switch
   useEffect(() => {
@@ -1348,12 +1397,18 @@ export default function MediaServerPlayer({
       }
     }
 
-    // Up Next trigger >= 95%
-    if (autoNext && nextEpisode && currentDur > 20 && absNow >= currentDur * 0.95 && !upNextDismissedRef.current) {
+    // Up Next trigger (user-configured seconds before end, e.g. 20s, 60s, 120s)
+    const targetTrigger = Math.max(currentDur * 0.5, currentDur - upNextTimingSeconds);
+    if (autoNext && nextEpisode && currentDur > 10 && absNow >= targetTrigger && !upNextDismissedRef.current) {
       if (!showUpNext) {
         setShowUpNext(true);
         setUpNextCountdown(10);
       }
+    } else if (showUpNext && absNow < targetTrigger - 3) {
+      // If user rewinds before the trigger time, dismiss and reset so it can trigger again
+      setShowUpNext(false);
+      setUpNextCountdown(10);
+      upNextDismissedRef.current = false;
     }
   };
 
@@ -1562,11 +1617,16 @@ export default function MediaServerPlayer({
     }
   };
 
-  // Playback Speed Change (Supports up to 10x with optional toast)
+  // Playback Speed Change (Supports up to 10x with optional toast and localStorage persistence)
   const handleSpeedChange = useCallback((spd, showToast = false) => {
     const clamped = Math.max(0.25, Math.min(10.0, Math.round((parseFloat(spd) || 1.0) * 100) / 100));
     setPlaybackSpeed(clamped);
     setCustomSpeedInput(String(clamped));
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('watchanime_media_player_speed', String(clamped));
+      } catch (_) {}
+    }
     if (videoRef.current) {
       videoRef.current.playbackRate = clamped;
     }
@@ -1965,7 +2025,7 @@ export default function MediaServerPlayer({
                 theatreMode
                   ? 'rounded-none border-0'
                   : 'rounded-2xl border border-white/10'
-              }`}
+              } ${(!showControls && playerState === 'playing') ? 'cursor-none [&_*]:!cursor-none' : ''}`}
             >
 
               {/* HTML5 Native Video Tag */}
@@ -2107,10 +2167,10 @@ export default function MediaServerPlayer({
                 </div>
               )}
 
-              {/* Up Next Overlay (~95% duration watched) */}
+              {/* Up Next Overlay (Bottom-Right, fully clear of top Prev/Next/Watched buttons) */}
               {showUpNext && nextEpisode && autoNext && (
                 <div
-                  className="absolute top-4 sm:top-6 right-4 sm:right-6 z-40 animate-fade-in pointer-events-auto"
+                  className="absolute bottom-20 sm:bottom-24 right-4 sm:right-6 z-40 animate-fade-in pointer-events-auto"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between mb-1.5 px-0.5">
@@ -3077,6 +3137,53 @@ export default function MediaServerPlayer({
                 </div>
               </div>
 
+              {/* UP NEXT TIMING Options (Presets: 20s, 60s, 120s + Custom input) */}
+              <div className="flex flex-wrap items-center gap-2 text-xs pt-1 border-t border-white/5">
+                <span className="font-extrabold text-gray-300 flex items-center gap-1 shrink-0 uppercase tracking-wider text-[11px]">
+                  <Clock size={14} className="text-pink-400" />
+                  UP NEXT:
+                </span>
+
+                {[20, 60, 120].map((secs) => {
+                  const isSelected = upNextTimingSeconds === secs;
+                  return (
+                    <button
+                      key={secs}
+                      onClick={() => handleUpNextTimingChange(secs)}
+                      className={`px-2.5 py-0.5 rounded-xl text-xs font-bold transition cursor-pointer border ${isSelected
+                        ? 'bg-[#f472b6] text-black border-[#f472b6] shadow-[0_0_12px_rgba(244,114,182,0.6)] font-black'
+                        : 'liquid-glass-item text-gray-300 border-white/10 hover:text-white'
+                        }`}
+                      title={`Show Up Next modal ${secs} seconds before the video ends`}
+                    >
+                      {secs}s before
+                    </button>
+                  );
+                })}
+
+                {/* Custom Up Next Timing Input */}
+                <div className="flex items-center gap-1 liquid-glass-item border border-white/10 rounded-xl px-2 py-0.5" title="Custom seconds before video end to show Up Next">
+                  <span className="text-gray-400 text-[10px] font-semibold">Custom:</span>
+                  <input
+                    type="number"
+                    min="5"
+                    max="600"
+                    step="5"
+                    value={customUpNextTimingInput}
+                    onChange={(e) => {
+                      setCustomUpNextTimingInput(e.target.value);
+                      const parsed = parseInt(e.target.value, 10);
+                      if (!isNaN(parsed) && parsed >= 5 && parsed <= 600) {
+                        handleUpNextTimingChange(parsed);
+                      }
+                    }}
+                    className="w-12 bg-transparent text-white font-bold text-xs focus:outline-none text-center"
+                    placeholder="60"
+                  />
+                  <span className="text-gray-400 text-xs">s</span>
+                </div>
+              </div>
+
             </div>
 
           </div>
@@ -3267,6 +3374,31 @@ export default function MediaServerPlayer({
                       }`}
                   >
                     {s}x
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Up Next Timing Selector */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-gray-300 flex items-center gap-1.5">
+                  <Clock size={14} className="text-pink-400" />
+                  Up Next Timing
+                </span>
+                <span className="font-mono text-pink-400 font-bold">{upNextTimingSeconds}s before</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[20, 60, 120].map((secs) => (
+                  <button
+                    key={secs}
+                    onClick={() => handleUpNextTimingChange(secs)}
+                    className={`py-1.5 rounded-xl text-xs font-bold border transition ${upNextTimingSeconds === secs
+                      ? 'bg-[#f472b6] text-black border-[#f472b6] font-black'
+                      : 'liquid-glass-item text-gray-300 border-white/10'
+                      }`}
+                  >
+                    {secs}s before
                   </button>
                 ))}
               </div>

@@ -10,9 +10,19 @@ export default function MediaServerPlayerContainer({
   episodeId,
   episodes = [],
   onBack,
-  initialSpeed = 1,
+  initialSpeed: propInitialSpeed = 1,
   initialVolume = 1,
 }) {
+  const [initialSpeed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('watchanime_media_player_speed');
+      if (saved) {
+        const parsed = parseFloat(saved);
+        if (!isNaN(parsed) && parsed >= 0.25 && parsed <= 10.0) return parsed;
+      }
+    }
+    return propInitialSpeed;
+  });
   const [currentEpisodeId, setCurrentEpisodeId] = useState(episodeId);
   const [animeDetails, setAnimeDetails] = useState(null);
   const [theatreMode, setTheatreMode] = useState(false);
