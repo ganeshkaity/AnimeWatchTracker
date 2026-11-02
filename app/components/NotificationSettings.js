@@ -18,6 +18,7 @@ import {
   Sliders,
   Volume2,
   VolumeX,
+  Radio,
 } from 'lucide-react';
 import {
   getNotificationPermission,
@@ -36,6 +37,7 @@ import {
   getVapidPublicKey,
   setCustomVapidKey,
 } from '../utils/notifications';
+import { broadcastToDevices, fetchSubscribedDevices } from '../utils/serverBroadcast';
 import { useAuth } from '../context/AuthContext';
 
 export default function NotificationSettings({ isCompact = false }) {
@@ -50,6 +52,8 @@ export default function NotificationSettings({ isCompact = false }) {
 
   // Status & loading indicators
   const [loading, setLoading] = useState(false);
+  const [loadingBroadcast, setLoadingBroadcast] = useState(false);
+  const [remoteSubscribersCount, setRemoteSubscribersCount] = useState(null);
   const [statusMessage, setStatusMessage] = useState({ type: '', text: '' });
   const [copiedToken, setCopiedToken] = useState(false);
 
@@ -73,6 +77,14 @@ export default function NotificationSettings({ isCompact = false }) {
         setPendingReminders(getActiveScheduledReminders());
       };
       window.addEventListener('watchanime_reminders_updated', handleRemindersUpdate);
+
+      // Fetch remote subscriber count from Firestore via local API
+      fetchSubscribedDevices().then((data) => {
+        if (data && data.success && typeof data.count === 'number') {
+          setRemoteSubscribersCount(data.count);
+        }
+      });
+
       return () => window.removeEventListener('watchanime_reminders_updated', handleRemindersUpdate);
     }
   }, []);
@@ -209,6 +221,35 @@ export default function NotificationSettings({ isCompact = false }) {
       showFeedback('error', `Server send error: ${err.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ─── Broadcast from Local PC to All Subscribed Devices (Vercel PWA) ────────
+  const handleBroadcastToAllDevices = async () => {
+    setLoadingBroadcast(true);
+    try {
+      const res = await broadcastToDevices({
+        title: testTitle || 'Movie Tracker Alert',
+        message: testMessage || 'New activity synced from your local PC!',
+        url: '/',
+      });
+
+      if (res.success) {
+        if (res.deliveredCount > 0) {
+          showFeedback('success', `Broadcast delivered to ${res.deliveredCount} device(s) via Google FCM!`);
+        } else {
+          showFeedback('info', res.message || 'No active devices found. Open Vercel PWA on your phone and tap Enable Push.');
+        }
+        if (typeof res.totalSubscribers === 'number') {
+          setRemoteSubscribersCount(res.totalSubscribers);
+        }
+      } else {
+        showFeedback('error', res.message || res.error || 'Broadcast failed.');
+      }
+    } catch (err) {
+      showFeedback('error', `Broadcast error: ${err.message}`);
+    } finally {
+      setLoadingBroadcast(false);
     }
   };
 
@@ -467,6 +508,38 @@ export default function NotificationSettings({ isCompact = false }) {
           >
             <Send size={13} />
             <span>Test Remote Push</span>
+          </button>
+        </div>
+
+        {/* Local PC Server → Vercel Deployed PWA Broadcast */}
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-cyan-950/40 via-purple-950/40 to-slate-900/60 border border-cyan-500/30 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-300">
+                <Radio size={15} className="animate-pulse text-cyan-400" />
+              </div>
+              <div>
+                <span className="font-bold text-white text-xs block">Local Server → Deployed PWA Broadcast</span>
+                <span className="text-[10px] text-gray-400">Pushes from your PC directly to your phone &amp; remote devices</span>
+              </div>
+            </div>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shrink-0">
+              {remoteSubscribersCount !== null ? `${remoteSubscribersCount} device(s) connected` : 'Active'}
+            </span>
+          </div>
+
+          <p className="text-[10px] text-gray-300 leading-relaxed">
+            Uses your local server's Firebase Admin credentials to broadcast via FCM. Open your Vercel PWA on your phone, tap "Enable Push", and trigger this test.
+          </p>
+
+          <button
+            type="button"
+            onClick={handleBroadcastToAllDevices}
+            disabled={loadingBroadcast}
+            className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-600 via-indigo-600 to-purple-600 hover:from-cyan-500 hover:to-purple-500 text-white text-xs font-bold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-2 shadow-lg active:scale-95 disabled:opacity-50"
+          >
+            {loadingBroadcast ? <RefreshCw size={13} className="animate-spin" /> : <Send size={13} />}
+            <span>Broadcast from Local Server to Vercel PWA</span>
           </button>
         </div>
 

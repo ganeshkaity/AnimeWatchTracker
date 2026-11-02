@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * app/api/notifications/send/route.js
@@ -67,7 +69,21 @@ async function getAccessTokenFromServiceAccount(serviceAccount) {
 }
 
 function parseServiceAccount() {
-  // 1. Direct JSON string in FIREBASE_SERVICE_ACCOUNT
+  // 1. Check local service account JSON file
+  const localFilePath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH 
+    ? path.resolve(process.cwd(), process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
+    : path.resolve(process.cwd(), 'firebase-service-account.json');
+
+  if (fs.existsSync(localFilePath)) {
+    try {
+      const content = fs.readFileSync(localFilePath, 'utf8');
+      return JSON.parse(content);
+    } catch (e) {
+      console.warn('[FCM API] Error reading service account file:', e.message);
+    }
+  }
+
+  // 2. Direct JSON string in FIREBASE_SERVICE_ACCOUNT
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
       const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
@@ -80,7 +96,7 @@ function parseServiceAccount() {
     }
   }
 
-  // 2. Composed from individual env variables
+  // 3. Composed from individual env variables
   if (
     process.env.FIREBASE_CLIENT_EMAIL &&
     (process.env.FIREBASE_PRIVATE_KEY || process.env.FIREBASE_ADMIN_PRIVATE_KEY)

@@ -438,6 +438,13 @@ export default function AddWatchlistModal({
         }
       }
 
+      // Notify local and remote devices (Vercel PWA)
+      if (typeof window !== 'undefined') {
+        import('../utils/notifications').then(({ triggerAppEventNotification }) => {
+          triggerAppEventNotification('watchlist_added', { title: watchlistItem.title, id: watchlistItem.id });
+        }).catch(() => {});
+      }
+
       onClose();
     } catch (err) {
       console.error('[AddWatchlistModal] Submit error:', err);

@@ -5,6 +5,7 @@ import { OfflineProvider } from './context/OfflineContext';
 import CookieConsent from './components/CookieConsent';
 import PwaRegistration from './components/PwaRegistration';
 import NotificationBanner from './components/NotificationBanner';
+import AutoPushPrompt from './components/AutoPushPrompt';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -55,6 +56,7 @@ export default function RootLayout({ children }) {
             <CookieConsent />
             <PwaRegistration />
             <NotificationBanner />
+            <AutoPushPrompt />
           </OfflineProvider>
         </AuthProvider>
       </body>

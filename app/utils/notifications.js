@@ -305,45 +305,78 @@ export function getActiveScheduledReminders() {
 
 /**
  * Triggers a contextual notification based on an application event.
+ * Dispatches a local notification AND broadcasts to subscribed remote devices (Vercel PWA)
+ * via the local server broadcaster.
  */
 export async function triggerAppEventNotification(eventType, eventData = {}) {
   const prefs = getNotificationPreferences();
   if (!prefs.enabled) return;
 
+  let title = 'WatchAnime Update';
+  let body = '';
+  let url = '/';
+
   switch (eventType) {
     case 'watchlist_added':
       if (prefs.watchlistReminders) {
-        await showLocalNotification({
-          title: 'Added to Watchlist',
-          body: `"${eventData.title || 'Item'}" has been added to your personal collection.`,
-          url: '/watchlist',
-          tag: 'watchlist-add',
-        });
+        title = 'Added to Watchlist';
+        body = `"${eventData.title || 'Item'}" has been added to your collection.`;
+        url = '/watchlist';
+      }
+      break;
+
+    case 'movie_added':
+      if (prefs.newReleases) {
+        title = 'New Movie Added';
+        body = `"${eventData.title || 'Movie'}" was added to your local library.`;
+        url = eventData.url || '/movies';
       }
       break;
 
     case 'episode_completed':
       if (prefs.episodeReleases) {
-        await showLocalNotification({
-          title: 'Episode Completed',
-          body: `Finished Episode ${eventData.episodeNumber || ''} of "${eventData.title || 'Series'}". Ready for the next one?`,
-          url: eventData.url || '/',
-          tag: 'episode-progress',
-        });
+        title = 'Episode Completed';
+        body = `Finished Episode ${eventData.episodeNumber || ''} of "${eventData.title || 'Series'}". Ready for the next one?`;
+        url = eventData.url || '/';
       }
       break;
 
     case 'download_ready':
-      await showLocalNotification({
-        title: 'Media Ready',
-        body: `"${eventData.title || 'Media'}" is ready for offline streaming.`,
-        url: eventData.url || '/',
-        tag: 'media-ready',
-      });
+      title = 'Media Ready';
+      body = `"${eventData.title || 'Media'}" is ready for offline streaming.`;
+      url = eventData.url || '/';
       break;
 
     default:
+      title = eventData.title || 'WatchAnime Alert';
+      body = eventData.message || eventData.body || '';
+      url = eventData.url || '/';
       break;
+  }
+
+  if (!body) return;
+
+  // 1. Show local notification on current device
+  await showLocalNotification({
+    title,
+    body,
+    url,
+    tag: `app-event-${eventType}`,
+  });
+
+  // 2. Broadcast to all subscribed devices (including deployed Vercel PWA / phones)
+  if (typeof window !== 'undefined') {
+    import('./serverBroadcast')
+      .then(({ broadcastToDevices }) => {
+        broadcastToDevices({
+          title,
+          message: body,
+          url,
+          eventType,
+          data: eventData,
+        }).catch(() => {});
+      })
+      .catch(() => {});
   }
 }
 

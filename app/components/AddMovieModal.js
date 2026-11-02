@@ -436,6 +436,18 @@ export default function AddMovieModal({
       };
 
       await onAddMovie(movieData);
+
+      // Trigger local alert and broadcast to remote Vercel PWA
+      if (typeof window !== 'undefined') {
+        import('../utils/notifications').then(({ triggerAppEventNotification }) => {
+          triggerAppEventNotification('movie_added', {
+            title: movieData.title,
+            id: movieData.id,
+            url: `/movies/${movieData.id}`,
+          });
+        }).catch(() => {});
+      }
+
       onClose();
     } catch (err) {
       console.error('[AddMovieModal] Submit error:', err);
