@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import OmdbRefetchSection from './OmdbRefetchSection';
+import RatingSourceSelector from './RatingSourceSelector';
+import { mapUsToIndianRating, normalizeIndianRating } from '../utils/ageRatingUtils';
 
 const ANIME_GENRES = [
   "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror",
@@ -28,6 +30,13 @@ export default function EditAnimeModal({
   const [namingPattern, setNamingPattern] = useState('auto');
   const [year, setYear] = useState('');
   const [rating, setRating] = useState('');
+  const [tmdbRating, setTmdbRating] = useState('');
+  const [imdbRating, setImdbRating] = useState('');
+  const [ratingSource, setRatingSource] = useState('tmdb');
+  const [ageRating, setAgeRating] = useState('');
+  const [tmdbAgeRating, setTmdbAgeRating] = useState('');
+  const [omdbAgeRating, setOmdbAgeRating] = useState('');
+  const [ageRatingSource, setAgeRatingSource] = useState('tmdb');
   const [overview, setOverview] = useState('');
   const [coverUrl, setCoverUrl] = useState('');
   const [bannerUrl, setBannerUrl] = useState('');
@@ -54,6 +63,13 @@ export default function EditAnimeModal({
       setNamingPattern(anime.namingPattern || 'auto');
       setYear(anime.year ? String(anime.year) : '');
       setRating(anime.rating ? String(anime.rating) : '');
+      setTmdbRating(anime.tmdbRating ? String(anime.tmdbRating) : (anime.rating ? String(anime.rating) : ''));
+      setImdbRating(anime.imdbRating ? String(anime.imdbRating) : (anime.omdb?.imdbRating ? String(anime.omdb.imdbRating) : ''));
+      setRatingSource(anime.ratingSource || (anime.imdbRating ? 'omdb' : 'tmdb'));
+      setAgeRating(anime.ageRating || '');
+      setTmdbAgeRating(anime.tmdbAgeRating || anime.ageRating || '');
+      setOmdbAgeRating(anime.omdbAgeRating || '');
+      setAgeRatingSource(anime.ageRatingSource || 'tmdb');
       setOverview(anime.overview || anime.synopsis || '');
       setCoverUrl(anime.coverUrl || anime.posterUrl || '');
       setBannerUrl(anime.bannerUrl || anime.backdropUrl || '');
@@ -71,8 +87,18 @@ export default function EditAnimeModal({
     if (data?.omdb) {
       setOmdb(data.omdb);
       if (data.imdbId) setImdbId(data.imdbId);
-      if (data.imdbRating && !rating) {
-        setRating(String(data.imdbRating));
+      if (data.imdbRating) {
+        setImdbRating(String(data.imdbRating));
+        if (ratingSource === 'omdb') {
+          setRating(String(data.imdbRating));
+        }
+      }
+      if (data.omdb.rated && data.omdb.rated !== 'N/A') {
+        const converted = mapUsToIndianRating(data.omdb.rated) || normalizeIndianRating(data.omdb.rated) || data.omdb.rated;
+        setOmdbAgeRating(converted);
+        if (ageRatingSource === 'omdb' || !ageRating) {
+          setAgeRating(converted);
+        }
       }
     }
   };
@@ -86,6 +112,10 @@ export default function EditAnimeModal({
 
     setSubmitting(true);
     try {
+      const effectiveRating = ratingSource === 'omdb'
+        ? (imdbRating ? parseFloat(imdbRating) : (rating ? parseFloat(rating) : 0))
+        : (tmdbRating ? parseFloat(tmdbRating) : (rating ? parseFloat(rating) : 0));
+
       const updated = {
         title: title.trim(),
         romajiTitle: romajiTitle.trim() || null,
@@ -93,7 +123,14 @@ export default function EditAnimeModal({
         folderPath: folderPath.trim() || null,
         namingPattern: namingPattern || 'auto',
         year: year ? String(year) : null,
-        rating: rating ? parseFloat(rating) : 0,
+        rating: effectiveRating,
+        tmdbRating: tmdbRating ? parseFloat(tmdbRating) : (anime.tmdbRating || null),
+        imdbRating: imdbRating ? parseFloat(imdbRating) : (omdb?.imdbRating || anime.imdbRating || anime.omdb?.imdbRating || null),
+        ratingSource: ratingSource || 'tmdb',
+        ageRating: ageRating ? ageRating.trim() : null,
+        tmdbAgeRating: tmdbAgeRating ? tmdbAgeRating.trim() : null,
+        omdbAgeRating: omdbAgeRating ? omdbAgeRating.trim() : null,
+        ageRatingSource: ageRatingSource || 'tmdb',
         overview: overview.trim() || '',
         coverUrl: coverUrl.trim() || null,
         posterUrl: coverUrl.trim() || null,
@@ -536,6 +573,25 @@ export default function EditAnimeModal({
               type="series"
               currentOmdb={omdb}
               onOmdbUpdated={handleOmdbUpdated}
+            />
+
+            {/* Rating Display & Source (TMDB & OMDB / IMDb Indian Age Rating) */}
+            <RatingSourceSelector
+              title={englishTitle || title}
+              year={year}
+              imdbId={imdbId}
+              tmdbId={anime.tmdbId}
+              type="anime"
+              ageRating={ageRating}
+              setAgeRating={setAgeRating}
+              tmdbAgeRating={tmdbAgeRating}
+              setTmdbAgeRating={setTmdbAgeRating}
+              omdbAgeRating={omdbAgeRating}
+              setOmdbAgeRating={setOmdbAgeRating}
+              ageRatingSource={ageRatingSource}
+              setAgeRatingSource={setAgeRatingSource}
+              currentOmdb={omdb}
+              onAgeRatingChanged={(newAge) => setAgeRating(newAge)}
             />
           </form>
         </div>

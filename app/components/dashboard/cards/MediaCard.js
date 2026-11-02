@@ -51,34 +51,44 @@ export default function MediaCard({
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
         />
 
+        {/* Top Vignette Gradient Overlay for Maximum Readability on White/Light Posters */}
+        <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/80 via-black/40 to-transparent pointer-events-none z-[5]" />
+
         {/* Liquid Glass Rating Badge (Top-Left) */}
         {displayRating && (
-          <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 text-[10px] font-bold text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.5)] backdrop-saturate-150 pointer-events-none">
-            <Star size={10} className="fill-amber-400 text-amber-400" />
-            <span className="leading-none">{displayRating}</span>
+          <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-xl border border-white/20 text-[10px] font-black text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.8)] backdrop-saturate-150 pointer-events-none">
+            <Star size={10} className="fill-amber-400 text-amber-400 shrink-0" />
+            <span className="leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">{displayRating}</span>
           </div>
         )}
 
         {/* Red YouTube Logo Badge if YouTube folder */}
         {isYouTube && (
-          <div className={`absolute top-2 ${onMobileMenuToggle ? 'right-9 md:right-2' : 'right-2'} z-10 p-1 bg-black/60 rounded-md flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md pointer-events-none`}>
+          <div className={`absolute top-2 ${onMobileMenuToggle ? 'right-9 md:right-2' : 'right-2'} z-10 p-1 bg-black/70 rounded-md flex items-center justify-center shadow-lg border border-red-500/40 backdrop-blur-md pointer-events-none`}>
             <YoutubeLogo size={14} />
           </div>
         )}
 
-        {/* 3-Dot Options Button with Glassmorphism Effect (Mobile devices only) */}
+        {/* Liquid Glass Indian Age Rating Badge (Top-Right) */}
+        {item?.ageRating && (
+          <div className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded-md bg-black/60 backdrop-blur-xl border border-white/20 text-[9px] font-black text-white flex items-center shadow-[0_4px_16px_rgba(0,0,0,0.8)] backdrop-saturate-150 pointer-events-none tracking-wider drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+            {item.ageRating}
+          </div>
+        )}
+
+        {/* 3-Dot Options Button with Glassmorphism Effect (Mobile devices only, positioned at bottom right) */}
         {onMobileMenuToggle && (
-          <div className="absolute top-2 right-2 z-20 md:hidden">
+          <div className="absolute bottom-2 right-2 z-20 md:hidden">
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onMobileMenuToggle(e);
               }}
-              className="p-1.5 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-xl border border-white/30 text-white shadow-[0_4px_16px_rgba(0,0,0,0.5)] backdrop-saturate-150 transition-all duration-200 active:scale-90 hover:scale-110 cursor-pointer"
+              className="p-1 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-xl border border-white/25 text-white shadow-[0_4px_16px_rgba(0,0,0,0.8)] backdrop-saturate-150 transition-all duration-200 active:scale-90 hover:scale-110 cursor-pointer"
               title="Media Options"
             >
-              <MoreVertical size={13} />
+              <MoreVertical size={11} />
             </button>
           </div>
         )}

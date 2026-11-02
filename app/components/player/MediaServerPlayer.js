@@ -123,6 +123,7 @@ export default function MediaServerPlayer({
   animeId,
   episode,
   episodes = [],
+  parentItem = null,
   onBack,
   onEpisodeChange,
   initialSpeed = 1,
@@ -218,6 +219,9 @@ export default function MediaServerPlayer({
   });
   const [autoPlay, setAutoPlay] = useState(true);
   const [autoNext, setAutoNext] = useState(true);
+  const [showUpNext, setShowUpNext] = useState(false);
+  const [upNextCountdown, setUpNextCountdown] = useState(10);
+  const upNextDismissedRef = useRef(false);
   const [internalTheatreMode, setInternalTheatreMode] = useState(false);
   const theatreMode = externalTheatreMode !== undefined ? externalTheatreMode : internalTheatreMode;
 
@@ -522,6 +526,42 @@ export default function MediaServerPlayer({
 
   const prevEpisode = currentIndex > 0 ? localEpisodes[currentIndex - 1] : null;
   const nextEpisode = currentIndex >= 0 && currentIndex < localEpisodes.length - 1 ? localEpisodes[currentIndex + 1] : null;
+
+  // ── Up Next 10s Auto-Play Timer & Controls ────────────────────────
+  useEffect(() => {
+    let timer = null;
+    if (showUpNext && upNextCountdown > 0) {
+      timer = setInterval(() => {
+        setUpNextCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            if (nextEpisode && onEpisodeChange) {
+              onEpisodeChange(nextEpisode);
+            }
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [showUpNext, upNextCountdown, nextEpisode, onEpisodeChange]);
+
+  // Reset Up Next states on episode switch
+  useEffect(() => {
+    setShowUpNext(false);
+    setUpNextCountdown(10);
+    upNextDismissedRef.current = false;
+  }, [episode?.id]);
+
+  // Hide Up Next if autoNext is disabled
+  useEffect(() => {
+    if (!autoNext) {
+      setShowUpNext(false);
+    }
+  }, [autoNext]);
 
   // ── 1. Group Episodes Folder-Wise with Sequential Counting & Natural Sort ─
   const folderGroups = useMemo(() => {
@@ -1307,6 +1347,14 @@ export default function MediaServerPlayer({
         syncProgressToStore(absNow, currentDur, true);
       }
     }
+
+    // Up Next trigger >= 95%
+    if (autoNext && nextEpisode && currentDur > 20 && absNow >= currentDur * 0.95 && !upNextDismissedRef.current) {
+      if (!showUpNext) {
+        setShowUpNext(true);
+        setUpNextCountdown(10);
+      }
+    }
   };
 
   const handleEnded = () => {
@@ -2055,6 +2103,124 @@ export default function MediaServerPlayer({
                     <span className="text-xs sm:text-sm font-black tracking-wide font-mono">
                       {speedToast.speed}x Speed
                     </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Up Next Overlay (~95% duration watched) */}
+              {showUpNext && nextEpisode && autoNext && (
+                <div
+                  className="absolute top-4 sm:top-6 right-4 sm:right-6 z-40 animate-fade-in pointer-events-auto"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between mb-1.5 px-0.5">
+                    <span className="text-xs sm:text-sm font-extrabold text-white tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">Next Up</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowUpNext(false);
+                        upNextDismissedRef.current = true;
+                      }}
+                      className="text-[11px] sm:text-xs font-semibold text-gray-300 hover:text-white transition px-1.5 py-0.5 rounded cursor-pointer drop-shadow-md hover:underline"
+                    >
+                      Hide
+                    </button>
+                  </div>
+
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowUpNext(false);
+                      if (nextEpisode && onEpisodeChange) {
+                        onEpisodeChange(nextEpisode);
+                      }
+                    }}
+                    className="relative w-48 sm:w-60 md:w-64 aspect-video rounded-xl overflow-hidden cursor-pointer group shadow-2xl border border-white/20 hover:border-pink-500/60 transition-all duration-300 transform hover:scale-[1.02] bg-[#0c101b]"
+                    title={`Play Next: Episode ${visibleEpisodes.find(e => e.id === nextEpisode.id)?.folderEpNum || nextEpisode.episodeNumber || (currentIndex + 2)}`}
+                  >
+                    {/* Thumbnail */}
+                    <img
+                      src={
+                        nextEpisode.stillPath ||
+                        nextEpisode.thumbnailUrl ||
+                        nextEpisode.thumbnail ||
+                        nextEpisode.backdropUrl ||
+                        parentItem?.backdropUrl ||
+                        parentItem?.posterUrl ||
+                        '/placeholder.png'
+                      }
+                      alt={`Episode ${visibleEpisodes.find(e => e.id === nextEpisode.id)?.folderEpNum || nextEpisode.episodeNumber || (currentIndex + 2)}`}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-85 group-hover:opacity-100"
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                      }}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent pointer-events-none" />
+
+                    {/* Center Circular Countdown + Play Button */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="relative flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12">
+                        <svg className="w-11 h-11 sm:w-12 sm:h-12 -rotate-90">
+                          <circle
+                            cx="22"
+                            cy="22"
+                            r="18"
+                            stroke="rgba(255, 255, 255, 0.25)"
+                            strokeWidth="2.5"
+                            fill="rgba(0, 0, 0, 0.55)"
+                            className="sm:hidden"
+                          />
+                          <circle
+                            cx="22"
+                            cy="22"
+                            r="18"
+                            stroke="white"
+                            strokeWidth="2.5"
+                            fill="transparent"
+                            strokeDasharray={2 * Math.PI * 18}
+                            strokeDashoffset={2 * Math.PI * 18 * (1 - upNextCountdown / 10)}
+                            strokeLinecap="round"
+                            className="sm:hidden transition-all duration-1000 ease-linear"
+                          />
+                          <circle
+                            cx="24"
+                            cy="24"
+                            r="20"
+                            stroke="rgba(255, 255, 255, 0.25)"
+                            strokeWidth="3"
+                            fill="rgba(0, 0, 0, 0.55)"
+                            className="hidden sm:block"
+                          />
+                          <circle
+                            cx="24"
+                            cy="24"
+                            r="20"
+                            stroke="white"
+                            strokeWidth="3"
+                            fill="transparent"
+                            strokeDasharray={2 * Math.PI * 20}
+                            strokeDashoffset={2 * Math.PI * 20 * (1 - upNextCountdown / 10)}
+                            strokeLinecap="round"
+                            className="hidden sm:block transition-all duration-1000 ease-linear"
+                          />
+                        </svg>
+                        <Play size={16} fill="white" className="text-white ml-0.5 absolute pointer-events-none sm:hidden" />
+                        <Play size={18} fill="white" className="text-white ml-0.5 absolute pointer-events-none hidden sm:block" />
+                      </div>
+                    </div>
+
+                    {/* Bottom-Left: E {num} */}
+                    <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-md text-white font-black text-[11px] sm:text-xs">
+                      E {visibleEpisodes.find(e => e.id === nextEpisode.id)?.folderEpNum || nextEpisode.episodeNumber || (currentIndex + 2)}
+                    </div>
+
+                    {/* Bottom-Right: Age rating if available */}
+                    {(nextEpisode.ageRating || parentItem?.ageRating) && (
+                      <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-md border border-white/20 text-white font-extrabold text-[9px] sm:text-[10px] tracking-wider">
+                        {nextEpisode.ageRating || parentItem?.ageRating}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

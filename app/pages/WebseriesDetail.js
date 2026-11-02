@@ -449,7 +449,7 @@ export default function WebseriesDetail({ seriesId, onBack }) {
   useEffect(() => {
     if (!seriesId) return;
     const currentItem = series || getLocalWebseriesItem(seriesId);
-    if (currentItem?.tmdbId && (!currentItem.images || !currentItem.images.posters?.length || !currentItem.cast?.length)) {
+    if (currentItem?.tmdbId && (!currentItem.images || !currentItem.images.posters?.length || !currentItem.cast?.length || !currentItem.ageRating)) {
       fetch(`/api/watchlist/details?type=web-series&id=${encodeURIComponent(currentItem.tmdbId)}`)
         .then(res => res.json())
         .then(data => {
@@ -465,8 +465,12 @@ export default function WebseriesDetail({ seriesId, onBack }) {
                 overview: prev.overview || d.overview || '',
                 videos: d.videos || prev.videos || [],
                 logoUrl: prev.logoUrl || d.logoUrl || '',
+                ageRating: d.ageRating || prev.ageRating || null,
               };
               upsertLocalWebseries(enriched);
+              if (db && userId && d.ageRating) {
+                updateDoc(doc(db, 'users', userId, 'webseries', seriesId), { ageRating: d.ageRating }).catch(() => {});
+              }
               return enriched;
             });
           }
@@ -1261,7 +1265,7 @@ export default function WebseriesDetail({ seriesId, onBack }) {
         <button
           type="button"
           onClick={onBack || (() => router.push('/webseries'))}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-200 hover:text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer shadow-lg"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl liquid-glass-item text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
         >
           <ChevronLeft size={16} />
           <span>Dashboard</span>
@@ -1272,7 +1276,7 @@ export default function WebseriesDetail({ seriesId, onBack }) {
           <button
             type="button"
             onClick={() => setShowAssignModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-300 hover:text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl liquid-glass-item text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
             title="Assign local episodes to online fetched episodes"
           >
             <SlidersHorizontal size={14} className="text-amber-400" />
@@ -1282,7 +1286,7 @@ export default function WebseriesDetail({ seriesId, onBack }) {
           <button
             type="button"
             onClick={() => setShowEditModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-300 hover:text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl liquid-glass-item text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
             title="Edit web-series information"
           >
             <Edit3 size={14} />
@@ -1292,10 +1296,10 @@ export default function WebseriesDetail({ seriesId, onBack }) {
           <button
             type="button"
             onClick={handleToggleCompleted}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border backdrop-blur-md transition cursor-pointer shadow-lg ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95 ${
               isCompleted
                 ? 'bg-emerald-500/25 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/35 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
-                : 'bg-black/40 border-white/15 text-gray-300 hover:text-white hover:bg-black/60'
+                : 'liquid-glass-item text-white border-white/15 hover:bg-white/15'
             }`}
           >
             <CheckCircle2 size={14} className={isCompleted ? 'text-emerald-400' : ''} />
@@ -1305,7 +1309,7 @@ export default function WebseriesDetail({ seriesId, onBack }) {
           <button
             type="button"
             onClick={() => setShowDeleteModal(true)}
-            className="p-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 hover:text-red-200 text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg"
+            className="p-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 hover:text-red-200 text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
             title="Remove web-series"
           >
             <Trash2 size={15} />
@@ -1317,7 +1321,7 @@ export default function WebseriesDetail({ seriesId, onBack }) {
           <button
             type="button"
             onClick={() => setShowMobileActionModal(true)}
-            className="flex items-center justify-center p-2 rounded-xl bg-black/50 hover:bg-black/70 border border-white/15 text-gray-200 hover:text-white backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
+            className="flex items-center justify-center p-2 rounded-xl liquid-glass-item text-white backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
             aria-label="Open Actions Menu"
             title="Web-series Actions"
           >
@@ -1355,9 +1359,11 @@ export default function WebseriesDetail({ seriesId, onBack }) {
                 ) : null}
               </div>
 
-              <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-amber-500 text-black font-extrabold text-[9px] shadow uppercase tracking-wider">
-                {getEffectiveRating(series)?.label || 'TMDB'}
-              </div>
+              {series.ageRating && (
+                <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-white/15 backdrop-blur-md border border-white/25 text-white font-black text-[10px] shadow tracking-wider">
+                  {series.ageRating}
+                </div>
+              )}
             </div>
 
             {/* Ratings just below the content poster */}
@@ -1403,6 +1409,11 @@ export default function WebseriesDetail({ seriesId, onBack }) {
                     | {series.language.toUpperCase()}
                   </span>
                 )}
+                {series.ageRating && (
+                  <span className="px-2.5 py-0.5 text-gray-300 text-[10px] font-bold">
+                    | {series.ageRating}
+                  </span>
+                )}
               </div>
 
               {/* Series Logo Art */}
@@ -1427,6 +1438,22 @@ export default function WebseriesDetail({ seriesId, onBack }) {
                   {series.originalTitle || series.romajiTitle}
                 </p>
               )}
+
+              {/* Mobile Ratings (Rotten Tomatoes, IMDb) below Title */}
+              <div className="block sm:hidden pt-2">
+                <OmdbRatingsBlock
+                  align="left"
+                  omdb={series.omdb}
+                  imdbId={series.imdbId || series.imdb_id}
+                  imdbRating={series.imdbRating}
+                  imdbVotes={series.imdbVotes}
+                  rottenTomatoes={series.rottenTomatoes}
+                  metacritic={series.metacritic}
+                  loading={omdbLoading && !series.omdb}
+                  showRatings={true}
+                  showAwards={false}
+                />
+              </div>
             </div>
 
             {/* Genres with pipes */}

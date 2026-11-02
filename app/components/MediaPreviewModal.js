@@ -558,7 +558,12 @@ export default function MediaPreviewModal({
                 {ratingText}
               </span>
             )}
-            {(year || ratingText) && runtimeStr && <span className="text-gray-500">•</span>}
+            {item.ageRating && (
+              <span className="px-1.5 py-0.5 rounded border border-white/20 bg-white/10 text-[10px] text-pink-300 font-extrabold tracking-wider">
+                {item.ageRating}
+              </span>
+            )}
+            {(year || ratingText || item.ageRating) && runtimeStr && <span className="text-gray-500">•</span>}
             {runtimeStr && <span>{runtimeStr}</span>}
             {rawGenre && <span className="text-gray-500">•</span>}
             {rawGenre && <span className="text-gray-400">{rawGenre}</span>}

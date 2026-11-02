@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { extractIndianAgeRating } from '../../../utils/ageRatingUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,8 +22,8 @@ export async function GET(request) {
         { status: 500 }
       );
     }
-    // Use append_to_response=credits,images,videos,keywords to fetch everything in 1 single fast request
-    const tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}?api_key=${apiKey}&language=en-US&include_image_language=en,null&append_to_response=credits,images,videos,keywords`;
+    // Use append_to_response=credits,images,videos,keywords,release_dates to fetch everything in 1 single fast request
+    const tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}?api_key=${apiKey}&language=en-US&include_image_language=en,null&append_to_response=credits,images,videos,keywords,release_dates`;
 
     const res = await fetch(tmdbUrl, {
       headers: {
@@ -129,6 +130,8 @@ export async function GET(request) {
         }))
       : [];
 
+    const ageRating = extractIndianAgeRating(d, true);
+
     const movieDetails = {
       tmdbId: d.id,
       title: d.title || d.original_title || 'Untitled Movie',
@@ -154,6 +157,7 @@ export async function GET(request) {
       videos,
       status: d.status || 'Released',
       imdbId: d.imdb_id || '',
+      ageRating,
     };
 
     return NextResponse.json({

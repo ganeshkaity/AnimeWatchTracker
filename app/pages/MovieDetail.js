@@ -287,8 +287,8 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
           setLoading(false);
           verifyLocalFile(movieObj.localFilePath);
 
-          // If movie lacks cast, images, or overview and has a tmdbId, auto-enrich in background
-          if (movieObj.tmdbId && (!movieObj.cast || movieObj.cast.length === 0 || !movieObj.images || !movieObj.overview)) {
+          // If movie lacks cast, images, overview or ageRating and has a tmdbId, auto-enrich in background
+          if (movieObj.tmdbId && (!movieObj.cast || movieObj.cast.length === 0 || !movieObj.images || !movieObj.overview || !movieObj.ageRating)) {
             fetch(`/api/movies/details?id=${encodeURIComponent(movieObj.tmdbId)}`)
               .then(res => res.json())
               .then(data => {
@@ -305,8 +305,13 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                       backdropUrl: prev.backdropUrl || m.backdropUrl || '',
                       overview: prev.overview || m.overview || '',
                       directors: m.directors || prev.directors || [],
+                      ageRating: m.ageRating || prev.ageRating || null,
                     };
                     upsertLocalMovie(enriched);
+                    const targetUserId = getUserId();
+                    if (db && targetUserId && m.ageRating) {
+                      updateDoc(doc(db, 'users', targetUserId, 'movies', prev.id), { ageRating: m.ageRating }).catch(() => {});
+                    }
                     return enriched;
                   });
                 }
@@ -993,7 +998,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
         <button
           type="button"
           onClick={onBack || (() => router.push('/movies'))}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-200 hover:text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer shadow-lg"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl liquid-glass-item text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
         >
           <ChevronLeft size={16} />
           <span>Movies</span>
@@ -1004,7 +1009,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
           <button
             type="button"
             onClick={() => setShowEditModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-300 hover:text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl liquid-glass-item text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
             title="Edit movie information"
           >
             <Edit3 size={14} />
@@ -1014,9 +1019,9 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
           <button
             type="button"
             onClick={handleToggleCompleted}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border backdrop-blur-md transition cursor-pointer shadow-lg ${isCompleted
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95 ${isCompleted
               ? 'bg-emerald-500/25 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/35 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
-              : 'bg-black/40 border-white/15 text-gray-300 hover:text-white hover:bg-black/60'
+              : 'liquid-glass-item text-white border-white/15 hover:bg-white/15'
               }`}
           >
             <CheckCircle2 size={14} className={isCompleted ? 'text-emerald-400' : ''} />
@@ -1026,7 +1031,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
           <button
             type="button"
             onClick={handleDelete}
-            className="p-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 hover:text-red-200 text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg"
+            className="p-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 hover:text-red-200 text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
             title="Remove movie"
           >
             <Trash2 size={15} />
@@ -1038,7 +1043,7 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
           <button
             type="button"
             onClick={() => setShowMobileActionModal(true)}
-            className="flex items-center justify-center p-2 rounded-xl bg-black/50 hover:bg-black/70 border border-white/15 text-gray-200 hover:text-white backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
+            className="flex items-center justify-center p-2 rounded-xl liquid-glass-item text-white backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
             aria-label="Open Actions Menu"
             title="Movie Actions"
           >
@@ -1076,9 +1081,11 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                 ) : null}
               </div>
 
-              <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-amber-500 text-black font-extrabold text-[9px] shadow uppercase tracking-wider">
-                {getEffectiveRating(movie)?.label || 'TMDB'}
-              </div>
+              {movie.ageRating && (
+                <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-white/15 backdrop-blur-md border border-white/25 text-white font-black text-[10px] shadow tracking-wider">
+                  {movie.ageRating}
+                </div>
+              )}
             </div>
 
             {/* Ratings just below the content poster */}
@@ -1126,6 +1133,11 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                     | {movie.language}
                   </span>
                 )}
+                {movie.ageRating && (
+                  <span className="px-2.5 py-0.5 text-gray-300 text-[10px] font-bold">
+                    | {movie.ageRating}
+                  </span>
+                )}
               </div>
 
               {/* Movie Logo Art */}
@@ -1150,6 +1162,22 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                   {movie.originalTitle}
                 </p>
               )}
+
+              {/* Mobile Ratings (Rotten Tomatoes, IMDb) below Title */}
+              <div className="block sm:hidden pt-2">
+                <OmdbRatingsBlock
+                  align="left"
+                  omdb={movie.omdb}
+                  imdbId={movie.imdbId || movie.imdb_id}
+                  imdbRating={movie.imdbRating}
+                  imdbVotes={movie.imdbVotes}
+                  rottenTomatoes={movie.rottenTomatoes}
+                  metacritic={movie.metacritic}
+                  loading={omdbLoading && !movie.omdb}
+                  showRatings={true}
+                  showAwards={false}
+                />
+              </div>
             </div>
             {/* Genres */}
             {Array.isArray(movie.genres) && movie.genres.length > 0 && (

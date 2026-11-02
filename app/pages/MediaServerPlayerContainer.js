@@ -94,6 +94,7 @@ export default function MediaServerPlayerContainer({
             animeId={animeId}
             episode={currentEpisode}
             episodes={mergedEpisodes}
+            parentItem={animeDetails}
             onBack={onBack}
             onEpisodeChange={(newEp) => setCurrentEpisodeId(newEp.id)}
             initialSpeed={initialSpeed}

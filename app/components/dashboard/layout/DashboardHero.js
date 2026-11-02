@@ -206,11 +206,16 @@ export default function DashboardHero({
                     </span>
                   )}
                   <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-pink-300">
-                    <Clock size={13} className="text-pink-400" /> {currentHero.isManga || currentHero.isAudio || currentHero.isMovie ? currentHero.quality : currentHero.episodes}
+                    <Clock size={13} className="text-pink-400" /> {currentHero.isMovie ? (currentHero.episodes || 'Movie') : (currentHero.isManga || currentHero.isAudio ? currentHero.quality : currentHero.episodes)}
                   </span>
                   <span className="flex items-center gap-1.5 text-cyan-300">
                     <Calendar size={14} className="text-cyan-400" /> {currentHero.year}
                   </span>
+                  {currentHero.ageRating && (
+                    <span className="flex items-center gap-1.5 text-pink-300 font-extrabold tracking-wide">
+                      {currentHero.ageRating}
+                    </span>
+                  )}
                 </div>
 
                 {/* Description */}

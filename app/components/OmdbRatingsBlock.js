@@ -17,7 +17,8 @@ export default function OmdbRatingsBlock({
   showRatings = true,
   showAwards = true,
   className = "",
-  compact = false
+  compact = false,
+  align = 'center', // 'center' | 'left'
 }) {
   const [showImdbTooltip, setShowImdbTooltip] = useState(false);
 
@@ -67,7 +68,7 @@ export default function OmdbRatingsBlock({
     <div className={`w-full ${className}`}>
       {/* ── 1. Critical & Audience Ratings (Placed below the content poster) ── */}
       {showRatings && hasAnyRating && (
-        <div className="w-full flex items-center justify-center gap-2.5 pt-1.5 flex-wrap">
+        <div className={`w-full flex items-center ${align === 'left' ? 'justify-start text-left' : 'justify-center'} gap-2.5 pt-1.5 flex-wrap`}>
           {/* IMDb Rating */}
           {imdbRating && (
             <div

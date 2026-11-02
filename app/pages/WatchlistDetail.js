@@ -439,6 +439,25 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
             setItem(data);
             upsertLocalWatchlist(data);
             setLoading(false);
+
+            if (!data.ageRating && data.tmdbId) {
+              const typeParam = data.contentType === 'movie' ? 'movie' : (data.contentType === 'anime' ? 'anime' : 'web-series');
+              fetch(`/api/watchlist/details?type=${encodeURIComponent(typeParam)}&id=${encodeURIComponent(data.tmdbId)}`)
+                .then(r => r.json())
+                .then(res => {
+                  if (res.success && res.details?.ageRating) {
+                    setItem(prev => {
+                      if (!prev) return prev;
+                      const up = { ...prev, ageRating: res.details.ageRating };
+                      upsertLocalWatchlist(up);
+                      return up;
+                    });
+                    if (db && userId) {
+                      updateDoc(doc(db, 'users', userId, 'watchlist', data.id), { ageRating: res.details.ageRating }).catch(() => {});
+                    }
+                  }
+                }).catch(() => {});
+            }
           }
         } catch (err) {
           console.warn('Watchlist fetch error:', err);
@@ -598,7 +617,7 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
         <button
           type="button"
           onClick={onBack || (() => router.push('/watchlist'))}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-200 hover:text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer shadow-lg"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl liquid-glass-item text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
         >
           <ChevronLeft size={16} />
           <span>Watchlist</span>
@@ -609,7 +628,7 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
           <button
             type="button"
             onClick={() => setShowEditModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-300 hover:text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl liquid-glass-item text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
           >
             <Edit3 size={14} />
             <span className="hidden sm:inline">Edit</span>
@@ -617,7 +636,7 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
           <button
             type="button"
             onClick={() => setShowDeleteModal(true)}
-            className="p-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 transition cursor-pointer shadow-lg"
+            className="p-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 transition cursor-pointer shadow-lg active:scale-95"
             title="Remove from Watchlist"
           >
             <Trash2 size={15} />
@@ -654,9 +673,9 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
                 ) : null}
               </div>
 
-              {getEffectiveRating(item)?.label && (
-                <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-amber-500 text-black font-extrabold text-[9px] shadow uppercase tracking-wider">
-                  {getEffectiveRating(item).label}
+              {item.ageRating && (
+                <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-white/15 backdrop-blur-md border border-white/25 text-white font-black text-[10px] shadow tracking-wider">
+                  {item.ageRating}
                 </div>
               )}
             </div>
@@ -700,6 +719,11 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
                     {item.releaseDate}
                   </span>
                 )}
+                {item.ageRating && (
+                  <span className="px-2.5 py-0.5 rounded-lg bg-white/10 border border-white/10 text-gray-300 text-[10px] font-bold">
+                    {item.ageRating}
+                  </span>
+                )}
               </div>
 
               {/* Title Art / Logo + Text Title */}
@@ -722,6 +746,23 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
                   {item.originalTitle}
                 </p>
               )}
+
+              {/* Mobile Ratings (Rotten Tomatoes, IMDb) below Title */}
+              <div className="block sm:hidden pt-2">
+                <OmdbRatingsBlock
+                  align="left"
+                  omdb={item.omdb}
+                  imdbId={item.imdbId || item.imdb_id}
+                  imdbRating={item.imdbRating}
+                  imdbVotes={item.imdbVotes}
+                  rottenTomatoes={item.rottenTomatoes}
+                  metacritic={item.metacritic}
+                  loading={omdbLoading && !item.omdb}
+                  showRatings={true}
+                  showAwards={false}
+                />
+              </div>
+
               {seasons.length > 0 && (
                 <span className="px-2.5 py-0.5 mr-2 rounded-lg bg-white/10 border border-white/10 text-gray-300 text-[10px] font-mono font-bold">
                   {seasons.length} {seasons.length === 1 ? 'Season' : 'Seasons'}
@@ -854,11 +895,6 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
                         Show more
                       </span>
                     </p>
-                    {/* Sleek black vignette gradient mask overlay on bottom */}
-                    <div
-                      className="pointer-events-none absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-[#07090f] via-[#07090f]/75 to-transparent"
-                      aria-hidden="true"
-                    />
                   </div>
                 ) : (
                   <div className="space-y-2">

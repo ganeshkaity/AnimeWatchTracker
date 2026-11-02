@@ -25,11 +25,13 @@ export default function TopRatedMasterpieceCard({
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
         />
 
+        <div className="absolute inset-x-0 top-0 h-14 bg-gradient-to-b from-black/80 via-black/35 to-transparent pointer-events-none z-[5]" />
+
         {/* Liquid Glass Rating Badge (Top-Right) */}
         {displayRating && (
-          <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 text-[10px] font-bold text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.5)] backdrop-saturate-150 pointer-events-none">
-            <Star size={10} className="fill-amber-400 text-amber-400" />
-            <span className="leading-none">{displayRating}</span>
+          <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-xl border border-white/20 text-[10px] font-black text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.8)] backdrop-saturate-150 pointer-events-none">
+            <Star size={10} className="fill-amber-400 text-amber-400 shrink-0" />
+            <span className="leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">{displayRating}</span>
           </div>
         )}
       </div>

@@ -118,13 +118,9 @@ export const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList
     }
     const validGenres = genres.filter(g => GENRES_LIST.includes(g) && g !== 'All');
 
-    const totalSeasons = anime.totalSeasons ? Number(anime.totalSeasons) : 1;
-    const totalEpisodes = anime.totalEpisodes ? Number(anime.totalEpisodes) : (anime.episodeCount || 0);
-    const scannedCount = anime.episodeCount || 0;
-    let epDisplay = `${totalEpisodes} EP`;
-    if (scannedCount > 0 && scannedCount !== totalEpisodes) {
-      epDisplay = `${scannedCount}/${totalEpisodes} EP`;
-    }
+    const totalSeasons = anime.seasonsCount ? Number(anime.seasonsCount) : (anime.totalSeasons ? Number(anime.totalSeasons) : (Array.isArray(anime.seasons) && anime.seasons.length > 0 ? anime.seasons.length : 1));
+    const totalEpisodes = anime.totalEpisodes ? Number(anime.totalEpisodes) : (anime.episodesCount ? Number(anime.episodesCount) : (anime.episodeCount || 0));
+    const epDisplay = totalEpisodes > 0 ? `${totalEpisodes} EP` : (anime.episodeCount ? `${anime.episodeCount} EP` : 'Anime');
     const pct = getAnimeProgressPercent(anime);
 
     const animePoster = anime.posterUrl || anime.coverUrl || anime.coverImage || resolveHeroImg(anime.thumbnailBase64) || resolveHeroImg(anime.thumbnailPath) || null;
@@ -149,6 +145,7 @@ export const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList
       episodes: epDisplay,
       totalSeasons: totalSeasons,
       totalEpisodes: totalEpisodes,
+      ageRating: anime.ageRating || anime.contentRating || anime.certification || null,
       year: anime.year || new Date(anime.createdAt || Date.now()).getFullYear().toString(),
       quality: anime.quality || '1080p HD',
       language: anime.language || 'SUB / DUB',
@@ -289,7 +286,8 @@ export const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList
       totalSeasons: 0,
       totalEpisodes: 1,
       year: movie.year || (movie.releaseDate ? movie.releaseDate.split('-')[0] : '2026'),
-      quality: '4K Ultra HD',
+      quality: runtimeStr || '',
+      ageRating: movie.ageRating || movie.contentRating || movie.certification || null,
       language: (movie.language || 'English').toUpperCase(),
       studio: (movie.productionCountries && movie.productionCountries[0]) || 'Cinema',
       genres: validGenres.length > 0 ? validGenres : ['Movie'],
@@ -310,13 +308,9 @@ export const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList
     }
     const validGenres = genres.filter(g => GENRES_LIST.includes(g) && g !== 'All');
 
-    const totalSeasons = series.totalSeasons ? Number(series.totalSeasons) : (Array.isArray(series.seasons) ? series.seasons.length : 1);
-    const totalEpisodes = series.totalEpisodes ? Number(series.totalEpisodes) : (series.episodeCount || 0);
-    const scannedCount = series.episodeCount || (Array.isArray(series.episodes) ? series.episodes.length : 0);
-    let epDisplay = totalEpisodes > 0 ? `${totalEpisodes} EP` : (scannedCount > 0 ? `${scannedCount} EP` : 'TV Series');
-    if (scannedCount > 0 && totalEpisodes > 0 && scannedCount !== totalEpisodes) {
-      epDisplay = `${scannedCount}/${totalEpisodes} EP`;
-    }
+    const totalSeasons = series.seasonsCount ? Number(series.seasonsCount) : (series.totalSeasons ? Number(series.totalSeasons) : (Array.isArray(series.seasons) && series.seasons.length > 0 ? series.seasons.length : 1));
+    const totalEpisodes = series.totalEpisodes ? Number(series.totalEpisodes) : (series.episodesCount ? Number(series.episodesCount) : (series.episodeCount || 0));
+    const epDisplay = totalEpisodes > 0 ? `${totalEpisodes} EP` : (series.episodeCount ? `${series.episodeCount} EP` : 'TV Series');
 
     const pct = Number(series.progressPercent || 0);
     const isCompleted = Boolean(series.watched || series.isWatched || series.watchStatus === 'Completed' || pct >= 100);
@@ -348,9 +342,10 @@ export const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList
       isManualRating: Boolean(series.isManualRating),
       episodes: epDisplay,
       totalSeasons: totalSeasons,
-      totalEpisodes: totalEpisodes || scannedCount,
+      totalEpisodes: totalEpisodes,
       year: series.year || (series.releaseDate ? series.releaseDate.split('-')[0] : '2026'),
-      quality: '4K Ultra HD',
+      quality: series.quality || '1080p HD',
+      ageRating: series.ageRating || series.contentRating || series.certification || null,
       language: (series.language || 'English').toUpperCase(),
       studio: (series.productionCountries && series.productionCountries[0]) || 'Web Series',
       genres: validGenres.length > 0 ? validGenres : ['Web Series', 'Drama'],
@@ -370,8 +365,8 @@ export const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList
       isAudio: false,
       isMovie: false,
       isWebseries: false,
-      title: 'WELCOME TO WATCHANIME',
-      japaneseTitle: 'トラッカーへようこそ',
+      title: 'WELCOME TO GANESHSPACE',
+      japaneseTitle: 'ガネシュスペースへようこそ',
       banner: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop',
       rating: '10.0',
       episodes: '0 / 0',

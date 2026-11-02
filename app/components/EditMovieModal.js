@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import OmdbRefetchSection from './OmdbRefetchSection';
+import RatingSourceSelector from './RatingSourceSelector';
+import { mapUsToIndianRating, normalizeIndianRating } from '../utils/ageRatingUtils';
 
 const GENRES_LIST = [
   "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary",
@@ -43,6 +45,13 @@ export default function EditMovieModal({
   const [year, setYear] = useState('');
   const [runtime, setRuntime] = useState('');
   const [rating, setRating] = useState('');
+  const [tmdbRating, setTmdbRating] = useState('');
+  const [imdbRating, setImdbRating] = useState('');
+  const [ratingSource, setRatingSource] = useState('tmdb');
+  const [ageRating, setAgeRating] = useState('');
+  const [tmdbAgeRating, setTmdbAgeRating] = useState('');
+  const [omdbAgeRating, setOmdbAgeRating] = useState('');
+  const [ageRatingSource, setAgeRatingSource] = useState('tmdb');
   const [overview, setOverview] = useState('');
   const [posterUrl, setPosterUrl] = useState('');
   const [backdropUrl, setBackdropUrl] = useState('');
@@ -72,6 +81,13 @@ export default function EditMovieModal({
       setYear(movie.year || '');
       setRuntime(movie.runtime ? String(movie.runtime) : '');
       setRating(movie.rating ? String(movie.rating) : '');
+      setTmdbRating(movie.tmdbRating ? String(movie.tmdbRating) : (movie.rating ? String(movie.rating) : ''));
+      setImdbRating(movie.imdbRating ? String(movie.imdbRating) : (movie.omdb?.imdbRating ? String(movie.omdb.imdbRating) : ''));
+      setRatingSource(movie.ratingSource || (movie.imdbRating ? 'omdb' : 'tmdb'));
+      setAgeRating(movie.ageRating || '');
+      setTmdbAgeRating(movie.tmdbAgeRating || movie.ageRating || '');
+      setOmdbAgeRating(movie.omdbAgeRating || '');
+      setAgeRatingSource(movie.ageRatingSource || 'tmdb');
       setOverview(movie.overview || '');
       setPosterUrl(movie.posterUrl || '');
       setBackdropUrl(movie.backdropUrl || '');
@@ -236,8 +252,18 @@ export default function EditMovieModal({
     if (data?.omdb) {
       setOmdb(data.omdb);
       if (data.imdbId) setImdbId(data.imdbId);
-      if (data.imdbRating && !rating) {
-        setRating(String(data.imdbRating));
+      if (data.imdbRating) {
+        setImdbRating(String(data.imdbRating));
+        if (ratingSource === 'omdb') {
+          setRating(String(data.imdbRating));
+        }
+      }
+      if (data.omdb.rated && data.omdb.rated !== 'N/A') {
+        const converted = mapUsToIndianRating(data.omdb.rated) || normalizeIndianRating(data.omdb.rated) || data.omdb.rated;
+        setOmdbAgeRating(converted);
+        if (ageRatingSource === 'omdb' || !ageRating) {
+          setAgeRating(converted);
+        }
       }
     }
   };
@@ -278,6 +304,10 @@ export default function EditMovieModal({
         }
       }
 
+      const effectiveRating = ratingSource === 'omdb'
+        ? (imdbRating ? parseFloat(imdbRating) : (rating ? parseFloat(rating) : 0))
+        : (tmdbRating ? parseFloat(tmdbRating) : (rating ? parseFloat(rating) : 0));
+
       const updated = {
         ...movie,
         title: title.trim(),
@@ -293,9 +323,16 @@ export default function EditMovieModal({
         year: year.trim(),
         runtime: runtimeMinutes,
         duration: runtimeMinutes * 60,
-        rating: rating ? parseFloat(rating) : movie.rating,
+        rating: effectiveRating,
+        tmdbRating: tmdbRating ? parseFloat(tmdbRating) : (movie.tmdbRating || null),
+        imdbRating: imdbRating ? parseFloat(imdbRating) : (omdb?.imdbRating || movie.imdbRating || movie.omdb?.imdbRating || null),
+        ratingSource: ratingSource || 'tmdb',
+        ageRating: ageRating ? ageRating.trim() : null,
+        tmdbAgeRating: tmdbAgeRating ? tmdbAgeRating.trim() : null,
+        omdbAgeRating: omdbAgeRating ? omdbAgeRating.trim() : null,
+        ageRatingSource: ageRatingSource || 'tmdb',
         userRating: rating ? parseFloat(rating) : (movie.userRating || null),
-        isManualRating: Boolean(rating && !isNaN(parseFloat(rating)) && parseFloat(rating) > 0),
+        isManualRating: false,
         overview: overview.trim(),
         posterUrl: posterUrl || movie.posterUrl,
         backdropUrl: backdropUrl || movie.backdropUrl,
@@ -847,6 +884,25 @@ export default function EditMovieModal({
               type="movie"
               currentOmdb={omdb}
               onOmdbUpdated={handleOmdbUpdated}
+            />
+
+            {/* Rating Display & Source (TMDB & OMDB / IMDb Indian Age Rating) */}
+            <RatingSourceSelector
+              title={title}
+              year={year}
+              imdbId={imdbId}
+              tmdbId={movie.tmdbId}
+              type="movie"
+              ageRating={ageRating}
+              setAgeRating={setAgeRating}
+              tmdbAgeRating={tmdbAgeRating}
+              setTmdbAgeRating={setTmdbAgeRating}
+              omdbAgeRating={omdbAgeRating}
+              setOmdbAgeRating={setOmdbAgeRating}
+              ageRatingSource={ageRatingSource}
+              setAgeRatingSource={setAgeRatingSource}
+              currentOmdb={omdb}
+              onAgeRatingChanged={(newAge) => setAgeRating(newAge)}
             />
 
             {/* Buttons */}

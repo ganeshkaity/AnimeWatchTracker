@@ -2,15 +2,41 @@
  * Centralized Rating Utility
  * 
  * Determines effective rating with strict priority:
- * 1. User manual rating (manually rated by user: userRating, customRating, manualRating, userCustomRating, or isManualRating === true)
- * 2. IMDb rating (imdbRating, omdb.imdbRating)
- * 3. TMDB rating / malRating / fallback (rating, tmdbRating, score, vote_average)
+ * 1. Explicit user selection via RatingSourceSelector (ratingSource === 'tmdb' or 'omdb'/'imdb')
+ * 2. User manual rating (userRating, customRating, manualRating, or isManualRating === true)
+ * 3. IMDb rating (imdbRating, omdb.imdbRating)
+ * 4. TMDB rating / malRating / fallback (rating, tmdbRating, score, vote_average)
  */
 
 export function getEffectiveRating(item) {
   if (!item) return null;
 
-  // 1. Manually rated by user
+  // 1. Explicit user choice via RatingSourceSelector (tmdb vs omdb/imdb)
+  if (item.ratingSource === 'tmdb') {
+    const tmdbVal = item.tmdbRating ?? item.rating ?? item.score ?? item.vote_average ?? item.malRating;
+    if (tmdbVal && tmdbVal !== 'N/A' && !isNaN(Number(tmdbVal)) && Number(tmdbVal) > 0) {
+      const num = Number(tmdbVal);
+      return {
+        value: num.toFixed(1),
+        numeric: num,
+        source: 'tmdb',
+        label: 'TMDB'
+      };
+    }
+  } else if (item.ratingSource === 'omdb' || item.ratingSource === 'imdb') {
+    const rawImdb = item.imdbRating || item.omdb?.imdbRating || item.rating;
+    if (rawImdb && rawImdb !== 'N/A' && !isNaN(Number(rawImdb)) && Number(rawImdb) > 0) {
+      const num = Number(rawImdb);
+      return {
+        value: num.toFixed(1),
+        numeric: num,
+        source: 'imdb',
+        label: 'IMDb'
+      };
+    }
+  }
+
+  // 2. Manually rated by user
   const manual = item.userRating ?? item.customRating ?? item.manualRating ?? item.userCustomRating;
   if (manual !== undefined && manual !== null && manual !== '' && !isNaN(Number(manual)) && Number(manual) > 0) {
     const num = Number(manual);

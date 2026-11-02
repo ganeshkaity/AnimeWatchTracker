@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { extractIndianAgeRating } from '../../../utils/ageRatingUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -310,12 +311,13 @@ async function fetchTmdbMedia(query, apiKey) {
 
     if (tvShow) {
       const fullRes = await fetch(
-        `https://api.themoviedb.org/3/tv/${tvShow.id}?api_key=${apiKey}&include_image_language=en,ja,null&append_to_response=images,credits,videos`,
+        `https://api.themoviedb.org/3/tv/${tvShow.id}?api_key=${apiKey}&include_image_language=en,ja,null&append_to_response=images,credits,videos,content_ratings`,
         { signal: AbortSignal.timeout(6000) }
       );
       if (fullRes.ok) {
         const fullData = await fullRes.json();
         const imgData = fullData.images || {};
+        const ageRating = extractIndianAgeRating(fullData, false);
         const cast = Array.isArray(fullData.credits?.cast)
           ? fullData.credits.cast.slice(0, 25).map((c) => ({
               id: c.id,
@@ -363,6 +365,7 @@ async function fetchTmdbMedia(query, apiKey) {
               height: img.height,
             }))
             : [],
+          ageRating,
         };
       }
     }
@@ -377,12 +380,13 @@ async function fetchTmdbMedia(query, apiKey) {
 
     if (movie) {
       const fullRes = await fetch(
-        `https://api.themoviedb.org/3/movie/${movie.id}?api_key=${apiKey}&include_image_language=en,ja,null&append_to_response=images,credits,videos`,
+        `https://api.themoviedb.org/3/movie/${movie.id}?api_key=${apiKey}&include_image_language=en,ja,null&append_to_response=images,credits,videos,release_dates`,
         { signal: AbortSignal.timeout(6000) }
       );
       if (fullRes.ok) {
         const fullData = await fullRes.json();
         const imgData = fullData.images || {};
+        const ageRating = extractIndianAgeRating(fullData, true);
         const cast = Array.isArray(fullData.credits?.cast)
           ? fullData.credits.cast.slice(0, 25).map((c) => ({
               id: c.id,
@@ -430,6 +434,7 @@ async function fetchTmdbMedia(query, apiKey) {
               height: img.height,
             }))
             : [],
+          ageRating,
         };
       }
     }

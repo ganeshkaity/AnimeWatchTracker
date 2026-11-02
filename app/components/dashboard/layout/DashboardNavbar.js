@@ -57,11 +57,15 @@ export default function DashboardNavbar({
       if (!inDesktop && !inMobile) {
         setIsSearchOpen(false);
       }
+      if (actionModalRef.current && !actionModalRef.current.contains(e.target)) {
+        setShowActionModal(false);
+      }
     };
 
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setIsSearchOpen(false);
+        setShowActionModal(false);
       }
     };
 
@@ -631,19 +635,10 @@ export default function DashboardNavbar({
           )}
         </div>
 
-        {/* Desktop Unified Media Actions Trigger (Hover or Click Modal) */}
+        {/* Desktop Unified Media Actions Trigger (Click Only Modal) */}
         <div
           ref={actionModalRef}
           className="relative hidden sm:block"
-          onMouseEnter={() => {
-            if (actionModalTimerRef.current) clearTimeout(actionModalTimerRef.current);
-            setShowActionModal(true);
-          }}
-          onMouseLeave={() => {
-            actionModalTimerRef.current = setTimeout(() => {
-              setShowActionModal(false);
-            }, 220);
-          }}
         >
           <button
             type="button"
@@ -656,7 +651,6 @@ export default function DashboardNavbar({
           >
             <Plus size={15} className={`transition-transform duration-300 ${showActionModal ? 'rotate-45 text-cyan-300' : 'text-[#7c5cff]'}`} />
             <span>Add / Stream</span>
-            <ChevronDown size={13} className={`text-gray-300 transition-transform duration-300 ${showActionModal ? 'rotate-180' : ''}`} />
           </button>
 
           {/* Small Floating Modal on Hover/Click */}

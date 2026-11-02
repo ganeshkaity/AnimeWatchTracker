@@ -2267,6 +2267,12 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
       .then(data => {
         if (!isCancelled && data.success && data.anime) {
           setOnlineData(data.anime);
+          if (data.anime.ageRating && (!anime.ageRating || anime.ageRating !== data.anime.ageRating)) {
+            const targetUserId = getUserId();
+            if (db && targetUserId && anime.id) {
+              updateDoc(doc(db, 'users', targetUserId, 'animes', anime.id), { ageRating: data.anime.ageRating }).catch(() => {});
+            }
+          }
         }
       })
       .catch(err => console.warn('[AnimeDetail] enrich details error:', err));
@@ -2816,11 +2822,11 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
       <header className="relative z-30 h-14 md:h-16 px-4 md:px-8 flex items-center justify-between bg-transparent">
         <button
           type="button"
-          onClick={onBack || (() => router.push('/'))}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-200 hover:text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer shadow-lg"
+          onClick={onBack || (() => router.push('/animes'))}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl liquid-glass-item text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
         >
           <ChevronLeft size={16} />
-          <span>Dashboard</span>
+          <span>Library</span>
         </button>
 
         {/* Desktop Action Buttons (sm and above) */}
@@ -2828,7 +2834,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
           <button
             type="button"
             onClick={() => setShowAssignModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-300 hover:text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl liquid-glass-item text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
             title="Assign local episodes to online fetched episodes"
           >
             <SlidersHorizontal size={14} className="text-neonCyan" />
@@ -2838,7 +2844,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
           <button
             type="button"
             onClick={() => setShowEditModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-white/15 text-gray-300 hover:text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl liquid-glass-item text-white text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
             title="Edit anime information"
           >
             <Edit3 size={14} />
@@ -2848,10 +2854,10 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
           <button
             type="button"
             onClick={handleToggleCompleted}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border backdrop-blur-md transition cursor-pointer shadow-lg ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95 ${
               isAllWatched
                 ? 'bg-emerald-500/25 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/35 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
-                : 'bg-black/40 border-white/15 text-gray-300 hover:text-white hover:bg-black/60'
+                : 'liquid-glass-item text-white border-white/15 hover:bg-white/15'
             }`}
           >
             <CheckCircle2 size={14} className={isAllWatched ? 'text-emerald-400' : ''} />
@@ -2861,7 +2867,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
           <button
             type="button"
             onClick={() => setShowDeleteFolderConfirm(true)}
-            className="p-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 hover:text-red-200 text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg"
+            className="p-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 hover:text-red-200 text-xs font-bold backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
             title="Delete anime folder from database"
           >
             <Trash2 size={15} />
@@ -2873,7 +2879,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
           <button
             type="button"
             onClick={() => setShowMobileActionModal(true)}
-            className="flex items-center justify-center p-2 rounded-xl bg-black/50 hover:bg-black/70 border border-white/15 text-gray-200 hover:text-white backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
+            className="flex items-center justify-center p-2 rounded-xl liquid-glass-item text-white backdrop-blur-md transition cursor-pointer shadow-lg active:scale-95"
             aria-label="Open Actions Menu"
             title="Anime Actions"
           >
@@ -2912,9 +2918,11 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                   )}
                 </div>
 
-                <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-[#7c5cff] text-white font-extrabold text-[9px] shadow uppercase tracking-wider">
-                  {getEffectiveRating(anime)?.label || 'ANIME'}
-                </div>
+                {(anime.ageRating || onlineData?.ageRating) && (
+                  <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-white/15 backdrop-blur-md border border-white/25 text-white font-black text-[10px] shadow tracking-wider">
+                    {anime.ageRating || onlineData?.ageRating}
+                  </div>
+                )}
               </div>
 
               {/* Ratings just below the content poster */}
@@ -2960,6 +2968,11 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                       | {anime.status || onlineData?.status}
                     </span>
                   )}
+                  {(anime.ageRating || onlineData?.ageRating) && (
+                    <span className="px-2.5 py-0.5 text-gray-300 text-[10px] font-bold">
+                      | {anime.ageRating || onlineData?.ageRating}
+                    </span>
+                  )}
                 </div>
 
                 {/* Series Logo Art */}
@@ -2984,6 +2997,22 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                     {anime.romajiTitle || onlineData?.romajiTitle || anime.englishTitle || onlineData?.englishTitle}
                   </p>
                 )}
+
+                {/* Mobile Ratings (Rotten Tomatoes, IMDb) below Title */}
+                <div className="block sm:hidden pt-2">
+                  <OmdbRatingsBlock
+                    align="left"
+                    omdb={anime.omdb}
+                    imdbId={anime.imdbId || anime.imdb_id}
+                    imdbRating={anime.imdbRating}
+                    imdbVotes={anime.imdbVotes}
+                    rottenTomatoes={anime.rottenTomatoes}
+                    metacritic={anime.metacritic}
+                    loading={omdbLoading && !anime.omdb}
+                    showRatings={true}
+                    showAwards={false}
+                  />
+                </div>
               </div>
 
               {/* Genres with pipes */}
@@ -3815,7 +3844,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
               <h2 className="text-sm sm:text-base font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
                 <Sparkles size={16} className="text-neonCyan" /> Storyline & Overview
               </h2>
-              <div className="glass-panel p-5 sm:p-6 rounded-2xl border border-white/5 space-y-3 bg-white/[0.015]">
+              <div className="p-5 sm:p-6 space-y-3">
                 <p className={`text-xs sm:text-sm text-gray-300 leading-relaxed ${isOverviewExpanded ? '' : 'line-clamp-3'}`}>
                   {storylineText}
                 </p>

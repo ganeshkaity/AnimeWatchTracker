@@ -298,6 +298,11 @@ export default function MobileMediaActionSheet({
                   <span>{displayRating}</span>
                 </span>
               )}
+              {item.ageRating && (
+                <span className="px-1.5 py-0.5 rounded border border-white/20 bg-white/10 text-[10px] text-pink-300 font-extrabold tracking-wider">
+                  {item.ageRating}
+                </span>
+              )}
               {item.year && <span>• {item.year}</span>}
               {item.totalEpisodes ? (
                 <span>• {item.totalEpisodes} Ep</span>

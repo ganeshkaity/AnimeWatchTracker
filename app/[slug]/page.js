@@ -30,7 +30,7 @@ export default function AnimePage() {
     <div className="min-h-screen text-white">
       <AnimeDetail
         animeId={animeId}
-        onBack={() => router.push('/')}
+        onBack={() => router.push('/animes')}
         onPlayEpisode={(epId, epList, type = 'mediaserver', extraOpts = {}) => {
           const speed = extraOpts.speed || 1;
           const volume = Math.round((extraOpts.volume ?? 1) * 100);

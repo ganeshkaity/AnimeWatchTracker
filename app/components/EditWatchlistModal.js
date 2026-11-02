@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import OmdbRefetchSection from './OmdbRefetchSection';
+import RatingSourceSelector from './RatingSourceSelector';
+import { mapUsToIndianRating, normalizeIndianRating } from '../utils/ageRatingUtils';
 
 const extractYoutubeId = (urlOrId) => {
   if (!urlOrId) return '';
@@ -33,6 +35,13 @@ export default function EditWatchlistModal({
   const [originalTitle, setOriginalTitle] = useState('');
   const [year, setYear] = useState('');
   const [rating, setRating] = useState('');
+  const [tmdbRating, setTmdbRating] = useState('');
+  const [imdbRating, setImdbRating] = useState('');
+  const [ratingSource, setRatingSource] = useState('tmdb');
+  const [ageRating, setAgeRating] = useState('');
+  const [tmdbAgeRating, setTmdbAgeRating] = useState('');
+  const [omdbAgeRating, setOmdbAgeRating] = useState('');
+  const [ageRatingSource, setAgeRatingSource] = useState('tmdb');
   const [status, setStatus] = useState('Plan to Watch');
   const [overview, setOverview] = useState('');
   const [posterUrl, setPosterUrl] = useState('');
@@ -64,6 +73,13 @@ export default function EditWatchlistModal({
       setOriginalTitle(item.originalTitle || '');
       setYear(item.year || '');
       setRating(item.rating ? String(item.rating) : '');
+      setTmdbRating(item.tmdbRating ? String(item.tmdbRating) : (item.rating ? String(item.rating) : ''));
+      setImdbRating(item.imdbRating ? String(item.imdbRating) : (item.omdb?.imdbRating ? String(item.omdb.imdbRating) : ''));
+      setRatingSource(item.ratingSource || (item.imdbRating ? 'omdb' : 'tmdb'));
+      setAgeRating(item.ageRating || '');
+      setTmdbAgeRating(item.tmdbAgeRating || item.ageRating || '');
+      setOmdbAgeRating(item.omdbAgeRating || '');
+      setAgeRatingSource(item.ageRatingSource || 'tmdb');
       setStatus(item.status || 'Plan to Watch');
       setOverview(item.overview || item.description || '');
       setPosterUrl(item.posterUrl || '');
@@ -87,8 +103,18 @@ export default function EditWatchlistModal({
     if (data?.omdb) {
       setOmdb(data.omdb);
       if (data.imdbId) setImdbId(data.imdbId);
-      if (data.imdbRating && !rating) {
-        setRating(String(data.imdbRating));
+      if (data.imdbRating) {
+        setImdbRating(String(data.imdbRating));
+        if (ratingSource === 'omdb') {
+          setRating(String(data.imdbRating));
+        }
+      }
+      if (data.omdb.rated && data.omdb.rated !== 'N/A') {
+        const converted = mapUsToIndianRating(data.omdb.rated) || normalizeIndianRating(data.omdb.rated) || data.omdb.rated;
+        setOmdbAgeRating(converted);
+        if (ageRatingSource === 'omdb' || !ageRating) {
+          setAgeRating(converted);
+        }
       }
     }
   };
@@ -192,14 +218,25 @@ export default function EditWatchlistModal({
         }
       }
 
+      const effectiveRating = ratingSource === 'omdb'
+        ? (imdbRating ? parseFloat(imdbRating) : (rating ? parseFloat(rating) : 0))
+        : (tmdbRating ? parseFloat(tmdbRating) : (rating ? parseFloat(rating) : 0));
+
       const updated = {
         ...item,
         title: title.trim(),
         originalTitle: originalTitle.trim(),
         year: year.trim(),
-        rating: rating ? Number(rating) : 0,
+        rating: effectiveRating,
+        tmdbRating: tmdbRating ? parseFloat(tmdbRating) : (item.tmdbRating || null),
+        imdbRating: imdbRating ? parseFloat(imdbRating) : (omdb?.imdbRating || item.imdbRating || item.omdb?.imdbRating || null),
+        ratingSource: ratingSource || 'tmdb',
+        ageRating: ageRating ? ageRating.trim() : null,
+        tmdbAgeRating: tmdbAgeRating ? tmdbAgeRating.trim() : null,
+        omdbAgeRating: omdbAgeRating ? omdbAgeRating.trim() : null,
+        ageRatingSource: ageRatingSource || 'tmdb',
         userRating: rating ? Number(rating) : (item.userRating || null),
-        isManualRating: Boolean(rating && !isNaN(Number(rating)) && Number(rating) > 0),
+        isManualRating: false,
         status,
         overview: overview.trim(),
         posterUrl: posterUrl.trim(),
@@ -523,6 +560,25 @@ export default function EditWatchlistModal({
             type={item.contentType || item.type || 'movie'}
             currentOmdb={omdb}
             onOmdbUpdated={handleOmdbUpdated}
+          />
+
+          {/* Rating Display & Source (TMDB & OMDB / IMDb Indian Age Rating) */}
+          <RatingSourceSelector
+            title={title}
+            year={year}
+            imdbId={imdbId}
+            tmdbId={item.tmdbId}
+            type={item.contentType || item.type || 'movie'}
+            ageRating={ageRating}
+            setAgeRating={setAgeRating}
+            tmdbAgeRating={tmdbAgeRating}
+            setTmdbAgeRating={setTmdbAgeRating}
+            omdbAgeRating={omdbAgeRating}
+            setOmdbAgeRating={setOmdbAgeRating}
+            ageRatingSource={ageRatingSource}
+            setAgeRatingSource={setAgeRatingSource}
+            currentOmdb={omdb}
+            onAgeRatingChanged={(newAge) => setAgeRating(newAge)}
           />
 
           <div className="pt-2 flex justify-end gap-2 border-t border-white/10">

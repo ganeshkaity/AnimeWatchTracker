@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { toFanartBigPreview, toFanartPreview, toFanartFull } from '../../../lib/fanartUtils';
+import { extractIndianAgeRating } from '../../../utils/ageRatingUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,7 +48,7 @@ export async function GET(request) {
     // ── 1. MOVIE: ONLY FETCH FROM TMDB ──
     if (type === 'movie') {
       const tmdbId = hintTmdbId || id.replace(/^tmdb-/, '');
-      const tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(tmdbId)}?api_key=${tmdbApiKey}&language=en-US&include_image_language=en,null&append_to_response=credits,images,videos,keywords,watch/providers`;
+      const tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(tmdbId)}?api_key=${tmdbApiKey}&language=en-US&include_image_language=en,null&append_to_response=credits,images,videos,keywords,watch/providers,release_dates`;
 
       const res = await fetch(tmdbUrl, { headers: { 'Accept': 'application/json' }, next: { revalidate: 86400 } });
       if (!res.ok) {
@@ -149,6 +150,7 @@ export async function GET(request) {
         videos,
         watchProviders,
         status: d.status || 'Released',
+        ageRating: extractIndianAgeRating(d, true),
       };
 
       return NextResponse.json({ success: true, details: movieDetails });
@@ -157,7 +159,7 @@ export async function GET(request) {
     // ── 2. WEB-SERIES: ONLY FETCH FROM TMDB ──
     if (type === 'web-series' || type === 'series' || type === 'tv') {
       const tmdbId = hintTmdbId || id.replace(/^tmdb-/, '');
-      const tmdbUrl = `https://api.themoviedb.org/3/tv/${encodeURIComponent(tmdbId)}?api_key=${tmdbApiKey}&language=en-US&include_image_language=en,null&append_to_response=credits,images,videos,keywords,watch/providers`;
+      const tmdbUrl = `https://api.themoviedb.org/3/tv/${encodeURIComponent(tmdbId)}?api_key=${tmdbApiKey}&language=en-US&include_image_language=en,null&append_to_response=credits,images,videos,keywords,watch/providers,content_ratings`;
 
       const res = await fetch(tmdbUrl, { headers: { 'Accept': 'application/json' }, next: { revalidate: 86400 } });
       if (!res.ok) {
@@ -329,6 +331,7 @@ export async function GET(request) {
         videos,
         watchProviders,
         status: d.status || 'Returning Series',
+        ageRating: extractIndianAgeRating(d, false),
       };
 
       return NextResponse.json({ success: true, details: seriesDetails });
@@ -817,7 +820,7 @@ async function fetchTmdbRichAnimeData(tmdbId, query, tmdbApiKey, isManga) {
     if (!resolvedId) return null;
 
     const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
-    const detUrl = `https://api.themoviedb.org/3/${endpoint}/${resolvedId}?api_key=${tmdbApiKey}&include_image_language=en,ja,null&append_to_response=credits,images,videos,watch/providers`;
+    const detUrl = `https://api.themoviedb.org/3/${endpoint}/${resolvedId}?api_key=${tmdbApiKey}&include_image_language=en,ja,null&append_to_response=credits,images,videos,watch/providers,release_dates,content_ratings`;
 
     const res = await fetch(detUrl, { headers: { 'Accept': 'application/json' }, next: { revalidate: 86400 } });
     if (!res.ok) return null;
@@ -892,6 +895,7 @@ async function fetchTmdbRichAnimeData(tmdbId, query, tmdbApiKey, isManga) {
       watchProviders,
       status: d.status,
       episodesCount: d.number_of_episodes || null,
+      ageRating: extractIndianAgeRating(d, mediaType !== 'tv'),
     };
   } catch {
     return null;
