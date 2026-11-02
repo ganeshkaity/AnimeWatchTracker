@@ -45,8 +45,8 @@ next-env.d.ts
 *.swp
 *.swo
 
-# PWA auto-generated files
-public/sw.js
+# PWA auto-generated files (public/sw.js is now a committed source file)
+# public/sw.js
 public/workbox-*.js
 public/swe-worker-*.js
 public/fallback-*.js

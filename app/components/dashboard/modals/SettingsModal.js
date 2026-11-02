@@ -212,7 +212,7 @@ export default function SettingsModal({
 
                 {!showPinChange ? (
                   <div className="space-y-2">
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2">
                       <input
                         type="password"
                         placeholder={currentSavedPin ? 'Enter Passcode to unlock' : 'Create 4-digit Passcode'}
