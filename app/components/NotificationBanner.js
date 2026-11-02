@@ -100,9 +100,9 @@ export default function NotificationBanner() {
   return (
     <aside
       aria-label="New notification"
-      className="fixed bottom-6 right-6 z-50 max-w-sm w-full animate-in fade-in slide-in-from-bottom-5 duration-300 pointer-events-auto"
+      className="fixed inset-x-0 bottom-4 sm:bottom-6 sm:inset-x-auto sm:right-6 z-50 flex justify-center sm:block pointer-events-none px-3.5 sm:px-0 animate-in fade-in slide-in-from-bottom-5 duration-300"
     >
-      <div className="glass-panel p-4 rounded-2xl border border-purple-500/30 bg-[#0f172a]/95 shadow-2xl backdrop-blur-xl flex items-start gap-3">
+      <div className="glass-panel p-4 rounded-2xl border border-purple-500/30 bg-[#0f172a]/95 shadow-2xl backdrop-blur-xl flex items-start gap-3 w-full max-w-sm pointer-events-auto select-none">
         <div className="p-2 rounded-xl bg-purple-500/20 text-purple-300 shrink-0 mt-0.5">
           <Bell size={18} className="animate-pulse text-[#a855f7]" />
         </div>
