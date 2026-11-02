@@ -183,7 +183,7 @@ export default function NotFound() {
         transition={{ delay: 0.6 }}
         className="mt-6 text-[10px] font-mono tracking-widest text-gray-500 uppercase"
       >
-        WatchAnime System • Error 404 • Page Not Found
+        GaneshSpace System • Error 404 • Page Not Found
       </motion.p>
     </div>
   );

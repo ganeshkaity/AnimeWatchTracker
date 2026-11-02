@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Settings, X, Download, Lock, KeyRound, Trophy, Check, AlertCircle, Shield } from 'lucide-react';
+import { Settings, X, Download, Lock, KeyRound, Trophy, Check, AlertCircle, Shield, Bell } from 'lucide-react';
 import { getVaultPin, setVaultPin } from '../../../utils/localStore';
+import NotificationSettings from '../../NotificationSettings';
 
 export default function SettingsModal({
   showSettings,
@@ -26,6 +27,7 @@ export default function SettingsModal({
   const [oldPinInput, setOldPinInput] = useState('');
   const [newPinInput, setNewPinInput] = useState('');
   const [pinSuccessMsg, setPinSuccessMsg] = useState('');
+  const [showNotificationSettings, setShowNotificationSettings] = useState(false);
 
   useEffect(() => {
     if (showSettings && typeof window !== 'undefined') {
@@ -316,6 +318,35 @@ export default function SettingsModal({
                 >
                   View Badges
                 </button>
+              </div>
+
+              {/* Notification Settings & Remote Push (FCM) */}
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-cyan-500/10 border border-purple-500/20 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-purple-500/20 text-[#a855f7] shrink-0">
+                      <Bell size={16} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-white">Notifications Hub</h4>
+                      <p className="text-[10px] text-gray-400">Local browser &amp; FCM remote push alerts</p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowNotificationSettings(!showNotificationSettings)}
+                    className="px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 text-purple-300 font-bold text-xs transition cursor-pointer active:scale-95 shrink-0"
+                  >
+                    {showNotificationSettings ? 'Hide' : 'Configure'}
+                  </button>
+                </div>
+
+                {showNotificationSettings && (
+                  <div className="pt-2 border-t border-white/10">
+                    <NotificationSettings isCompact={true} />
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-3 pt-3 border-t border-white/10">

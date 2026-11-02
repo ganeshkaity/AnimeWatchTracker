@@ -4,17 +4,18 @@ import { AuthProvider } from './context/AuthContext';
 import { OfflineProvider } from './context/OfflineContext';
 import CookieConsent from './components/CookieConsent';
 import PwaRegistration from './components/PwaRegistration';
+import NotificationBanner from './components/NotificationBanner';
 
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata = {
-  title: "WatchAnime - Track and Watch Anime, Movies, Manhwa, Webtoons, Audio Stories",
+  title: "GaneshSpace - Track and Watch Anime, Movies, Manhwa, Webtoons, Audio Stories",
   description: "Track your personal Anime, Movies, Manhwa, Webtoons, Audio Stories, episodes progress, notes, and flags with direct VLC integration and offline support.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "WatchAnime",
+    title: "GaneshSpace",
   },
   icons: {
     icon: "/icons/icon-192x192.png",
@@ -53,6 +54,7 @@ export default function RootLayout({ children }) {
             {children}
             <CookieConsent />
             <PwaRegistration />
+            <NotificationBanner />
           </OfflineProvider>
         </AuthProvider>
       </body>
