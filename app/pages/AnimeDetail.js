@@ -1018,16 +1018,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
   };
 
   const playInYtDlp = async (episode) => {
-    setPromptPlayEp(null);
-    await saveDefaultPlayerIfChecked('ytdlp');
-    const quality = ytModalSelectedQuality || episode.selectedQuality || ytWidgetSelectedQuality || 'best';
-    if (onPlayEpisode) {
-      onPlayEpisode(episode.id, episodes, 'ytdlp', {
-        speed: playbackSpeed,
-        volume: playbackVolume,
-        quality
-      });
-    }
+    return playInYoutube(episode);
   };
 
   // Fetch YouTube video duration if not already stored
@@ -1137,17 +1128,9 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
     // Pre-fetch YouTube duration before launching any player
     const ep = isYt ? await ensureYtDuration(episode) : episode;
 
-    // RULE 1: For YouTube playlist animes (Only YouTube Embed or YT-DLP)
+    // RULE 1: For YouTube playlist animes (Only YouTube Embed)
     if (isYt) {
-      if (defPlayer === 'youtube') {
-        playInYoutube(ep);
-      } else if (defPlayer === 'ytdlp') {
-        playInYtDlp(ep);
-      } else {
-        // If defPlayer is 'mediaserver', 'vlc', 'ask', or unset -> give player selection modal (YouTube Embed, YT-DLP)
-        setMakeDefault(false);
-        setPromptPlayEp(ep);
-      }
+      playInYoutube(ep);
       return;
     }
 
@@ -4777,11 +4760,11 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                     <div className="grid gap-4 mb-6 grid-cols-1 sm:grid-cols-2 max-w-md mx-auto">
                       {isPromptYt ? (
                         <>
-                          {/* 1. YouTube Embed Player */}
+                          {/* YouTube Embed Player */}
                           <button
                             type="button"
                             onClick={() => playInYoutube(promptPlayEp)}
-                            className="p-6 rounded-2xl bg-red-500/10 border border-red-500/30 hover:border-red-400 text-red-300 hover:text-white hover:bg-red-500/20 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_25px_rgba(239,68,68,0.35)]"
+                            className="col-span-2 p-6 rounded-2xl bg-red-500/10 border border-red-500/30 hover:border-red-400 text-red-300 hover:text-white hover:bg-red-500/20 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_25px_rgba(239,68,68,0.35)]"
                           >
                             <div className="p-3.5 rounded-2xl bg-red-500/20 group-hover:bg-red-500/30 transition-colors">
                               <Youtube size={28} className="text-red-400" />
@@ -4789,21 +4772,6 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                             <div className="text-center">
                               <span className="text-xs font-black uppercase tracking-widest block text-white">YouTube Embed</span>
                               <span className="text-[10px] text-gray-400 font-medium">Native IFrame Player</span>
-                            </div>
-                          </button>
-
-                          {/* 2. YT-DLP Player */}
-                          <button
-                            type="button"
-                            onClick={() => playInYtDlp(promptPlayEp)}
-                            className="p-6 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 hover:border-cyan-400 text-cyan-300 hover:text-white hover:bg-cyan-500/20 transition-all duration-300 flex flex-col items-center justify-center gap-3 cursor-pointer group hover:shadow-[0_0_25px_rgba(6,182,212,0.35)]"
-                          >
-                            <div className="p-3.5 rounded-2xl bg-cyan-500/20 group-hover:bg-cyan-500/30 transition-colors">
-                              <Server size={28} className="text-cyan-400" />
-                            </div>
-                            <div className="text-center">
-                              <span className="text-xs font-black uppercase tracking-widest block text-white">YT-DLP Player</span>
-                              <span className="text-[10px] text-gray-400 font-medium">Custom Media Engine</span>
                             </div>
                           </button>
                         </>

@@ -741,7 +741,7 @@ export default function WebseriesDetail({ seriesId, onBack }) {
     return unwatched || episodes[0];
   }, [episodes]);
 
-  // Launch video player (Media Server Player for local files, YtDlp Player for YouTube episodes)
+  // Launch video player (Media Server Player for local files, YouTube Embed Player for YouTube episodes)
   const handlePlayEpisode = (ep) => {
     if (!ep) return;
     const targetEp = ep.localEp || ep;
@@ -767,7 +767,7 @@ export default function WebseriesDetail({ seriesId, onBack }) {
       series?.youtubePlaylistUrl
     );
     if (isYt) {
-      router.push(`/player/ytdlp/${seriesId}?ep=${targetEp.id}&type=webseries`);
+      router.push(`/player/youtube/${seriesId}?ep=${targetEp.id}&type=webseries`);
     } else {
       router.push(`/player/mediaserver/${seriesId}?ep=${targetEp.id}&type=webseries`);
     }

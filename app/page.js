@@ -24,10 +24,6 @@ const MediaServerPlayerContainer = dynamic(() => import('./pages/MediaServerPlay
   ssr: false,
 });
 
-const YtDlpPlayerContainer = dynamic(() => import('./pages/YtDlpPlayerContainer'), {
-  ssr: false,
-});
-
 export default function Home() {
   const { currentUser, loading } = useAuth();
   const router = useRouter();
@@ -51,15 +47,8 @@ export default function Home() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.3, ease: 'easeInOut' }}
           >
-            {playerType === 'youtube' ? (
+            {playerType === 'youtube' || playerType === 'ytdlp' || playerType === 'yt-dlp' ? (
               <YoutubePlayerContainer
-                animeId={activeAnimeId}
-                episodeId={activeEpisodeId}
-                episodes={activeEpisodesList}
-                onBack={() => setActiveEpisodeId(null)}
-              />
-            ) : playerType === 'ytdlp' || playerType === 'yt-dlp' ? (
-              <YtDlpPlayerContainer
                 animeId={activeAnimeId}
                 episodeId={activeEpisodeId}
                 episodes={activeEpisodesList}

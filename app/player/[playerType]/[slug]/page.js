@@ -6,7 +6,6 @@ import { useAuth } from '../../../context/AuthContext';
 import { getLocalAnimes, getLocalEpisodes, getLocalMovie, getLocalWebseriesItem, getLocalWebseriesEpisodes } from '../../../utils/localStore';
 import YoutubePlayerContainer from '../../../pages/YoutubePlayerContainer';
 import MediaServerPlayerContainer from '../../../pages/MediaServerPlayerContainer';
-import YtDlpPlayerContainer from '../../../pages/YtDlpPlayerContainer';
 import { Loader2 } from 'lucide-react';
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../../firebase';
@@ -160,21 +159,12 @@ export default function PlayerPage() {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {playerType === 'youtube' ? (
+      {playerType === 'youtube' || playerType === 'ytdlp' || playerType === 'yt-dlp' ? (
         <YoutubePlayerContainer
           animeId={animeId}
           episodeId={currentEpisodeId}
           episodes={episodes}
           onBack={handleBack}
-        />
-      ) : playerType === 'ytdlp' || playerType === 'yt-dlp' ? (
-        <YtDlpPlayerContainer
-          animeId={animeId}
-          episodeId={currentEpisodeId}
-          episodes={episodes}
-          onBack={handleBack}
-          initialSpeed={speedParam ? parseFloat(speedParam) : 1}
-          initialVolume={volumeParam ? parseFloat(volumeParam) / 100 : 1}
         />
       ) : (
         <MediaServerPlayerContainer
