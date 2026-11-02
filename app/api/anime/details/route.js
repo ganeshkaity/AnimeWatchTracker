@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { extractIndianAgeRating } from '../../../utils/ageRatingUtils';
+import { extractIndianAgeRating, mapUsToIndianRating, normalizeIndianRating } from '../../../utils/ageRatingUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -317,7 +317,16 @@ async function fetchTmdbMedia(query, apiKey) {
       if (fullRes.ok) {
         const fullData = await fullRes.json();
         const imgData = fullData.images || {};
-        const ageRating = extractIndianAgeRating(fullData, false);
+        let ageRating = extractIndianAgeRating(fullData, false);
+        if (!ageRating && process.env.OMDB_API_KEY) {
+          try {
+            const omdbRes = await fetch(`https://www.omdbapi.com/?apikey=${process.env.OMDB_API_KEY}&t=${encodeURIComponent(query)}&type=series`);
+            const omdbData = await omdbRes.json();
+            if (omdbData && omdbData.Response === 'True' && omdbData.Rated && omdbData.Rated !== 'N/A') {
+              ageRating = mapUsToIndianRating(omdbData.Rated) || normalizeIndianRating(omdbData.Rated) || omdbData.Rated;
+            }
+          } catch {}
+        }
         const cast = Array.isArray(fullData.credits?.cast)
           ? fullData.credits.cast.slice(0, 25).map((c) => ({
               id: c.id,
@@ -386,7 +395,16 @@ async function fetchTmdbMedia(query, apiKey) {
       if (fullRes.ok) {
         const fullData = await fullRes.json();
         const imgData = fullData.images || {};
-        const ageRating = extractIndianAgeRating(fullData, true);
+        let ageRating = extractIndianAgeRating(fullData, true);
+        if (!ageRating && process.env.OMDB_API_KEY) {
+          try {
+            const omdbRes = await fetch(`https://www.omdbapi.com/?apikey=${process.env.OMDB_API_KEY}&t=${encodeURIComponent(query)}&type=movie`);
+            const omdbData = await omdbRes.json();
+            if (omdbData && omdbData.Response === 'True' && omdbData.Rated && omdbData.Rated !== 'N/A') {
+              ageRating = mapUsToIndianRating(omdbData.Rated) || normalizeIndianRating(omdbData.Rated) || omdbData.Rated;
+            }
+          } catch {}
+        }
         const cast = Array.isArray(fullData.credits?.cast)
           ? fullData.credits.cast.slice(0, 25).map((c) => ({
               id: c.id,

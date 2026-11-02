@@ -125,10 +125,17 @@ export default function RatingSourceSelector({
         }
       }
 
-      setErrorMsg(`Could not find Indian age rating on TMDB for "${cleanTitle}".`);
+      // If not available in TMDB, search in OMDB too!
+      setStatusMsg(`Age rating not found in TMDB. Searching in OMDB...`);
+      await handleFetchOmdb();
     } catch (err) {
       console.error('Error fetching TMDB age rating:', err);
-      setErrorMsg(err.message || 'Error fetching TMDB age rating');
+      // Fallback to OMDB
+      try {
+        await handleFetchOmdb();
+      } catch (omdbErr) {
+        setErrorMsg(err.message || 'Error fetching age rating');
+      }
     } finally {
       setFetchingTmdb(false);
     }

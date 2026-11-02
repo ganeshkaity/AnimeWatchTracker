@@ -25,6 +25,7 @@ import TransferWatchlistModal from '../components/TransferWatchlistModal';
 import OmdbRatingsBlock from '../components/OmdbRatingsBlock';
 import { cleanTitleForOmdb } from '../utils/omdbUtils';
 import { getEffectiveRating } from '../utils/ratingUtils';
+import { mapUsToIndianRating, normalizeIndianRating } from '../utils/ageRatingUtils';
 
 function GalleryImageCard({
   img,
@@ -440,23 +441,58 @@ export default function WatchlistDetail({ watchlistId, onBack }) {
             upsertLocalWatchlist(data);
             setLoading(false);
 
-            if (!data.ageRating && data.tmdbId) {
-              const typeParam = data.contentType === 'movie' ? 'movie' : (data.contentType === 'anime' ? 'anime' : 'web-series');
-              fetch(`/api/watchlist/details?type=${encodeURIComponent(typeParam)}&id=${encodeURIComponent(data.tmdbId)}`)
-                .then(r => r.json())
-                .then(res => {
-                  if (res.success && res.details?.ageRating) {
-                    setItem(prev => {
-                      if (!prev) return prev;
-                      const up = { ...prev, ageRating: res.details.ageRating };
-                      upsertLocalWatchlist(up);
-                      return up;
-                    });
-                    if (db && userId) {
-                      updateDoc(doc(db, 'users', userId, 'watchlist', data.id), { ageRating: res.details.ageRating }).catch(() => {});
+            if (!data.ageRating) {
+              const fetchAgeFromOmdb = () => {
+                const clean = cleanTitleForOmdb(data.title);
+                const omdbType = data.contentType === 'movie' ? 'movie' : 'series';
+                const p = new URLSearchParams();
+                if (data.imdbId) p.set('imdbId', data.imdbId);
+                else if (clean) p.set('title', clean);
+                if (data.year) p.set('year', String(data.year));
+                p.set('type', omdbType);
+                fetch(`/api/omdb?${p.toString()}`)
+                  .then(r => r.json())
+                  .then(omdbRes => {
+                    if (omdbRes.success && omdbRes.omdb?.rated && omdbRes.omdb.rated !== 'N/A') {
+                      const omdbAge = mapUsToIndianRating(omdbRes.omdb.rated) || normalizeIndianRating(omdbRes.omdb.rated) || omdbRes.omdb.rated;
+                      if (omdbAge) {
+                        setItem(prev => {
+                          if (!prev) return prev;
+                          const up = { ...prev, ageRating: omdbAge };
+                          upsertLocalWatchlist(up);
+                          return up;
+                        });
+                        if (db && userId) {
+                          updateDoc(doc(db, 'users', userId, 'watchlist', data.id), { ageRating: omdbAge }).catch(() => {});
+                        }
+                      }
                     }
-                  }
-                }).catch(() => {});
+                  }).catch(() => {});
+              };
+
+              if (data.tmdbId) {
+                const typeParam = data.contentType === 'movie' ? 'movie' : (data.contentType === 'anime' ? 'anime' : 'web-series');
+                fetch(`/api/watchlist/details?type=${encodeURIComponent(typeParam)}&id=${encodeURIComponent(data.tmdbId)}`)
+                  .then(r => r.json())
+                  .then(res => {
+                    if (res.success && res.details?.ageRating) {
+                      setItem(prev => {
+                        if (!prev) return prev;
+                        const up = { ...prev, ageRating: res.details.ageRating };
+                        upsertLocalWatchlist(up);
+                        return up;
+                      });
+                      if (db && userId) {
+                        updateDoc(doc(db, 'users', userId, 'watchlist', data.id), { ageRating: res.details.ageRating }).catch(() => {});
+                      }
+                    } else {
+                      // TMDB did not have age rating, search in OMDB too
+                      fetchAgeFromOmdb();
+                    }
+                  }).catch(() => fetchAgeFromOmdb());
+              } else {
+                fetchAgeFromOmdb();
+              }
             }
           }
         } catch (err) {

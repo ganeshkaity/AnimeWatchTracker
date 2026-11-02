@@ -16,6 +16,7 @@ import {
   Star,
 } from 'lucide-react';
 import { getEffectiveRating } from '../../../utils/ratingUtils';
+import { mapUsToIndianRating, normalizeIndianRating } from '../../../utils/ageRatingUtils';
 
 export default function MobileMediaActionSheet({
   activeMobileMenu,
@@ -198,6 +199,7 @@ export default function MobileMediaActionSheet({
 
   const ratingObj = getEffectiveRating(item);
   const displayRating = ratingObj ? ratingObj.value : item.rating || null;
+  const itemAgeRating = item.ageRating || item.contentRating || item.certification || (item.omdb?.rated ? (mapUsToIndianRating(item.omdb.rated) || normalizeIndianRating(item.omdb.rated)) : null);
 
   return (
     <AnimatePresence>
@@ -298,9 +300,9 @@ export default function MobileMediaActionSheet({
                   <span>{displayRating}</span>
                 </span>
               )}
-              {item.ageRating && (
+              {itemAgeRating && (
                 <span className="px-1.5 py-0.5 rounded border border-white/20 bg-white/10 text-[10px] text-pink-300 font-extrabold tracking-wider">
-                  {item.ageRating}
+                  {itemAgeRating}
                 </span>
               )}
               {item.year && <span>• {item.year}</span>}

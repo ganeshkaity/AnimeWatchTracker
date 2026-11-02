@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { extractIndianAgeRating } from '../../../utils/ageRatingUtils';
+import { extractIndianAgeRating, mapUsToIndianRating, normalizeIndianRating } from '../../../utils/ageRatingUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -130,7 +130,29 @@ export async function GET(request) {
         }))
       : [];
 
-    const ageRating = extractIndianAgeRating(d, true);
+    let ageRating = extractIndianAgeRating(d, true);
+
+    // If Indian age rating not found in TMDB, search in OMDB too
+    if (!ageRating && process.env.OMDB_API_KEY) {
+      try {
+        const omdbParams = new URLSearchParams();
+        if (d.imdb_id) {
+          omdbParams.set('i', d.imdb_id);
+        } else if (d.title || d.original_title) {
+          omdbParams.set('t', d.title || d.original_title);
+          if (releaseYear) omdbParams.set('y', releaseYear);
+        }
+        omdbParams.set('type', 'movie');
+        omdbParams.set('apikey', process.env.OMDB_API_KEY);
+        const omdbRes = await fetch(`https://www.omdbapi.com/?${omdbParams.toString()}`);
+        const omdbData = await omdbRes.json();
+        if (omdbData && omdbData.Response === 'True' && omdbData.Rated && omdbData.Rated !== 'N/A') {
+          ageRating = mapUsToIndianRating(omdbData.Rated) || normalizeIndianRating(omdbData.Rated) || omdbData.Rated;
+        }
+      } catch (err) {
+        console.warn('[TMDB Movie Details] OMDB age rating fallback error:', err.message);
+      }
+    }
 
     const movieDetails = {
       tmdbId: d.id,

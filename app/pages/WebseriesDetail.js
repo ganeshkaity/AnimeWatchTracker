@@ -28,6 +28,7 @@ import AssignEpisodesModal from '../components/AssignEpisodesModal';
 import OmdbRatingsBlock from '../components/OmdbRatingsBlock';
 import { cleanTitleForOmdb } from '../utils/omdbUtils';
 import { getEffectiveRating } from '../utils/ratingUtils';
+import { mapUsToIndianRating, normalizeIndianRating } from '../utils/ageRatingUtils';
 import {
   processScannedFiles, sortEpisodes, getSubfolder, extractSeasonNumber,
   NAMING_PATTERNS
@@ -508,6 +509,9 @@ export default function WebseriesDetail({ seriesId, onBack }) {
         if (data.success && data.omdb) {
           setSeries((prev) => {
             if (!prev) return prev;
+            const omdbAge = (!prev.ageRating && data.omdb.rated && data.omdb.rated !== 'N/A')
+              ? (mapUsToIndianRating(data.omdb.rated) || normalizeIndianRating(data.omdb.rated) || data.omdb.rated)
+              : null;
             const updated = {
               ...prev,
               omdb: data.omdb,
@@ -518,13 +522,14 @@ export default function WebseriesDetail({ seriesId, onBack }) {
               metacritic: data.omdb.metacritic || prev.metacritic || null,
               awards: data.omdb.awards || prev.awards || null,
               boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
+              ageRating: prev.ageRating || omdbAge || null,
               updatedAt: new Date().toISOString(),
             };
             upsertLocalWebseries(updated);
 
             const targetUserId = getUserId();
             if (db && targetUserId) {
-              updateDoc(doc(db, 'users', targetUserId, 'webseries', seriesId), {
+              const docUpdate = {
                 omdb: data.omdb,
                 imdbId: data.omdb.imdbId || prev.imdbId || null,
                 imdbRating: data.omdb.imdbRating || prev.imdbRating || null,
@@ -534,7 +539,11 @@ export default function WebseriesDetail({ seriesId, onBack }) {
                 awards: data.omdb.awards || prev.awards || null,
                 boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
                 updatedAt: updated.updatedAt,
-              }).catch((e) => console.warn('[WebseriesDetail] updateDoc OMDB error:', e));
+              };
+              if (omdbAge && !prev.ageRating) {
+                docUpdate.ageRating = omdbAge;
+              }
+              updateDoc(doc(db, 'users', targetUserId, 'webseries', seriesId), docUpdate).catch((e) => console.warn('[WebseriesDetail] updateDoc OMDB error:', e));
             }
             return updated;
           });

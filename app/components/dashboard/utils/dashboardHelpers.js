@@ -2,6 +2,7 @@ import React from 'react';
 import { getLocalEpisodes } from '../../../utils/localStore';
 import { toFanartBigPreview } from '../../../lib/fanartUtils';
 import { getEffectiveRating } from '../../../utils/ratingUtils';
+import { mapUsToIndianRating, normalizeIndianRating } from '../../../utils/ageRatingUtils';
 
 export const GRADIENTS = [
   "from-violet-600 to-indigo-700",
@@ -145,7 +146,7 @@ export const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList
       episodes: epDisplay,
       totalSeasons: totalSeasons,
       totalEpisodes: totalEpisodes,
-      ageRating: anime.ageRating || anime.contentRating || anime.certification || null,
+      ageRating: anime.ageRating || anime.contentRating || anime.certification || (anime.omdb?.rated ? (mapUsToIndianRating(anime.omdb.rated) || normalizeIndianRating(anime.omdb.rated)) : null) || null,
       year: anime.year || new Date(anime.createdAt || Date.now()).getFullYear().toString(),
       quality: anime.quality || '1080p HD',
       language: anime.language || 'SUB / DUB',
@@ -287,7 +288,7 @@ export const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList
       totalEpisodes: 1,
       year: movie.year || (movie.releaseDate ? movie.releaseDate.split('-')[0] : '2026'),
       quality: runtimeStr || '',
-      ageRating: movie.ageRating || movie.contentRating || movie.certification || null,
+      ageRating: movie.ageRating || movie.contentRating || movie.certification || (movie.omdb?.rated ? (mapUsToIndianRating(movie.omdb.rated) || normalizeIndianRating(movie.omdb.rated)) : null) || null,
       language: (movie.language || 'English').toUpperCase(),
       studio: (movie.productionCountries && movie.productionCountries[0]) || 'Cinema',
       genres: validGenres.length > 0 ? validGenres : ['Movie'],
@@ -345,7 +346,7 @@ export const getHeroSlides = (animesList = [], mangasList = [], audioStoriesList
       totalEpisodes: totalEpisodes,
       year: series.year || (series.releaseDate ? series.releaseDate.split('-')[0] : '2026'),
       quality: series.quality || '1080p HD',
-      ageRating: series.ageRating || series.contentRating || series.certification || null,
+      ageRating: series.ageRating || series.contentRating || series.certification || (series.omdb?.rated ? (mapUsToIndianRating(series.omdb.rated) || normalizeIndianRating(series.omdb.rated)) : null) || null,
       language: (series.language || 'English').toUpperCase(),
       studio: (series.productionCountries && series.productionCountries[0]) || 'Web Series',
       genres: validGenres.length > 0 ? validGenres : ['Web Series', 'Drama'],

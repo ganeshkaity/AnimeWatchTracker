@@ -25,6 +25,7 @@ import MovieDetailSkeleton from '../components/MovieDetailSkeleton';
 import { cleanTitleForOmdb } from '../utils/omdbUtils';
 import { toFanartBigPreview } from '../lib/fanartUtils';
 import { getEffectiveRating } from '../utils/ratingUtils';
+import { mapUsToIndianRating, normalizeIndianRating } from '../utils/ageRatingUtils';
 
 // Custom VLC Icon matching AnimeDetail
 const VLCIcon = ({ className }) => (
@@ -360,6 +361,9 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
         if (data.success && data.omdb) {
           setMovie((prev) => {
             if (!prev) return prev;
+            const omdbAge = (!prev.ageRating && data.omdb.rated && data.omdb.rated !== 'N/A')
+              ? (mapUsToIndianRating(data.omdb.rated) || normalizeIndianRating(data.omdb.rated) || data.omdb.rated)
+              : null;
             const updated = {
               ...prev,
               omdb: data.omdb,
@@ -370,13 +374,14 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
               metacritic: data.omdb.metacritic || prev.metacritic || null,
               awards: data.omdb.awards || prev.awards || null,
               boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
+              ageRating: prev.ageRating || omdbAge || null,
               updatedAt: new Date().toISOString(),
             };
             upsertLocalMovie(updated);
 
             const targetUserId = getUserId();
             if (db && targetUserId) {
-              updateDoc(doc(db, 'users', targetUserId, 'movies', prev.id), {
+              const docUpdate = {
                 omdb: data.omdb,
                 imdbId: data.omdb.imdbId || prev.imdbId || null,
                 imdbRating: data.omdb.imdbRating || prev.imdbRating || null,
@@ -386,7 +391,11 @@ export default function MovieDetail({ movieId, onBack, onPlayMovie }) {
                 awards: data.omdb.awards || prev.awards || null,
                 boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
                 updatedAt: updated.updatedAt,
-              }).catch((e) => console.warn('[MovieDetail] updateDoc OMDB error:', e));
+              };
+              if (omdbAge && !prev.ageRating) {
+                docUpdate.ageRating = omdbAge;
+              }
+              updateDoc(doc(db, 'users', targetUserId, 'movies', prev.id), docUpdate).catch((e) => console.warn('[MovieDetail] updateDoc OMDB error:', e));
             }
             return updated;
           });

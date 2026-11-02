@@ -22,6 +22,7 @@ import AssignEpisodesModal from '../components/AssignEpisodesModal';
 import OmdbRatingsBlock from '../components/OmdbRatingsBlock';
 import { cleanTitleForOmdb } from '../utils/omdbUtils';
 import { getEffectiveRating } from '../utils/ratingUtils';
+import { mapUsToIndianRating, normalizeIndianRating } from '../utils/ageRatingUtils';
 import { 
   ArrowLeft, Play, CheckCircle2, Bookmark, StickyNote, Star, AlertTriangle, 
   Sparkles, History, RotateCcw, X, Heart, EyeOff, Film, Clock, Search,
@@ -2323,6 +2324,9 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
         if (data.success && data.omdb) {
           setAnime((prev) => {
             if (!prev) return prev;
+            const omdbAge = (!prev.ageRating && data.omdb.rated && data.omdb.rated !== 'N/A')
+              ? (mapUsToIndianRating(data.omdb.rated) || normalizeIndianRating(data.omdb.rated) || data.omdb.rated)
+              : null;
             const updated = {
               ...prev,
               omdb: data.omdb,
@@ -2333,13 +2337,14 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
               metacritic: data.omdb.metacritic || prev.metacritic || null,
               awards: data.omdb.awards || prev.awards || null,
               boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
+              ageRating: prev.ageRating || omdbAge || null,
               updatedAt: new Date().toISOString(),
             };
             upsertLocalAnime(updated);
 
             const targetUserId = getUserId();
             if (db && targetUserId) {
-              updateDoc(doc(db, 'users', targetUserId, 'anime', animeId), {
+              const docUpdate = {
                 omdb: data.omdb,
                 imdbId: data.omdb.imdbId || prev.imdbId || null,
                 imdbRating: data.omdb.imdbRating || prev.imdbRating || null,
@@ -2349,7 +2354,11 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                 awards: data.omdb.awards || prev.awards || null,
                 boxOffice: data.omdb.boxOffice || prev.boxOffice || null,
                 updatedAt: updated.updatedAt,
-              }).catch((e) => console.warn('[AnimeDetail] updateDoc OMDB error:', e));
+              };
+              if (omdbAge && !prev.ageRating) {
+                docUpdate.ageRating = omdbAge;
+              }
+              updateDoc(doc(db, 'users', targetUserId, 'anime', animeId), docUpdate).catch((e) => console.warn('[AnimeDetail] updateDoc OMDB error:', e));
             }
             return updated;
           });

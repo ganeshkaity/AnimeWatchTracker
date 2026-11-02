@@ -3,6 +3,7 @@ import { Star, Check, MoreVertical, Play, Film, Tv, BookOpen, Headphones } from 
 import CachedImage from '../../../utils/imageCache';
 import { YoutubeLogo } from '../utils/dashboardHelpers';
 import { getEffectiveRating } from '../../../utils/ratingUtils';
+import { mapUsToIndianRating, normalizeIndianRating } from '../../../utils/ageRatingUtils';
 
 export default function MediaCard({
   item,
@@ -35,6 +36,7 @@ export default function MediaCard({
 
   const effectiveRatingObj = getEffectiveRating(item);
   const displayRating = effectiveRatingObj ? effectiveRatingObj.value : (rating && !isNaN(parseFloat(rating)) ? parseFloat(rating).toFixed(1) : null);
+  const itemAgeRating = item?.ageRating || item?.contentRating || item?.certification || (item?.omdb?.rated ? (mapUsToIndianRating(item.omdb.rated) || normalizeIndianRating(item.omdb.rated)) : null);
 
   return (
     <div
@@ -70,9 +72,9 @@ export default function MediaCard({
         )}
 
         {/* Liquid Glass Indian Age Rating Badge (Top-Right) */}
-        {item?.ageRating && (
+        {itemAgeRating && (
           <div className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded-md bg-black/60 backdrop-blur-xl border border-white/20 text-[9px] font-black text-white flex items-center shadow-[0_4px_16px_rgba(0,0,0,0.8)] backdrop-saturate-150 pointer-events-none tracking-wider drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
-            {item.ageRating}
+            {itemAgeRating}
           </div>
         )}
 

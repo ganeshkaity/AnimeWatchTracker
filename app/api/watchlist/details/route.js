@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { toFanartBigPreview, toFanartPreview, toFanartFull } from '../../../lib/fanartUtils';
-import { extractIndianAgeRating } from '../../../utils/ageRatingUtils';
+import { extractIndianAgeRating, mapUsToIndianRating, normalizeIndianRating } from '../../../utils/ageRatingUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -150,8 +150,30 @@ export async function GET(request) {
         videos,
         watchProviders,
         status: d.status || 'Released',
-        ageRating: extractIndianAgeRating(d, true),
+        ageRating: (() => {
+          let rating = extractIndianAgeRating(d, true);
+          return rating;
+        })(),
       };
+
+      if (!movieDetails.ageRating && process.env.OMDB_API_KEY) {
+        try {
+          const omdbParams = new URLSearchParams();
+          if (d.imdb_id) omdbParams.set('i', d.imdb_id);
+          else if (d.title) {
+            omdbParams.set('t', d.title);
+            const y = (d.release_date || '').split('-')[0];
+            if (y) omdbParams.set('y', y);
+          }
+          omdbParams.set('type', 'movie');
+          omdbParams.set('apikey', process.env.OMDB_API_KEY);
+          const omdbRes = await fetch(`https://www.omdbapi.com/?${omdbParams.toString()}`);
+          const omdbData = await omdbRes.json();
+          if (omdbData && omdbData.Response === 'True' && omdbData.Rated && omdbData.Rated !== 'N/A') {
+            movieDetails.ageRating = mapUsToIndianRating(omdbData.Rated) || normalizeIndianRating(omdbData.Rated) || omdbData.Rated;
+          }
+        } catch {}
+      }
 
       return NextResponse.json({ success: true, details: movieDetails });
     }
@@ -331,8 +353,30 @@ export async function GET(request) {
         videos,
         watchProviders,
         status: d.status || 'Returning Series',
-        ageRating: extractIndianAgeRating(d, false),
+        ageRating: (() => {
+          let rating = extractIndianAgeRating(d, false);
+          return rating;
+        })(),
       };
+
+      if (!seriesDetails.ageRating && process.env.OMDB_API_KEY) {
+        try {
+          const omdbParams = new URLSearchParams();
+          if (d.external_ids?.imdb_id) omdbParams.set('i', d.external_ids.imdb_id);
+          else if (d.name || d.original_name) {
+            omdbParams.set('t', d.name || d.original_name);
+            const y = (d.first_air_date || '').split('-')[0];
+            if (y) omdbParams.set('y', y);
+          }
+          omdbParams.set('type', 'series');
+          omdbParams.set('apikey', process.env.OMDB_API_KEY);
+          const omdbRes = await fetch(`https://www.omdbapi.com/?${omdbParams.toString()}`);
+          const omdbData = await omdbRes.json();
+          if (omdbData && omdbData.Response === 'True' && omdbData.Rated && omdbData.Rated !== 'N/A') {
+            seriesDetails.ageRating = mapUsToIndianRating(omdbData.Rated) || normalizeIndianRating(omdbData.Rated) || omdbData.Rated;
+          }
+        } catch {}
+      }
 
       return NextResponse.json({ success: true, details: seriesDetails });
     }
