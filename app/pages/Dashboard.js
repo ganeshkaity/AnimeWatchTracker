@@ -2715,8 +2715,11 @@ export default function Dashboard({ onSelectAnime }) {
     }
   };
 
-  const handleSaveWebseriesEdit = async (updatedSeries) => {
+  const handleSaveWebseriesEdit = async (updatedSeries, updatedEpisodes = null) => {
     upsertLocalWebseries(updatedSeries);
+    if (updatedEpisodes && updatedEpisodes.length > 0) {
+      setLocalWebseriesEpisodes(updatedSeries.id, updatedEpisodes);
+    }
     setWebseriesList(prev => prev.map(w => w.id === updatedSeries.id ? updatedSeries : w));
 
     const targetUserId = getUserId();
@@ -2724,6 +2727,14 @@ export default function Dashboard({ onSelectAnime }) {
       try {
         const wsDocRef = doc(db, 'users', targetUserId, 'webseries', updatedSeries.id);
         await setDoc(wsDocRef, updatedSeries, { merge: true });
+        if (updatedEpisodes && updatedEpisodes.length > 0) {
+          const epBatch = writeBatch(db);
+          updatedEpisodes.forEach((ep) => {
+            const epRef = doc(db, 'users', targetUserId, 'webseries', updatedSeries.id, 'episodes', ep.id);
+            epBatch.set(epRef, ep, { merge: true });
+          });
+          await epBatch.commit();
+        }
       } catch (err) {
         console.warn('Firestore update webseries error, fallback to dirty queue:', err);
         addToDirtyQueue({

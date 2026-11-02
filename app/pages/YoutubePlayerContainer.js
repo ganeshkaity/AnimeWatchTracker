@@ -12,7 +12,8 @@ import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import {
   getLocalAnime, getLocalEpisodes, setLocalEpisodes, upsertLocalAnime,
-  getLocalMovie, upsertLocalMovie
+  getLocalMovie, upsertLocalMovie,
+  getLocalWebseriesItem, getLocalWebseriesEpisodes, setLocalWebseriesEpisodes, upsertLocalWebseries
 } from '../utils/localStore';
 
 const extractYoutubeId = (urlOrId) => {
@@ -127,10 +128,10 @@ export default function YoutubePlayerContainer({
     setCurrentEpisodeId(episodeId);
   }, [episodeId]);
 
-  // Load anime or movie details for header
+  // Load anime, webseries, or movie details for header
   useEffect(() => {
     if (animeId) {
-      const local = getLocalAnime(animeId) || getLocalMovie(animeId);
+      const local = getLocalAnime(animeId) || getLocalWebseriesItem(animeId) || getLocalMovie(animeId);
       if (local) setAnimeDetails(local);
     }
   }, [animeId]);
@@ -335,6 +336,42 @@ export default function YoutubePlayerContainer({
             watchProgress: nextWatched ? 100 : 0,
             updatedAt: new Date().toISOString(),
             lastWatchedAt: new Date().toISOString(),
+          }).catch(() => {});
+        } catch (err) {}
+      }
+
+      currentEpisode.isWatched = nextWatched;
+      return;
+    }
+
+    // Webseries handling
+    const isWebseries = Boolean(currentEpisode.isWebseries || currentEpisode.contentType === 'web-series' || getLocalWebseriesItem(animeId));
+    if (isWebseries) {
+      try {
+        const stored = getLocalWebseriesEpisodes(animeId) || [];
+        const updated = stored.map((e) =>
+          e.id === currentEpisode.id ? { ...e, isWatched: nextWatched } : e
+        );
+        setLocalWebseriesEpisodes(animeId, updated);
+        const totalEps = updated.length;
+        const watchedEps = updated.filter(e => e.isWatched).length;
+        const pct = totalEps > 0 ? Math.round((watchedEps / totalEps) * 100) : 0;
+        upsertLocalWebseries({
+          id: animeId,
+          lastWatchedEpisode: currentEpisode.episodeNumber ? `EP-${currentEpisode.episodeNumber}` : '',
+          lastOpenedAt: new Date().toISOString(),
+          progressPercent: pct,
+        });
+      } catch (e) {
+        console.warn('LocalStore error:', e);
+      }
+
+      if (currentUser?.uid && db) {
+        try {
+          const epRef = doc(db, 'users', currentUser.uid, 'webseries', animeId, 'episodes', currentEpisode.id);
+          updateDoc(epRef, {
+            isWatched: nextWatched,
+            updatedAt: new Date().toISOString(),
           }).catch(() => {});
         } catch (err) {}
       }

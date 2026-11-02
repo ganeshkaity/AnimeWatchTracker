@@ -11,7 +11,8 @@ import {
   ChevronRight, X, Maximize2, Loader2, Copy, CheckCheck,
   Info, MoreVertical, DollarSign, CreditCard, Eye, Plus, Film,
   FolderTree, FolderPlus, Folder, SlidersHorizontal, PlusCircle, CheckSquare,
-  Download, Menu, Layers, StickyNote, Search, Heart, EyeOff, RotateCcw, History
+  Download, Menu, Layers, StickyNote, Search, Heart, EyeOff, RotateCcw, History,
+  Youtube
 } from 'lucide-react';
 import { doc, getDoc, updateDoc, deleteDoc, setDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -740,10 +741,12 @@ export default function WebseriesDetail({ seriesId, onBack }) {
     return unwatched || episodes[0];
   }, [episodes]);
 
-  // Launch default video player (Media Server Player)
+  // Launch video player (Media Server Player for local files, YtDlp Player for YouTube episodes)
   const handlePlayEpisode = (ep) => {
     if (!ep) return;
-    if (!ep.hasLocalFile && !ep.filePath) {
+    const targetEp = ep.localEp || ep;
+    const hasMedia = targetEp.hasLocalFile || !!targetEp.filePath || !!targetEp.isYouTube || !!targetEp.youtubeId || !!targetEp.youtubeUrl;
+    if (!hasMedia) {
       setSelectedEpModal({
         ...ep,
         seasonNumber: ep.seasonNumber || activeSeason?.seasonNumber || 1,
@@ -753,8 +756,21 @@ export default function WebseriesDetail({ seriesId, onBack }) {
       });
       return;
     }
-    const targetEp = ep.localEp || ep;
-    router.push(`/player/mediaserver/${seriesId}?ep=${targetEp.id}&type=webseries`);
+    const isYt = Boolean(
+      targetEp.isYouTube ||
+      targetEp.youtubeId ||
+      targetEp.youtubeUrl ||
+      targetEp.filePath?.startsWith('youtube://') ||
+      targetEp.filePath?.includes('youtube.com') ||
+      targetEp.filePath?.includes('youtu.be') ||
+      series?.isYouTube ||
+      series?.youtubePlaylistUrl
+    );
+    if (isYt) {
+      router.push(`/player/ytdlp/${seriesId}?ep=${targetEp.id}&type=webseries`);
+    } else {
+      router.push(`/player/mediaserver/${seriesId}?ep=${targetEp.id}&type=webseries`);
+    }
   };
 
   // Custom Episode Assignment Save Handler
@@ -1230,11 +1246,27 @@ export default function WebseriesDetail({ seriesId, onBack }) {
   };
 
   // Save edit callback
-  const handleSaveEdit = async (updatedDoc) => {
+  const handleSaveEdit = async (updatedDoc, updatedEpisodes = null) => {
     setSeries(updatedDoc);
     upsertLocalWebseries(updatedDoc);
-    if (db && currentUser) {
-      await setDoc(doc(db, 'users', userId, 'webseries', seriesId), updatedDoc, { merge: true });
+    if (updatedEpisodes && updatedEpisodes.length > 0) {
+      setEpisodes(updatedEpisodes);
+      setLocalWebseriesEpisodes(seriesId, updatedEpisodes);
+    }
+    if (db && userId) {
+      try {
+        await setDoc(doc(db, 'users', userId, 'webseries', seriesId), updatedDoc, { merge: true });
+        if (updatedEpisodes && updatedEpisodes.length > 0) {
+          const batch = writeBatch(db);
+          updatedEpisodes.forEach((ep) => {
+            const epRef = doc(db, 'users', userId, 'webseries', seriesId, 'episodes', ep.id);
+            batch.set(epRef, ep, { merge: true });
+          });
+          await batch.commit();
+        }
+      } catch (err) {
+        console.error('Error saving updated webseries to Firestore:', err);
+      }
     }
   };
 
@@ -1853,9 +1885,16 @@ export default function WebseriesDetail({ seriesId, onBack }) {
 
                             {/* Info */}
                             <div className="flex-1 min-w-0 pt-0.5 space-y-1">
-                              <h3 className="text-sm sm:text-base font-bold text-white group-hover:text-amber-300 transition truncate">
-                                {ep.name || ep.title || `Episode ${ep.episodeNumber}`}
-                              </h3>
+                              <div className="flex items-center gap-2">
+                                <h3 className="text-sm sm:text-base font-bold text-white group-hover:text-amber-300 transition truncate">
+                                  {ep.name || ep.title || `Episode ${ep.episodeNumber}`}
+                                </h3>
+                                {(ep.isYouTube || ep.filePath?.startsWith('youtube://')) && (
+                                  <span className="px-1.5 py-0.5 rounded bg-red-600/30 border border-red-500/40 text-red-300 text-[10px] font-bold flex items-center gap-1 shrink-0">
+                                    <Youtube size={10} className="text-red-400" /> YouTube
+                                  </span>
+                                )}
+                              </div>
                               <div className="text-xs text-gray-400 font-medium flex flex-wrap items-center gap-1.5 sm:gap-2">
                                 <span>S{ep.seasonNumber || activeSeason?.seasonNumber} E{ep.episodeNumber}</span>
                                 {dateStr && (

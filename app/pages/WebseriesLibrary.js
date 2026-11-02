@@ -206,12 +206,28 @@ export default function WebseriesLibrary() {
   };
 
   // Save Edit Handler
-  const handleSaveEdit = async (updatedDoc) => {
+  const handleSaveEdit = async (updatedDoc, updatedEpisodes = null) => {
     setWebseriesList(prev => prev.map(s => s.id === updatedDoc.id ? updatedDoc : s));
     upsertLocalWebseries(updatedDoc);
+    if (updatedEpisodes && updatedEpisodes.length > 0) {
+      setLocalWebseriesEpisodes(updatedDoc.id, updatedEpisodes);
+    }
     if (db) {
       const uid = currentUser?.uid || getUserId();
-      await setDoc(doc(db, 'users', uid, 'webseries', updatedDoc.id), updatedDoc, { merge: true }).catch(console.error);
+      try {
+        await setDoc(doc(db, 'users', uid, 'webseries', updatedDoc.id), updatedDoc, { merge: true });
+        if (updatedEpisodes && updatedEpisodes.length > 0) {
+          const { writeBatch } = await import('firebase/firestore');
+          const batch = writeBatch(db);
+          updatedEpisodes.forEach(ep => {
+            const epRef = doc(db, 'users', uid, 'webseries', updatedDoc.id, 'episodes', ep.id);
+            batch.set(epRef, ep, { merge: true });
+          });
+          await batch.commit();
+        }
+      } catch (err) {
+        console.error('Save to firestore error:', err);
+      }
     }
   };
 

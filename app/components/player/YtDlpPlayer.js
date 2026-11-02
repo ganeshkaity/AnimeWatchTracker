@@ -13,7 +13,10 @@ import {
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
-import { upsertLocalAnime, getLocalEpisodes, setLocalEpisodes, getLocalAnime } from '../../utils/localStore';
+import {
+  upsertLocalAnime, getLocalEpisodes, setLocalEpisodes, getLocalAnime,
+  getLocalWebseriesItem, getLocalWebseriesEpisodes, setLocalWebseriesEpisodes, upsertLocalWebseries
+} from '../../utils/localStore';
 
 // ── HTMLMediaElement Prototype Patch for Piped Remux Duration ────────────────
 let _protoPatched = false;
@@ -678,6 +681,67 @@ export default function YtDlpPlayer({
     const currentDuration = dur || duration || knownDurationRef.current || episode.durationSeconds || 1;
     const progressPct = Math.min(100, Math.round((roundTime / currentDuration) * 100));
     const shouldMarkWatched = markWatched || progressPct >= 90;
+
+    // Webseries progress sync
+    const isWebseries = Boolean(episode?.isWebseries || episode?.contentType === 'web-series' || getLocalWebseriesItem(animeId));
+    if (isWebseries) {
+      try {
+        const storedEps = getLocalWebseriesEpisodes(animeId);
+        if (storedEps && storedEps.length > 0) {
+          const updated = storedEps.map((e) =>
+            e.id === episode.id
+              ? {
+                  ...e,
+                  lastPositionSeconds: roundTime,
+                  isWatched: shouldMarkWatched,
+                }
+              : e
+          );
+          setLocalWebseriesEpisodes(animeId, updated);
+
+          const totalWsEps = updated.length;
+          const watchedWsEps = updated.filter((e) => e.isWatched).length;
+          const wsProgressPercent = totalWsEps > 0 ? Math.round((watchedWsEps / totalWsEps) * 100) : 0;
+
+          upsertLocalWebseries({
+            id: animeId,
+            lastWatchedEpisode: episode.episodeNumber ? `EP-${episode.episodeNumber}` : '',
+            lastOpenedAt: new Date().toISOString(),
+            progressPercent: wsProgressPercent,
+          });
+        }
+      } catch (e) {
+        console.warn('[YtDlpPlayer] Webseries LocalStore sync error:', e);
+      }
+
+      if (currentUser && db) {
+        try {
+          const epRef = doc(db, 'users', currentUser.uid, 'webseries', animeId, 'episodes', episode.id);
+          updateDoc(epRef, {
+            watchedSeconds: roundTime,
+            durationSeconds: Math.floor(currentDuration),
+            lastPositionSeconds: roundTime,
+            isWatched: shouldMarkWatched,
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {});
+
+          const wsRef = doc(db, 'users', currentUser.uid, 'webseries', animeId);
+          const storedEps = getLocalWebseriesEpisodes(animeId) || [];
+          const totalWsEps = storedEps.length;
+          const watchedWsEps = storedEps.filter((e) => e.isWatched).length;
+          const wsProgressPercent = totalWsEps > 0 ? Math.round((watchedWsEps / totalWsEps) * 100) : 0;
+          updateDoc(wsRef, {
+            progressPercent: wsProgressPercent,
+            lastWatchedEpisode: episode.episodeNumber ? `EP-${episode.episodeNumber}` : '',
+            lastOpenedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {});
+        } catch (err) {
+          console.warn('[YtDlpPlayer] Webseries Firestore sync error:', err);
+        }
+      }
+      return;
+    }
 
     try {
       const storedEps = getLocalEpisodes(animeId);

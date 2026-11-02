@@ -73,6 +73,14 @@ export default function AddWebseriesModal({
   const [scannedFiles, setScannedFiles] = useState([]);
   const [scanMessage, setScanMessage] = useState('');
 
+  // YouTube Playlist State
+  const [isYouTube, setIsYouTube] = useState(false);
+  const [youtubePlaylistUrl, setYoutubePlaylistUrl] = useState('');
+  const [fetchingPlaylist, setFetchingPlaylist] = useState(false);
+  const [playlistVideos, setPlaylistVideos] = useState([]);
+  const [playlistError, setPlaylistError] = useState('');
+  const [playlistInfo, setPlaylistInfo] = useState(null);
+
   // Series Form Fields
   const [title, setTitle] = useState('');
   const [originalTitle, setOriginalTitle] = useState('');
@@ -123,6 +131,12 @@ export default function AddWebseriesModal({
       setScanning(false);
       setScannedFiles([]);
       setScanMessage('');
+      setIsYouTube(false);
+      setYoutubePlaylistUrl('');
+      setFetchingPlaylist(false);
+      setPlaylistVideos([]);
+      setPlaylistError('');
+      setPlaylistInfo(null);
       setTitle('');
       setOriginalTitle('');
       setYear('');
@@ -256,6 +270,45 @@ export default function AddWebseriesModal({
     }
   };
 
+  // ── 3B. Fetch YouTube Playlist via yt-dlp ────────────────────────────────────
+  const handleFetchPlaylist = async () => {
+    const url = youtubePlaylistUrl.trim();
+    if (!url) {
+      setPlaylistError('Please enter a YouTube playlist URL');
+      return;
+    }
+    setFetchingPlaylist(true);
+    setPlaylistError('');
+    try {
+      const res = await fetch('/api/youtube/playlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (data.success && data.playlist && Array.isArray(data.playlist.videos)) {
+        setPlaylistVideos(data.playlist.videos);
+        setPlaylistInfo(data.playlist);
+        if (!title.trim() && data.playlist.title) {
+          setTitle(data.playlist.title);
+        }
+        if (!posterUrl.trim() && data.playlist.thumbnail) {
+          setPosterUrl(data.playlist.thumbnail);
+        }
+        if (!backdropUrl.trim() && data.playlist.thumbnail) {
+          setBackdropUrl(data.playlist.thumbnail);
+        }
+      } else {
+        setPlaylistError(data.error || 'Failed to fetch playlist episodes via yt-dlp');
+      }
+    } catch (err) {
+      console.error('[AddWebseriesModal] Fetch playlist error:', err);
+      setPlaylistError('Network error while extracting playlist via yt-dlp');
+    } finally {
+      setFetchingPlaylist(false);
+    }
+  };
+
   // ── 4. Scan Folder ──────────────────────────────────────────────────────────
   const performScan = async (targetPath, pattern) => {
     const p = (targetPath || folderPath).trim();
@@ -287,6 +340,47 @@ export default function AddWebseriesModal({
 
   // ── 5. Build Final Episodes List ────────────────────────────────────────────
   const buildFinalEpisodes = (seriesId) => {
+    if (isYouTube) {
+      return playlistVideos.map((v, idx) => {
+        const epNum = v.index || (idx + 1);
+        const vId = v.id;
+        const ytUrl = v.url || `https://www.youtube.com/watch?v=${vId}`;
+        const durSec = v.durationSeconds || 0;
+
+        let matchedTmdbEp = null;
+        if (Array.isArray(seasons)) {
+          const targetSeason = seasons.find(s => s.seasonNumber === 1) || seasons[0];
+          if (targetSeason?.episodes) {
+            matchedTmdbEp = targetSeason.episodes.find(e => e.episodeNumber === epNum);
+          }
+        }
+
+        return {
+          id: `yt_${vId || (idx + 1)}`,
+          episodeNumber: epNum,
+          seasonNumber: 1,
+          title: matchedTmdbEp?.name || v.title || `Episode ${epNum}`,
+          name: matchedTmdbEp?.name || v.title || `Episode ${epNum}`,
+          fileName: v.title || `Episode ${epNum}`,
+          filePath: `youtube://${vId}`,
+          youtubeId: vId,
+          youtubeUrl: ytUrl,
+          folderPath: youtubePlaylistUrl.trim(),
+          overview: matchedTmdbEp?.overview || '',
+          airDate: matchedTmdbEp?.airDate || '',
+          stillUrl: matchedTmdbEp?.stillUrl || v.thumbnail || backdropUrl || posterUrl || '',
+          thumbnailUrl: v.thumbnail || '',
+          durationSeconds: durSec || (matchedTmdbEp?.runtime ? matchedTmdbEp.runtime * 60 : 0),
+          durationFormatted: v.durationFormatted || '',
+          isYouTube: true,
+          lastPositionSeconds: 0,
+          watchedSeconds: 0,
+          isWatched: false,
+          createdAt: new Date().toISOString(),
+        };
+      });
+    }
+
     const processed = processScannedFiles(scannedFiles, folderPath, namingPattern);
     const sorted = sortEpisodes(processed);
 
@@ -335,6 +429,17 @@ export default function AddWebseriesModal({
       return;
     }
 
+    if (isYouTube) {
+      if (!youtubePlaylistUrl.trim()) {
+        alert('Please enter a YouTube playlist URL.');
+        return;
+      }
+      if (playlistVideos.length === 0) {
+        alert('Please click "Fetch Playlist (yt-dlp)" to extract the episodes before saving.');
+        return;
+      }
+    }
+
     setSubmitting(true);
 
     try {
@@ -369,8 +474,10 @@ export default function AddWebseriesModal({
         images,
         videos,
         seasons,
-        folderPath: folderPath.trim(),
-        namingPattern: namingPattern || 'auto',
+        folderPath: isYouTube ? youtubePlaylistUrl.trim() : folderPath.trim(),
+        namingPattern: isYouTube ? 'youtube' : (namingPattern || 'auto'),
+        isYouTube: Boolean(isYouTube),
+        youtubePlaylistUrl: isYouTube ? youtubePlaylistUrl.trim() : '',
         episodeCount: finalEpisodes.length,
         progressPercent: 0,
         watchStatus: 'Plan to Watch',
@@ -527,91 +634,223 @@ export default function AddWebseriesModal({
             )}
           </div>
 
-          {/* ── SECTION 2: Folder Location & Naming Pattern ── */}
+          {/* ── SECTION 2: Media Source (Local Folder vs YouTube Playlist) ── */}
           <div className="space-y-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5">
-            <label className="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
-              <FolderTree size={14} /> 2. Local Media Folder & Naming Pattern
-            </label>
-
-            <div className="space-y-2">
-              <label className="text-[11px] text-gray-400 block font-semibold">
-                Episodes Folder Path:
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
+              <label className="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
+                {isYouTube ? (
+                  <>
+                    <Youtube size={15} className="text-red-400" />
+                    <span className="text-red-300">2. YouTube Playlist Link (yt-dlp Extraction)</span>
+                  </>
+                ) : (
+                  <>
+                    <FolderTree size={14} />
+                    <span>2. Local Media Folder & Naming Pattern</span>
+                  </>
+                )}
               </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="e.g. C:\Media\Webseries\Stranger Things"
-                  value={folderPath}
-                  onChange={(e) => setFolderPath(e.target.value)}
-                  className="flex-1 px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-cyan-400"
-                />
+
+              {/* Source Toggle Tabs */}
+              <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/10">
                 <button
                   type="button"
-                  onClick={handleBrowseFolder}
-                  disabled={scanning}
-                  className="px-4 py-2.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  onClick={() => setIsYouTube(false)}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    !isYouTube
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow'
+                      : 'text-gray-400 hover:text-white border border-transparent'
+                  }`}
                 >
-                  <FolderPlus size={15} />
-                  <span>Browse Folder</span>
+                  <FolderTree size={12} />
+                  <span>Local Folder</span>
                 </button>
-                {folderPath && (
-                  <button
-                    type="button"
-                    onClick={() => performScan(folderPath, namingPattern)}
-                    disabled={scanning}
-                    className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-                  >
-                    <RefreshCw size={14} className={scanning ? 'animate-spin' : ''} />
-                    <span>Scan</span>
-                  </button>
+                <button
+                  type="button"
+                  onClick={() => setIsYouTube(true)}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    isYouTube
+                      ? 'bg-red-500/20 text-red-300 border border-red-500/40 shadow'
+                      : 'text-gray-400 hover:text-white border border-transparent'
+                  }`}
+                >
+                  <Youtube size={13} className="text-red-400" />
+                  <span>YouTube Playlist</span>
+                </button>
+              </div>
+            </div>
+
+            {isYouTube ? (
+              /* YouTube Playlist Form */
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] text-gray-400 block font-semibold">
+                    YouTube Playlist URL:
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="https://www.youtube.com/playlist?list=... or video link with playlist"
+                      value={youtubePlaylistUrl}
+                      onChange={(e) => {
+                        setYoutubePlaylistUrl(e.target.value);
+                        setPlaylistError('');
+                      }}
+                      className="flex-1 px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-red-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleFetchPlaylist}
+                      disabled={fetchingPlaylist || !youtubePlaylistUrl.trim()}
+                      className="px-4 py-2.5 rounded-xl bg-red-600/25 hover:bg-red-600/35 border border-red-500/50 text-red-200 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                    >
+                      {fetchingPlaylist ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin text-red-400" />
+                          <span>Extracting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Youtube size={15} className="text-red-400" />
+                          <span>Fetch Playlist (yt-dlp)</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {playlistError && (
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+                    <AlertTriangle size={15} className="shrink-0" />
+                    <span>{playlistError}</span>
+                  </div>
+                )}
+
+                {playlistVideos.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-bold">
+                        <CheckCircle2 size={16} />
+                        <span>Extracted {playlistVideos.length} episodes via yt-dlp</span>
+                      </div>
+                      <span className="text-[10px] font-mono opacity-80">Ready to store in Firestore</span>
+                    </div>
+
+                    {/* Scrollable list preview of fetched episodes */}
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 p-2 rounded-xl bg-black/40 border border-white/10 custom-scrollbar">
+                      {playlistVideos.map((vid, idx) => (
+                        <div
+                          key={vid.id || idx}
+                          className="flex items-center justify-between gap-3 p-2 rounded-lg bg-white/[0.02] border border-white/5 hover:border-white/15 text-xs text-white"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="w-6 h-6 rounded-md bg-white/10 flex items-center justify-center text-[10px] font-mono font-bold text-gray-300 shrink-0">
+                              {idx + 1}
+                            </span>
+                            {vid.thumbnail ? (
+                              <img
+                                src={vid.thumbnail}
+                                alt=""
+                                className="w-12 h-7 rounded object-cover shrink-0 bg-black/60"
+                              />
+                            ) : null}
+                            <span className="truncate font-medium">{vid.title}</span>
+                          </div>
+                          {vid.durationFormatted && (
+                            <span className="text-[10px] font-mono text-gray-400 shrink-0">
+                              {vid.durationFormatted}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
-            </div>
-
-            {/* Naming Pattern Buttons (Matching anime modal) */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] text-gray-400 block font-semibold">
-                Episode Naming Pattern:
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {NAMING_PATTERNS.map((pat) => (
-                  <button
-                    key={pat.id}
-                    type="button"
-                    onClick={() => {
-                      setNamingPattern(pat.id);
-                      if (folderPath && scannedFiles.length > 0) {
-                        performScan(folderPath, pat.id);
-                      }
-                    }}
-                    className={`px-3 py-2 rounded-xl text-left border transition cursor-pointer ${
-                      namingPattern === pat.id
-                        ? 'bg-cyan-500/20 border-cyan-400 text-white shadow'
-                        : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    <span className="font-bold text-xs block">{pat.label}</span>
-                    <span className="text-[10px] opacity-60 block truncate">{pat.example}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Scan Status Feedback */}
-            {scanMessage && (
-              <div className={`p-3 rounded-xl text-xs flex items-center justify-between ${
-                scannedFiles.length > 0
-                  ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
-                  : 'bg-amber-500/10 border border-amber-500/30 text-amber-300'
-              }`}>
-                <div className="flex items-center gap-2 font-bold">
-                  <CheckCircle2 size={16} />
-                  <span>{scanMessage}</span>
+            ) : (
+              /* Local Media Folder Form */
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[11px] text-gray-400 block font-semibold">
+                    Episodes Folder Path:
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="e.g. C:\Media\Webseries\Stranger Things"
+                      value={folderPath}
+                      onChange={(e) => setFolderPath(e.target.value)}
+                      className="flex-1 px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-cyan-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleBrowseFolder}
+                      disabled={scanning}
+                      className="px-4 py-2.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <FolderPlus size={15} />
+                      <span>Browse Folder</span>
+                    </button>
+                    {folderPath && (
+                      <button
+                        type="button"
+                        onClick={() => performScan(folderPath, namingPattern)}
+                        disabled={scanning}
+                        className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <RefreshCw size={14} className={scanning ? 'animate-spin' : ''} />
+                        <span>Scan</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
-                {scannedFiles.length > 0 && (
-                  <span className="text-[10px] font-mono opacity-80">
-                    Ready to track
-                  </span>
+
+                {/* Naming Pattern Buttons (Matching anime modal) */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] text-gray-400 block font-semibold">
+                    Episode Naming Pattern:
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {NAMING_PATTERNS.map((pat) => (
+                      <button
+                        key={pat.id}
+                        type="button"
+                        onClick={() => {
+                          setNamingPattern(pat.id);
+                          if (folderPath && scannedFiles.length > 0) {
+                            performScan(folderPath, pat.id);
+                          }
+                        }}
+                        className={`px-3 py-2 rounded-xl text-left border transition cursor-pointer ${
+                          namingPattern === pat.id
+                            ? 'bg-cyan-500/20 border-cyan-400 text-white shadow'
+                            : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        <span className="font-bold text-xs block">{pat.label}</span>
+                        <span className="text-[10px] opacity-60 block truncate">{pat.example}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Scan Status Feedback */}
+                {scanMessage && (
+                  <div className={`p-3 rounded-xl text-xs flex items-center justify-between ${
+                    scannedFiles.length > 0
+                      ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                      : 'bg-amber-500/10 border border-amber-500/30 text-amber-300'
+                  }`}>
+                    <div className="flex items-center gap-2 font-bold">
+                      <CheckCircle2 size={16} />
+                      <span>{scanMessage}</span>
+                    </div>
+                    {scannedFiles.length > 0 && (
+                      <span className="text-[10px] font-mono opacity-80">
+                        Ready to track
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
             )}

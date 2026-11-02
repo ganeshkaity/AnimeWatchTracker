@@ -86,6 +86,7 @@ export default function PlayerPage() {
             wsEps = dbEps;
           }
           if (wsEps.length > 0) {
+            wsEps.sort((a, b) => (Number(a.episodeNumber) || 0) - (Number(b.episodeNumber) || 0));
             if (qualityParam) {
               wsEps = wsEps.map(e => ({ ...e, selectedQuality: qualityParam }));
             }

@@ -35,13 +35,24 @@ const extractYoutubeId = (urlOrId) => {
 export default function EditWebseriesModal({
   isOpen,
   webseries,
+  series,
   onClose,
   onSaveWebseries,
 }) {
+  const currentSeries = webseries || series;
+
   const [title, setTitle] = useState('');
   const [originalTitle, setOriginalTitle] = useState('');
   const [folderPath, setFolderPath] = useState('');
   const [namingPattern, setNamingPattern] = useState('auto');
+
+  // YouTube Playlist State
+  const [isYouTube, setIsYouTube] = useState(false);
+  const [youtubePlaylistUrl, setYoutubePlaylistUrl] = useState('');
+  const [fetchingPlaylist, setFetchingPlaylist] = useState(false);
+  const [playlistError, setPlaylistError] = useState('');
+  const [newPlaylistEpisodes, setNewPlaylistEpisodes] = useState(null);
+
   const [year, setYear] = useState('');
   const [releaseDate, setReleaseDate] = useState('');
   const [rating, setRating] = useState('');
@@ -67,50 +78,129 @@ export default function EditWebseriesModal({
   const [imdbId, setImdbId] = useState('');
 
   useEffect(() => {
-    if (webseries) {
-      setTitle(webseries.title || '');
-      setOriginalTitle(webseries.originalTitle || '');
-      setFolderPath(webseries.folderPath || '');
-      setNamingPattern(webseries.namingPattern || 'auto');
-      setYear(webseries.year || '');
-      setReleaseDate(webseries.releaseDate || '');
-      setRating(webseries.rating ? String(webseries.rating) : '');
-      setTmdbRating(webseries.tmdbRating ? String(webseries.tmdbRating) : (webseries.rating ? String(webseries.rating) : ''));
-      setImdbRating(webseries.imdbRating ? String(webseries.imdbRating) : (webseries.omdb?.imdbRating ? String(webseries.omdb.imdbRating) : ''));
-      setRatingSource(webseries.ratingSource || (webseries.imdbRating ? 'omdb' : 'tmdb'));
-      setAgeRating(webseries.ageRating || '');
-      setTmdbAgeRating(webseries.tmdbAgeRating || webseries.ageRating || '');
-      setOmdbAgeRating(webseries.omdbAgeRating || '');
-      setAgeRatingSource(webseries.ageRatingSource || 'tmdb');
-      setOverview(webseries.overview || '');
-      setPosterUrl(webseries.posterUrl || '');
-      setBackdropUrl(webseries.backdropUrl || '');
-      setLogoUrl(webseries.logoUrl || '');
-      setWatchStatus(webseries.watchStatus || (webseries.completed ? 'Completed' : 'Plan to Watch'));
-      setGenres(Array.isArray(webseries.genres) ? webseries.genres : []);
-      setAvailableLogos(Array.isArray(webseries?.images?.logos) ? webseries.images.logos : []);
-      setOmdb(webseries.omdb || null);
-      setImdbId(webseries.imdbId || webseries.omdb?.imdbId || '');
+    if (currentSeries) {
+      setTitle(currentSeries.title || '');
+      setOriginalTitle(currentSeries.originalTitle || '');
+      setFolderPath(currentSeries.folderPath || '');
+      setNamingPattern(currentSeries.namingPattern || 'auto');
 
-      const initVideos = Array.isArray(webseries?.videos) ? webseries.videos : [];
+      const hasYtPlaylist = Boolean(
+        currentSeries.isYouTube ||
+        currentSeries.youtubePlaylistUrl ||
+        (currentSeries.folderPath && (
+          currentSeries.folderPath.includes('youtube.com') ||
+          currentSeries.folderPath.includes('youtu.be') ||
+          currentSeries.folderPath.startsWith('http')
+        ))
+      );
+      setIsYouTube(hasYtPlaylist);
+      setYoutubePlaylistUrl(
+        currentSeries.youtubePlaylistUrl ||
+        (hasYtPlaylist ? currentSeries.folderPath : '') ||
+        ''
+      );
+      setNewPlaylistEpisodes(null);
+      setPlaylistError('');
+
+      setYear(currentSeries.year || '');
+      setReleaseDate(currentSeries.releaseDate || '');
+      setRating(currentSeries.rating ? String(currentSeries.rating) : '');
+      setTmdbRating(currentSeries.tmdbRating ? String(currentSeries.tmdbRating) : (currentSeries.rating ? String(currentSeries.rating) : ''));
+      setImdbRating(currentSeries.imdbRating ? String(currentSeries.imdbRating) : (currentSeries.omdb?.imdbRating ? String(currentSeries.omdb.imdbRating) : ''));
+      setRatingSource(currentSeries.ratingSource || (currentSeries.imdbRating ? 'omdb' : 'tmdb'));
+      setAgeRating(currentSeries.ageRating || '');
+      setTmdbAgeRating(currentSeries.tmdbAgeRating || currentSeries.ageRating || '');
+      setOmdbAgeRating(currentSeries.omdbAgeRating || '');
+      setAgeRatingSource(currentSeries.ageRatingSource || 'tmdb');
+      setOverview(currentSeries.overview || '');
+      setPosterUrl(currentSeries.posterUrl || '');
+      setBackdropUrl(currentSeries.backdropUrl || '');
+      setLogoUrl(currentSeries.logoUrl || '');
+      setWatchStatus(currentSeries.watchStatus || (currentSeries.completed ? 'Completed' : 'Plan to Watch'));
+      setGenres(Array.isArray(currentSeries.genres) ? currentSeries.genres : []);
+      setAvailableLogos(Array.isArray(currentSeries?.images?.logos) ? currentSeries.images.logos : []);
+      setOmdb(currentSeries.omdb || null);
+      setImdbId(currentSeries.imdbId || currentSeries.omdb?.imdbId || '');
+
+      const initVideos = Array.isArray(currentSeries?.videos) ? currentSeries.videos : [];
       setAvailableVideos(initVideos);
 
       const curYtKey = extractYoutubeId(
-        webseries.playableYoutubeId ||
-        webseries.youtubeId ||
-        webseries.trailerKey ||
-        webseries.trailerUrl
+        currentSeries.playableYoutubeId ||
+        currentSeries.youtubeId ||
+        currentSeries.trailerKey ||
+        currentSeries.trailerUrl
       );
       setSelectedVideoKey(curYtKey || '');
       setCustomYoutubeInput(
         curYtKey
           ? `https://www.youtube.com/watch?v=${curYtKey}`
-          : (webseries.playableYoutubeUrl || webseries.trailerUrl || '')
+          : (currentSeries.playableYoutubeUrl || currentSeries.trailerUrl || '')
       );
     }
-  }, [webseries]);
+  }, [currentSeries]);
 
-  if (!isOpen || !webseries) return null;
+  if (!isOpen || !currentSeries) return null;
+
+  // ── Fetch YouTube Playlist via yt-dlp ─────────────────────────────────────────
+  const handleFetchPlaylist = async () => {
+    const url = youtubePlaylistUrl.trim();
+    if (!url) {
+      setPlaylistError('Please enter a YouTube playlist URL');
+      return;
+    }
+    setFetchingPlaylist(true);
+    setPlaylistError('');
+    try {
+      const res = await fetch('/api/youtube/playlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (data.success && data.playlist && Array.isArray(data.playlist.videos)) {
+        const mapped = data.playlist.videos.map((v, idx) => ({
+          id: `yt_${v.id || (idx + 1)}`,
+          episodeNumber: v.index || (idx + 1),
+          seasonNumber: 1,
+          title: v.title || `Episode ${idx + 1}`,
+          name: v.title || `Episode ${idx + 1}`,
+          fileName: v.title || `Episode ${idx + 1}`,
+          filePath: `youtube://${v.id}`,
+          youtubeId: v.id,
+          youtubeUrl: v.url || `https://www.youtube.com/watch?v=${v.id}`,
+          folderPath: url,
+          overview: '',
+          stillUrl: v.thumbnail || backdropUrl || posterUrl || '',
+          thumbnailUrl: v.thumbnail || '',
+          durationSeconds: v.durationSeconds || 0,
+          durationFormatted: v.durationFormatted || '',
+          isYouTube: true,
+          lastPositionSeconds: 0,
+          watchedSeconds: 0,
+          isWatched: false,
+          createdAt: new Date().toISOString(),
+        }));
+        setNewPlaylistEpisodes(mapped);
+        if (!title.trim() && data.playlist.title) {
+          setTitle(data.playlist.title);
+        }
+        if (!posterUrl.trim() && data.playlist.thumbnail) {
+          setPosterUrl(data.playlist.thumbnail);
+        }
+        if (!backdropUrl.trim() && data.playlist.thumbnail) {
+          setBackdropUrl(data.playlist.thumbnail);
+        }
+      } else {
+        setPlaylistError(data.error || 'Failed to fetch playlist episodes via yt-dlp');
+      }
+    } catch (err) {
+      console.error('[EditWebseriesModal] Fetch playlist error:', err);
+      setPlaylistError('Network error while extracting playlist via yt-dlp');
+    } finally {
+      setFetchingPlaylist(false);
+    }
+  };
 
   const handleOmdbUpdated = (data) => {
     if (data?.omdb) {
@@ -139,6 +229,11 @@ export default function EditWebseriesModal({
       return;
     }
 
+    if (isYouTube && !youtubePlaylistUrl.trim()) {
+      alert('Please enter a YouTube playlist URL.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const parsedYtKey = extractYoutubeId(customYoutubeInput) || selectedVideoKey;
@@ -148,22 +243,25 @@ export default function EditWebseriesModal({
         : (tmdbRating ? parseFloat(tmdbRating) : (rating ? parseFloat(rating) : 0));
 
       const updated = {
-        ...webseries,
+        ...currentSeries,
         title: title.trim(),
         originalTitle: originalTitle.trim(),
-        folderPath: folderPath.trim(),
-        namingPattern: namingPattern || 'auto',
+        folderPath: isYouTube ? youtubePlaylistUrl.trim() : folderPath.trim(),
+        namingPattern: isYouTube ? 'youtube' : (namingPattern || 'auto'),
+        isYouTube: Boolean(isYouTube),
+        youtubePlaylistUrl: isYouTube ? youtubePlaylistUrl.trim() : null,
+        episodeCount: (isYouTube && newPlaylistEpisodes?.length) ? newPlaylistEpisodes.length : (currentSeries.episodeCount || 0),
         year: year ? String(year) : '',
         releaseDate: releaseDate || '',
         rating: effectiveRating,
-        tmdbRating: tmdbRating ? parseFloat(tmdbRating) : (webseries.tmdbRating || null),
-        imdbRating: imdbRating ? parseFloat(imdbRating) : (omdb?.imdbRating || webseries.imdbRating || webseries.omdb?.imdbRating || null),
+        tmdbRating: tmdbRating ? parseFloat(tmdbRating) : (currentSeries.tmdbRating || null),
+        imdbRating: imdbRating ? parseFloat(imdbRating) : (omdb?.imdbRating || currentSeries.imdbRating || currentSeries.omdb?.imdbRating || null),
         ratingSource: ratingSource || 'tmdb',
         ageRating: ageRating ? ageRating.trim() : null,
         tmdbAgeRating: tmdbAgeRating ? tmdbAgeRating.trim() : null,
         omdbAgeRating: omdbAgeRating ? omdbAgeRating.trim() : null,
         ageRatingSource: ageRatingSource || 'tmdb',
-        userRating: rating ? parseFloat(rating) : (webseries.userRating || null),
+        userRating: rating ? parseFloat(rating) : (currentSeries.userRating || null),
         isManualRating: false,
         overview: overview.trim(),
         posterUrl: posterUrl.trim(),
@@ -173,20 +271,20 @@ export default function EditWebseriesModal({
         completed: watchStatus === 'Completed',
         watched: watchStatus === 'Completed',
         genres: genres.length > 0 ? genres : ['Drama'],
-        omdb: omdb || webseries.omdb || null,
-        imdbId: imdbId || omdb?.imdbId || webseries.imdbId || webseries.omdb?.imdbId || null,
-        imdbRating: omdb?.imdbRating || webseries.imdbRating || webseries.omdb?.imdbRating || null,
-        imdbVotes: omdb?.imdbVotes || webseries.imdbVotes || webseries.omdb?.imdbVotes || null,
-        rottenTomatoes: omdb?.rottenTomatoes || webseries.rottenTomatoes || webseries.omdb?.rottenTomatoes || null,
-        metacritic: omdb?.metacritic || webseries.metacritic || webseries.omdb?.metacritic || null,
-        awards: omdb?.awards || webseries.awards || webseries.omdb?.awards || null,
-        boxOffice: omdb?.boxOffice || webseries.boxOffice || webseries.omdb?.boxOffice || null,
+        omdb: omdb || currentSeries.omdb || null,
+        imdbId: imdbId || omdb?.imdbId || currentSeries.imdbId || currentSeries.omdb?.imdbId || null,
+        imdbRating: omdb?.imdbRating || currentSeries.imdbRating || currentSeries.omdb?.imdbRating || null,
+        imdbVotes: omdb?.imdbVotes || currentSeries.imdbVotes || currentSeries.omdb?.imdbVotes || null,
+        rottenTomatoes: omdb?.rottenTomatoes || currentSeries.rottenTomatoes || currentSeries.omdb?.rottenTomatoes || null,
+        metacritic: omdb?.metacritic || currentSeries.metacritic || currentSeries.omdb?.metacritic || null,
+        awards: omdb?.awards || currentSeries.awards || currentSeries.omdb?.awards || null,
+        boxOffice: omdb?.boxOffice || currentSeries.boxOffice || currentSeries.omdb?.boxOffice || null,
         playableYoutubeId: parsedYtKey || null,
         playableYoutubeUrl: parsedYtKey ? `https://www.youtube.com/watch?v=${parsedYtKey}` : (customYoutubeInput.trim() || null),
         updatedAt: new Date().toISOString(),
       };
 
-      await onSaveWebseries(updated);
+      await onSaveWebseries(updated, isYouTube && newPlaylistEpisodes ? newPlaylistEpisodes : null);
       onClose();
     } catch (err) {
       console.error('[EditWebseriesModal] Save error:', err);
@@ -313,36 +411,174 @@ export default function EditWebseriesModal({
               </div>
             </div>
 
-            {/* Folder & Naming Pattern */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-              <div>
-                <label className="text-[11px] text-gray-400 block font-semibold mb-1">
-                  Local Folder Path
+            {/* ── Media Source: Local Folder vs YouTube Playlist ── */}
+            <div className="space-y-3 p-3.5 rounded-2xl bg-white/[0.02] border border-white/10">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                  {isYouTube ? (
+                    <>
+                      <Youtube size={15} className="text-red-400" />
+                      <span className="text-red-300">YouTube Playlist Link (yt-dlp Extraction)</span>
+                    </>
+                  ) : (
+                    <>
+                      <FolderTree size={14} />
+                      <span>Local Folder & Naming Pattern</span>
+                    </>
+                  )}
                 </label>
-                <input
-                  type="text"
-                  value={folderPath}
-                  onChange={(e) => setFolderPath(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white focus:outline-none focus:border-amber-400"
-                />
+
+                {/* Source Switcher */}
+                <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setIsYouTube(false)}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      !isYouTube
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow'
+                        : 'text-gray-400 hover:text-white border border-transparent'
+                    }`}
+                  >
+                    <FolderTree size={12} />
+                    <span>Local Folder</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsYouTube(true)}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      isYouTube
+                        ? 'bg-red-500/20 text-red-300 border border-red-500/40 shadow'
+                        : 'text-gray-400 hover:text-white border border-transparent'
+                    }`}
+                  >
+                    <Youtube size={13} className="text-red-400" />
+                    <span>YouTube Playlist</span>
+                  </button>
+                </div>
               </div>
 
-              <div>
-                <label className="text-[11px] text-gray-400 block font-semibold mb-1">
-                  Naming Pattern
-                </label>
-                <select
-                  value={namingPattern}
-                  onChange={(e) => setNamingPattern(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white focus:outline-none focus:border-amber-400 cursor-pointer"
-                >
-                  <option value="auto">Auto-Detect Pattern (Recommended)</option>
-                  <option value="sxxexx">Season / Episode (S01E01, S1E1)</option>
-                  <option value="episode">Episode Tag (Episode 01, Ep 01)</option>
-                  <option value="bare">Prefix / Pure Numeric (01 - Title, 1)</option>
-                  <option value="anything">Anything (All video files)</option>
-                </select>
-              </div>
+              {isYouTube ? (
+                /* YouTube Playlist Mode */
+                <div className="space-y-3 pt-1">
+                  <div>
+                    <label className="text-[11px] text-gray-400 block font-semibold mb-1">
+                      YouTube Playlist URL:
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="https://www.youtube.com/playlist?list=..."
+                        value={youtubePlaylistUrl}
+                        onChange={(e) => {
+                          setYoutubePlaylistUrl(e.target.value);
+                          setPlaylistError('');
+                        }}
+                        className="flex-1 px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-red-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleFetchPlaylist}
+                        disabled={fetchingPlaylist || !youtubePlaylistUrl.trim()}
+                        className="px-4 py-2.5 rounded-xl bg-red-600/25 hover:bg-red-600/35 border border-red-500/50 text-red-200 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                      >
+                        {fetchingPlaylist ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin text-red-400" />
+                            <span>Fetching...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Youtube size={15} className="text-red-400" />
+                            <span>Fetch / Rescan Playlist (yt-dlp)</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {playlistError && (
+                    <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+                      <AlertTriangle size={15} className="shrink-0" />
+                      <span>{playlistError}</span>
+                    </div>
+                  )}
+
+                  {newPlaylistEpisodes && newPlaylistEpisodes.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between">
+                        <div className="flex items-center gap-2 font-bold">
+                          <CheckCircle2 size={16} />
+                          <span>Extracted {newPlaylistEpisodes.length} episodes via yt-dlp</span>
+                        </div>
+                        <span className="text-[10px] font-mono opacity-80">
+                          Will update Firestore on save
+                        </span>
+                      </div>
+
+                      {/* Episode preview */}
+                      <div className="max-h-40 overflow-y-auto space-y-1.5 p-2 rounded-xl bg-black/40 border border-white/10 custom-scrollbar">
+                        {newPlaylistEpisodes.map((ep, idx) => (
+                          <div
+                            key={ep.id || idx}
+                            className="flex items-center justify-between gap-3 p-2 rounded-lg bg-white/[0.02] border border-white/5 text-xs text-white"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-6 h-6 rounded-md bg-white/10 flex items-center justify-center text-[10px] font-mono font-bold text-gray-300 shrink-0">
+                                {ep.episodeNumber || idx + 1}
+                              </span>
+                              {ep.stillUrl || ep.thumbnailUrl ? (
+                                <img
+                                  src={ep.stillUrl || ep.thumbnailUrl}
+                                  alt=""
+                                  className="w-12 h-7 rounded object-cover shrink-0 bg-black/60"
+                                />
+                              ) : null}
+                              <span className="truncate font-medium">{ep.title || ep.name}</span>
+                            </div>
+                            {ep.durationFormatted && (
+                              <span className="text-[10px] font-mono text-gray-400 shrink-0">
+                                {ep.durationFormatted}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Local Folder Mode */
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div>
+                    <label className="text-[11px] text-gray-400 block font-semibold mb-1">
+                      Local Folder Path
+                    </label>
+                    <input
+                      type="text"
+                      value={folderPath}
+                      onChange={(e) => setFolderPath(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] text-gray-400 block font-semibold mb-1">
+                      Naming Pattern
+                    </label>
+                    <select
+                      value={namingPattern}
+                      onChange={(e) => setNamingPattern(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white focus:outline-none focus:border-amber-400 cursor-pointer"
+                    >
+                      <option value="auto">Auto-Detect Pattern (Recommended)</option>
+                      <option value="sxxexx">Season / Episode (S01E01, S1E1)</option>
+                      <option value="episode">Episode Tag (Episode 01, Ep 01)</option>
+                      <option value="bare">Prefix / Pure Numeric (01 - Title, 1)</option>
+                      <option value="anything">Anything (All video files)</option>
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Overview */}

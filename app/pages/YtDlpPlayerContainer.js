@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, Youtube, HardDrive } from 'lucide-react';
 import YtDlpPlayer from '../components/player/YtDlpPlayer';
-import { getLocalAnime } from '../utils/localStore';
+import { getLocalAnime, getLocalWebseriesItem, getLocalMovie } from '../utils/localStore';
 
 export default function YtDlpPlayerContainer({
   animeId,
@@ -22,7 +22,7 @@ export default function YtDlpPlayerContainer({
 
   useEffect(() => {
     if (animeId) {
-      const local = getLocalAnime(animeId);
+      const local = getLocalAnime(animeId) || getLocalWebseriesItem(animeId) || getLocalMovie(animeId);
       if (local) setAnimeDetails(local);
     }
   }, [animeId]);
