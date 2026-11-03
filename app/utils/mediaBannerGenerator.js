@@ -25,26 +25,16 @@ function loadImageSafe(src) {
     img.crossOrigin = 'anonymous';
     img.onload = () => resolve(img);
     img.onerror = () => {
-      // If direct load fails (due to CORS), retry through our local base64/proxy API
-      const proxyUrl = `/api/upload-imgbb`;
-      fetch(proxyUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: src }),
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data && data.url) {
-            const fallbackImg = new Image();
-            fallbackImg.crossOrigin = 'anonymous';
-            fallbackImg.onload = () => resolve(fallbackImg);
-            fallbackImg.onerror = reject;
-            fallbackImg.src = data.url;
-          } else {
-            reject(new Error('Proxy fallback failed'));
-          }
-        })
-        .catch(reject);
+      // If direct load fails (due to CORS or remote CDN restrictions), load through our local download-image proxy
+      if (typeof src === 'string' && (src.startsWith('http://') || src.startsWith('https://'))) {
+        const proxyImg = new Image();
+        proxyImg.crossOrigin = 'anonymous';
+        proxyImg.onload = () => resolve(proxyImg);
+        proxyImg.onerror = () => reject(new Error('Proxy image load failed: ' + src));
+        proxyImg.src = `/api/download-image?url=${encodeURIComponent(src)}`;
+      } else {
+        reject(new Error('Failed to load image: ' + src));
+      }
     };
     img.src = src;
   });
