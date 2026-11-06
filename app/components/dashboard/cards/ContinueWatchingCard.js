@@ -12,7 +12,6 @@ function ContinueWatchingCard({
   backdropImg,
   logoUrl,
   title,
-  subText,
   rating,
   pct = 0,
   isCompleted = false,
@@ -103,17 +102,12 @@ function ContinueWatchingCard({
               alt={title}
               loading="lazy"
               decoding="async"
-              className="max-h-7 sm:max-h-9 w-auto max-w-full object-contain object-left drop-shadow-[0_2px_10px_rgba(0,0,0,0.95)]"
+              className="max-h-7 sm:max-h-8 md:max-h-9 w-auto max-w-full object-contain object-left drop-shadow-[0_2px_14px_rgba(0,0,0,0.95)]"
             />
           ) : (
-            <span className="text-xs sm:text-sm font-black text-white line-clamp-1 drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]">
+            <h3 className="text-xs sm:text-sm font-black text-white tracking-tight drop-shadow-[0_2px_10px_rgba(0,0,0,0.95)] line-clamp-1 group-hover:text-amber-300 transition-colors">
               {title}
-            </span>
-          )}
-          {subText && (
-            <span className="text-[10px] text-amber-300/90 font-medium block mt-0.5 line-clamp-1 drop-shadow">
-              {subText}
-            </span>
+            </h3>
           )}
         </div>
 

@@ -92,38 +92,32 @@ function ContinueWatchingSection({
           let itemRating = item.rating || item.score || item.vote_average || null;
           let pct = 0;
           let isCompleted = false;
-          let subText = '';
           let fallbackIcon = <Play size={32} />;
 
           if (item.mediaType === 'movie') {
             backdropImg = item.backdropUrl || item.bannerUrl || item.backdropPath || item.posterUrl || item.posterPath || (item.thumbnailBase64 || null);
             pct = item.progressPct || (item.duration ? Math.min(100, Math.round(((item.currentTime || 0) / item.duration) * 100)) : 0);
             isCompleted = Boolean(item.watched || item.completed || item.watchStatus === 'Completed' || pct >= 95);
-            subText = item.year || (item.releaseDate ? item.releaseDate.split('-')[0] : 'Movie');
             fallbackIcon = <Film size={32} />;
           } else if (item.mediaType === 'webseries') {
             backdropImg = item.backdropUrl || item.bannerUrl || item.backdropPath || item.coverUrl || item.posterUrl || (item.thumbnailBase64 || null);
             pct = item.progressPct || item.progressPercent || 0;
             isCompleted = Boolean(item.watched || item.isWatched || item.watchStatus === 'Completed' || pct >= 100);
-            subText = item.lastWatchedEpisode ? `EP ${item.lastWatchedEpisode}` : (item.year || 'Series');
             fallbackIcon = <Tv size={32} />;
           } else if (item.mediaType === 'anime') {
             backdropImg = item.backdropUrl || item.bannerUrl || item.banner || item.coverUrl || item.posterUrl || item.posterPath || item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : null);
             pct = getAnimeProgressPercent(item);
             isCompleted = Boolean(item.watched || item.isWatched || item.watchStatus === 'Completed' || pct >= 100);
-            subText = item.lastWatchedEpisode ? `EP ${item.lastWatchedEpisode}` : (item.year || 'Anime');
             fallbackIcon = <Play size={32} />;
           } else if (item.mediaType === 'manga') {
             backdropImg = item.bannerUrl || item.backdropUrl || item.coverUrl || item.posterUrl || item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : null);
             pct = item.progressPct || item.progressPercent || 0;
             isCompleted = Boolean(item.isWatched || item.isCompleted || pct >= 100);
-            subText = item.lastWatchedChapter ? `CH ${item.lastWatchedChapter}` : (item.completedChapters ? `CH ${item.completedChapters}` : (item.year || 'Manga'));
             fallbackIcon = <BookOpen size={32} />;
           } else if (item.mediaType === 'audioStory') {
             backdropImg = item.bannerUrl || item.backdropUrl || item.coverUrl || item.posterUrl || item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : null);
             pct = item.progressPct || item.progressPercent || 0;
             isCompleted = Boolean(item.isWatched || item.isCompleted || pct >= 100);
-            subText = item.lastWatchedTrack || (item.completedTracks ? `Tr ${item.completedTracks}` : 'Audio');
             fallbackIcon = <Headphones size={32} />;
           }
 
@@ -135,7 +129,6 @@ function ContinueWatchingSection({
               backdropImg={backdropImg}
               logoUrl={logoUrl}
               title={item.title || item.name}
-              subText={subText}
               rating={itemRating}
               pct={pct}
               isCompleted={isCompleted}
