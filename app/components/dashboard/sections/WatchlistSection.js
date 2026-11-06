@@ -4,7 +4,7 @@ import { Bookmark, ChevronRight, ChevronLeft, Plus } from 'lucide-react';
 import MediaCard from '../cards/MediaCard';
 import MediaRowSkeleton from '../skeletons/MediaRowSkeleton';
 
-export default function WatchlistSection({
+function WatchlistSection({
   sortedWatchlist = [],
   watchlistCount = 0,
   loadingWatchlist = false,
@@ -47,7 +47,7 @@ export default function WatchlistSection({
   };
 
   return (
-    <section id="watchlist" className="space-y-4 scroll-mt-24">
+    <section id="watchlist" className="space-y-4 scroll-mt-24 dashboard-section-contain">
       <span id="watchlist-anchor" className="sr-only" />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
@@ -177,3 +177,5 @@ export default function WatchlistSection({
     </section>
   );
 }
+
+export default React.memo(WatchlistSection);

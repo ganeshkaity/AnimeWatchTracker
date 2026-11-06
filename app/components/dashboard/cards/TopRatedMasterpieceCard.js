@@ -1,9 +1,11 @@
-import React from 'react';
+"use client";
+
+import React, { memo } from 'react';
 import { Star } from 'lucide-react';
 import CachedImage from '../../../utils/imageCache';
 import { getEffectiveRating } from '../../../utils/ratingUtils';
 
-export default function TopRatedMasterpieceCard({
+function TopRatedMasterpieceCard({
   show,
   index,
   onClick,
@@ -14,14 +16,15 @@ export default function TopRatedMasterpieceCard({
   return (
     <div
       onClick={onClick}
-      className="relative flex-none pl-6 sm:pl-8 group cursor-pointer select-none transition-transform duration-300 hover:-translate-y-1 py-2"
+      className="relative flex-none pl-6 sm:pl-8 group cursor-pointer select-none transition-transform duration-300 hover:-translate-y-1 py-2 will-change-transform"
+      style={{ transform: 'translateZ(0)' }}
     >
       {/* Poster Card */}
       <div className="relative w-32 sm:w-36 md:w-40 aspect-[2/3] rounded-lg overflow-hidden bg-[#0d121f] border border-white/10 group-hover:border-amber-400/50 shadow-xl group-hover:shadow-2xl transition-all duration-300">
         <CachedImage
           src={show.image}
-          alt={show.seriesTitle || show.title}
-          title={show.seriesTitle || show.title}
+          alt={show.seriesTitle || show.title || ''}
+          title={show.seriesTitle || show.title || ''}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
         />
 
@@ -29,14 +32,14 @@ export default function TopRatedMasterpieceCard({
 
         {/* Liquid Glass Rating Badge (Top-Right) */}
         {displayRating && (
-          <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-xl border border-white/20 text-[10px] font-black text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.8)] backdrop-saturate-150 pointer-events-none">
+          <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-full bg-black/80 sm:bg-black/60 sm:backdrop-blur-xl border border-white/20 text-[10px] font-black text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.8)] sm:backdrop-saturate-150 pointer-events-none">
             <Star size={10} className="fill-amber-400 text-amber-400 shrink-0" />
             <span className="leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">{displayRating}</span>
           </div>
         )}
       </div>
 
-      {/* Giant Metallic Rank Number Overlapping Bottom-Left Corner (Image 5 style) */}
+      {/* Giant Metallic Rank Number Overlapping Bottom-Left Corner */}
       <div
         className="absolute left-0 -bottom-1 sm:-bottom-2 z-20 font-black text-6xl sm:text-7xl md:text-8xl select-none leading-none pointer-events-none tracking-tighter"
         style={{
@@ -52,3 +55,5 @@ export default function TopRatedMasterpieceCard({
     </div>
   );
 }
+
+export default memo(TopRatedMasterpieceCard);

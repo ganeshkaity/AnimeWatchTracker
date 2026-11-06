@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, memo } from 'react';
 import { Star, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import CachedImage from '../../../utils/imageCache';
 import { getEffectiveRating } from '../../../utils/ratingUtils';
 import { getLocalMovies } from '../../../utils/localStore';
 
-export default function TopRatedMoviesSection({
+function TopRatedMoviesSection({
   movies = [],
   handleCardMouseEnter,
   handleCardMouseLeave,
@@ -49,7 +49,7 @@ export default function TopRatedMoviesSection({
   if (topMovies.length === 0) return null;
 
   return (
-    <section id="top-rated-movies" className="space-y-4">
+    <section id="top-rated-movies" className="space-y-4 dashboard-section-contain">
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-start sm:items-center gap-3 min-w-0">
@@ -120,7 +120,7 @@ export default function TopRatedMoviesSection({
 
                 {/* Liquid Glass Rating Badge (Top-Right) */}
                 {displayRating && (
-                  <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 text-[10px] font-bold text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.5)] backdrop-saturate-150 pointer-events-none">
+                  <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-full bg-black/80 sm:bg-white/10 sm:backdrop-blur-xl border border-white/30 text-[10px] font-bold text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.5)] sm:backdrop-saturate-150 pointer-events-none">
                     <Star size={10} className="fill-amber-400 text-amber-400" />
                     <span className="leading-none">{displayRating}</span>
                   </div>
@@ -147,3 +147,5 @@ export default function TopRatedMoviesSection({
     </section>
   );
 }
+
+export default memo(TopRatedMoviesSection);

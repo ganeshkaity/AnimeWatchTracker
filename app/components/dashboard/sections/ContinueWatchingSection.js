@@ -5,7 +5,7 @@ import ContinueWatchingCard from '../cards/ContinueWatchingCard';
 import ContinueWatchingSkeleton from '../skeletons/ContinueWatchingSkeleton';
 import { getAnimeProgressPercent } from '../utils/dashboardHelpers';
 
-export default function ContinueWatchingSection({
+function ContinueWatchingSection({
   continueWatchingList = [],
   isLoading = false,
   onSelectAnime,
@@ -27,7 +27,7 @@ export default function ContinueWatchingSection({
 
   if (isLoading) {
     return (
-      <section id="continue-watching" className="space-y-4 scroll-mt-24">
+      <section id="continue-watching" className="space-y-4 scroll-mt-24 dashboard-section-contain">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div>
@@ -47,7 +47,7 @@ export default function ContinueWatchingSection({
   }
 
   return (
-    <section id="continue-watching" className="space-y-4 scroll-mt-24">
+    <section id="continue-watching" className="space-y-4 scroll-mt-24 dashboard-section-contain">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="p-2 rounded-xl bg-[#7c5cff]/10 border border-[#7c5cff]/20 text-[#7c5cff]">
@@ -165,3 +165,5 @@ export default function ContinueWatchingSection({
     </section>
   );
 }
+
+export default React.memo(ContinueWatchingSection);

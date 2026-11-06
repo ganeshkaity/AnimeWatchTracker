@@ -6,13 +6,40 @@
   body {
     @apply bg-[#0e172a] text-white antialiased overflow-x-hidden;
     min-height: 100vh;
+    position: relative;
+  }
+
+  /* Hardware-accelerated fixed background on compositor layer (never repaints on scroll) */
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 0;
+    pointer-events: none;
     background:
       radial-gradient(ellipse 90% 70% at 50% -10%, rgba(30, 58, 138, 0.55) 0%, transparent 70%),
       radial-gradient(ellipse 70% 50% at 15% 45%, rgba(14, 116, 144, 0.35) 0%, transparent 60%),
       radial-gradient(ellipse 80% 60% at 85% 85%, rgba(29, 78, 216, 0.3) 0%, transparent 60%),
       linear-gradient(180deg, #0e172a 0%, #0b1120 35%, #070c18 70%, #03050a 100%);
-    background-attachment: fixed;
+    transform: translateZ(0);
+    will-change: transform;
+    backface-visibility: hidden;
   }
+}
+
+/* Performance: CSS Containment for offscreen dashboard sections */
+.dashboard-section-contain {
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 340px;
+}
+
+/* Performance: GPU-accelerated touch scroll for mobile horizontal lists */
+.smooth-scroll-gpu {
+  -webkit-overflow-scrolling: touch;
+  transform: translateZ(0);
 }
 
 /* All page content sits above z-index 0 */

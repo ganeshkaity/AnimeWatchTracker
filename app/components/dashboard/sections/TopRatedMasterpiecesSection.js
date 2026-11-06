@@ -3,7 +3,7 @@ import { Star, ChevronLeft, ChevronRight } from 'lucide-react';
 import TopRatedMasterpieceCard from '../cards/TopRatedMasterpieceCard';
 import TopRatedSkeleton from '../skeletons/TopRatedSkeleton';
 
-export default function TopRatedMasterpiecesSection({
+function TopRatedMasterpiecesSection({
   lazyTopRatedRef,
   loadingTopRated = false,
   hasScrolledToTopRated = true,
@@ -24,7 +24,7 @@ export default function TopRatedMasterpiecesSection({
   const isLoading = !hasScrolledToTopRated || loadingTopRated;
 
   return (
-    <section id="top-rated-masterpieces" ref={lazyTopRatedRef} className="space-y-4">
+    <section id="top-rated-masterpieces" ref={lazyTopRatedRef} className="space-y-4 dashboard-section-contain">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div>
@@ -82,3 +82,5 @@ export default function TopRatedMasterpiecesSection({
     </section>
   );
 }
+
+export default React.memo(TopRatedMasterpiecesSection);

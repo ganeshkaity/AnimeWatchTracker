@@ -156,7 +156,7 @@ export async function clearPosterCache() {
  * - Displays a skeleton shimmer while loading
  * - Preserves layout stability (prevents cumulative layout shifts)
  */
-export default function CachedImage({
+function CachedImage({
   src,
   alt = '',
   title = '',
@@ -268,3 +268,5 @@ export default function CachedImage({
     </div>
   );
 }
+
+export default React.memo(CachedImage);

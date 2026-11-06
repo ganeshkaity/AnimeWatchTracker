@@ -19,7 +19,7 @@ const GENRE_ROW_DEFINITIONS = [
   { id: 'crime-thriller', title: 'Crime & Mystery Thrillers', filterGenre: 'Crime', mediaFilter: 'all' },
 ];
 
-export default function EndlessGenreSections({
+function EndlessGenreSections({
   movies = [],
   animes = [],
   webseriesList = [],
@@ -215,7 +215,7 @@ export default function EndlessGenreSections({
     <div className="space-y-8 pt-4">
       {/* 1. Genre Sections (Ends with Crime & Mystery Thrillers) */}
       {nonEmptyGenreRows.map((row) => (
-        <section key={row.id} className="space-y-3">
+        <section key={row.id} className="space-y-3 dashboard-section-contain">
           {/* Row Header */}
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-extrabold tracking-wide text-white flex items-center gap-2">
@@ -328,7 +328,7 @@ export default function EndlessGenreSections({
         const totalCount = groupRow.items.length;
 
         return (
-          <section key={groupRow.id} className="space-y-3">
+          <section key={groupRow.id} className="space-y-3 dashboard-section-contain">
             {/* Group Header */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -457,3 +457,5 @@ export default function EndlessGenreSections({
     </div>
   );
 }
+
+export default React.memo(EndlessGenreSections);

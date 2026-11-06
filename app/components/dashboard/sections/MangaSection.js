@@ -5,7 +5,7 @@ import MediaCard from '../cards/MediaCard';
 import MediaRowSkeleton from '../skeletons/MediaRowSkeleton';
 import { getDeterministicRating } from '../utils/dashboardHelpers';
 
-export default function MangaSection({
+function MangaSection({
   sortedMangas = [],
   loadingManga = false,
   setShowAddMangaModal,
@@ -26,7 +26,7 @@ export default function MangaSection({
   };
 
   return (
-    <section id="manga" className="space-y-4 scroll-mt-24">
+    <section id="manga" className="space-y-4 scroll-mt-24 dashboard-section-contain">
       <span id="manga-webtoons" className="sr-only" />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
@@ -122,3 +122,5 @@ export default function MangaSection({
     </section>
   );
 }
+
+export default React.memo(MangaSection);

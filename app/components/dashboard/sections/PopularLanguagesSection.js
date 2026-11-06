@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, Globe } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { POPULAR_LANGUAGES } from '../data/popularCategoriesData';
 
-export default function PopularLanguagesSection() {
+function PopularLanguagesSection() {
   const router = useRouter();
   const scrollRef = useRef(null);
 
@@ -18,7 +18,7 @@ export default function PopularLanguagesSection() {
   };
 
   return (
-    <section id="popular-languages" className="space-y-3">
+    <section id="popular-languages" className="space-y-3 dashboard-section-contain">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -103,3 +103,5 @@ export default function PopularLanguagesSection() {
     </section>
   );
 }
+
+export default React.memo(PopularLanguagesSection);

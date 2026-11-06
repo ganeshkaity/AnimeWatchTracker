@@ -1,4 +1,6 @@
-import React from 'react';
+"use client";
+
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -11,17 +13,151 @@ import { getEffectiveRating } from '../../../utils/ratingUtils';
 
 export default function DashboardHero({
   heroSlides = [],
-  currentSlide = 0,
-  setCurrentSlide,
-  slideDirection = 1,
-  setSlideDirection,
-  currentHero,
+  currentSlide: externalSlide,
+  setCurrentSlide: externalSetCurrentSlide,
+  slideDirection: externalDirection,
+  setSlideDirection: externalSetDirection,
+  currentHero: externalCurrentHero,
   animesCount = 0,
   onSelectAnime,
   setShowAddModal,
   isLoading = false,
 }) {
   const router = useRouter();
+  const heroRef = useRef(null);
+
+  // Self-contained slide index & direction so autoplay never causes the parent Dashboard to re-render
+  const [internalSlide, setInternalSlide] = useState(0);
+  const [internalDirection, setInternalDirection] = useState(1);
+
+  const slideIndex = externalSlide !== undefined ? externalSlide : internalSlide;
+  const direction = externalDirection !== undefined ? externalDirection : internalDirection;
+
+  const slidesLength = Array.isArray(heroSlides) ? heroSlides.length : 0;
+  const safeIndex = slidesLength > 0 ? (slideIndex % slidesLength) : 0;
+  const currentHero = heroSlides[safeIndex] || externalCurrentHero;
+
+  // Viewport Intersection & Tab Visibility States for Pausing Autoplay
+  const [isInViewport, setIsInViewport] = useState(true);
+  const [isTabVisible, setIsTabVisible] = useState(true);
+
+  // Pause when scrolled out of view
+  useEffect(() => {
+    const el = heroRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsInViewport(entry.isIntersecting);
+      },
+      { threshold: 0.1 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Pause when browser tab is inactive / minimized
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const handleVisibilityChange = () => {
+      setIsTabVisible(!document.hidden);
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  // Navigation handlers
+  const goToNextSlide = useCallback(() => {
+    if (slidesLength <= 1) return;
+    if (externalSetDirection) externalSetDirection(1);
+    else setInternalDirection(1);
+
+    if (externalSetCurrentSlide) {
+      externalSetCurrentSlide((prev) => (prev + 1) % slidesLength);
+    } else {
+      setInternalSlide((prev) => (prev + 1) % slidesLength);
+    }
+  }, [slidesLength, externalSetDirection, externalSetCurrentSlide]);
+
+  const goToPrevSlide = useCallback(() => {
+    if (slidesLength <= 1) return;
+    if (externalSetDirection) externalSetDirection(-1);
+    else setInternalDirection(-1);
+
+    if (externalSetCurrentSlide) {
+      externalSetCurrentSlide((prev) => (prev === 0 ? slidesLength - 1 : prev - 1));
+    } else {
+      setInternalSlide((prev) => (prev === 0 ? slidesLength - 1 : prev - 1));
+    }
+  }, [slidesLength, externalSetDirection, externalSetCurrentSlide]);
+
+  // Clean, lightweight autoplay timer (Advances every 30 seconds, pauses when hidden/scrolled)
+  useEffect(() => {
+    if (!isInViewport || !isTabVisible || slidesLength <= 1) return;
+
+    const timer = setInterval(() => {
+      goToNextSlide();
+    }, 30000);
+
+    return () => clearInterval(timer);
+  }, [isInViewport, isTabVisible, slidesLength, goToNextSlide]);
+
+  // Smart background prefetching: only lazily warms the SINGLE next slide (never all 20 slides at once)
+  useEffect(() => {
+    if (slidesLength <= 1 || typeof window === 'undefined') return;
+
+    const nextIdx = (safeIndex + 1) % slidesLength;
+    const nextSlide = heroSlides[nextIdx];
+    if (!nextSlide) return;
+
+    const idleTimer = setTimeout(() => {
+      if (nextSlide.logoUrl) {
+        const logoImg = new Image();
+        logoImg.decoding = 'async';
+        logoImg.src = toFanartBigPreview(nextSlide.logoUrl);
+      }
+      const bgUrl = toFanartFull(nextSlide.banner || nextSlide.poster);
+      if (bgUrl) {
+        const bgImg = new Image();
+        bgImg.decoding = 'async';
+        bgImg.src = bgUrl;
+      }
+    }, 1500);
+
+    return () => clearTimeout(idleTimer);
+  }, [safeIndex, slidesLength, heroSlides]);
+
+  // Touch / Swipe Gestures with touch-action: pan-y (vertical page scroll is 100% native and never blocked)
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+  const isSwiping = useRef(false);
+
+  const handleTouchStart = (e) => {
+    if (e.touches && e.touches.length === 1) {
+      touchStartX.current = e.touches[0].clientX;
+      touchStartY.current = e.touches[0].clientY;
+      isSwiping.current = true;
+    }
+  };
+
+  const handleTouchEnd = (e) => {
+    if (!isSwiping.current) return;
+    isSwiping.current = false;
+    if (!e.changedTouches || e.changedTouches.length === 0) return;
+
+    const deltaX = e.changedTouches[0].clientX - touchStartX.current;
+    const deltaY = e.changedTouches[0].clientY - touchStartY.current;
+
+    // Trigger horizontal slide only if gesture is predominantly horizontal (> 50px)
+    if (Math.abs(deltaX) > 50 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+      if (deltaX < 0) {
+        goToNextSlide();
+      } else {
+        goToPrevSlide();
+      }
+    }
+  };
 
   if (isLoading || !currentHero) {
     return <HeroSkeleton />;
@@ -30,47 +166,18 @@ export default function DashboardHero({
   return (
     <>
       <section
+        ref={heroRef}
         id="hero"
-        className="relative w-full overflow-hidden shadow-2xl bg-[#07090f] h-[98vh] min-h-[580px] max-h-[98vh] flex items-end"
-        style={{ aspectRatio: '16 / 9' }}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        className="relative w-full overflow-hidden shadow-2xl bg-[#07090f] h-[98vh] min-h-[580px] max-h-[98vh] flex items-end select-none"
+        style={{ aspectRatio: '16 / 9', touchAction: 'pan-y' }}
       >
-        {/* Hidden Eager Prefetcher for Hero Logos & Banners so they are 0ms ready before slide transitions */}
-        <div className="hidden pointer-events-none opacity-0 select-none -z-50 absolute w-0 h-0 overflow-hidden" aria-hidden="true">
-          {heroSlides.map((slide, idx) => (
-            <React.Fragment key={`hero-preload-${slide.id || idx}`}>
-              {slide.logoUrl && (
-                <img
-                  src={toFanartBigPreview(slide.logoUrl)}
-                  alt=""
-                  loading="eager"
-                  decoding="async"
-                />
-              )}
-              {slide.banner && (
-                <img
-                  src={toFanartFull(slide.banner)}
-                  alt=""
-                  loading="eager"
-                  decoding="async"
-                />
-              )}
-              {slide.poster && (
-                <img
-                  src={toFanartFull(slide.poster)}
-                  alt=""
-                  loading="eager"
-                  decoding="async"
-                />
-              )}
-            </React.Fragment>
-          ))}
-        </div>
-
-        {/* Animated Slide Content - Slides Horizontally without empty gap */}
-        <AnimatePresence custom={slideDirection} mode="popLayout">
+        {/* Animated Slide Content - Slides Horizontally with GPU translate3d */}
+        <AnimatePresence custom={direction} mode="popLayout">
           <motion.div
-            key={currentHero.id}
-            custom={slideDirection}
+            key={currentHero.id || safeIndex}
+            custom={direction}
             initial={(dir) => ({
               opacity: 0,
               x: dir > 0 ? '100%' : '-100%'
@@ -83,13 +190,13 @@ export default function DashboardHero({
               opacity: 0,
               x: dir > 0 ? '-100%' : '100%'
             })}
-            transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
-            className="absolute inset-0 z-10 flex items-end justify-between"
+            transition={{ duration: 0.65, ease: [0.16, 1, 0.3, 1] }}
+            className="absolute inset-0 z-10 flex items-end justify-between will-change-transform"
           >
             {/* Background Image: Crisp vertical cover poster on mobile devices; crisp sharp wide banner on desktop for all media types */}
             {/* Mobile Devices: Show poster cover as background */}
             <div
-              className="md:hidden absolute inset-0 z-0 bg-cover bg-top filter blur-none scale-100 brightness-105 saturate-[1.1] transition-all duration-700"
+              className="md:hidden absolute inset-0 z-0 bg-cover bg-top filter blur-none scale-100 brightness-105 saturate-[1.1]"
               style={{
                 backgroundImage: `url(${toFanartFull(currentHero.poster || currentHero.banner)})`,
                 backgroundPosition: 'center top',
@@ -97,7 +204,7 @@ export default function DashboardHero({
             />
             {/* Desktop Devices: Show crisp wide banner with top alignment on widescreen */}
             <div
-              className="hidden md:block absolute inset-0 z-0 bg-cover bg-top filter blur-none scale-100 brightness-105 saturate-[1.1] transition-all duration-700"
+              className="hidden md:block absolute inset-0 z-0 bg-cover bg-top filter blur-none scale-100 brightness-105 saturate-[1.1]"
               style={{
                 backgroundImage: `url(${toFanartFull(currentHero.banner)})`,
                 backgroundPosition: 'center top',
@@ -134,8 +241,9 @@ export default function DashboardHero({
                     <div className="mb-3 max-w-[280px] sm:max-w-[380px] md:max-w-[480px] max-h-16 sm:max-h-20 md:max-h-28 flex items-center">
                       <img
                         src={toFanartBigPreview(currentHero.logoUrl)}
-                        alt={currentHero.title}
+                        alt={currentHero.title || ''}
                         fetchPriority="high"
+                        loading="eager"
                         decoding="async"
                         className="max-h-16 sm:max-h-20 md:max-h-28 w-auto max-w-full object-contain object-left drop-shadow-[0_4px_24px_rgba(0,0,0,0.95)]"
                       />
@@ -296,32 +404,28 @@ export default function DashboardHero({
         </AnimatePresence>
 
         {/* Slider Navigation Chevron Controls (Liquid Glass Effect, No Dots) */}
-        <div className="absolute right-4 bottom-6 md:right-8 md:bottom-8 lg:right-12 lg:bottom-10 z-30 flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => {
-              setSlideDirection(-1);
-              setCurrentSlide((prev) => (prev === 0 ? heroSlides.length - 1 : prev - 1));
-            }}
-            className="w-10 h-10 md:w-11 md:h-11 rounded-full liquid-glass-chevron text-white flex items-center justify-center cursor-pointer shadow-lg active:scale-95 transition-all"
-            title="Previous Slide"
-            aria-label="Previous Slide"
-          >
-            <ChevronLeft size={20} className="drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]" />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setSlideDirection(1);
-              setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
-            }}
-            className="w-10 h-10 md:w-11 md:h-11 rounded-full liquid-glass-chevron text-white flex items-center justify-center cursor-pointer shadow-lg active:scale-95 transition-all"
-            title="Next Slide"
-            aria-label="Next Slide"
-          >
-            <ChevronRight size={20} className="drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]" />
-          </button>
-        </div>
+        {slidesLength > 1 && (
+          <div className="absolute right-4 bottom-6 md:right-8 md:bottom-8 lg:right-12 lg:bottom-10 z-30 flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={goToPrevSlide}
+              className="w-10 h-10 md:w-11 md:h-11 rounded-full liquid-glass-chevron text-white flex items-center justify-center cursor-pointer shadow-lg active:scale-95 transition-all"
+              title="Previous Slide"
+              aria-label="Previous Slide"
+            >
+              <ChevronLeft size={20} className="drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]" />
+            </button>
+            <button
+              type="button"
+              onClick={goToNextSlide}
+              className="w-10 h-10 md:w-11 md:h-11 rounded-full liquid-glass-chevron text-white flex items-center justify-center cursor-pointer shadow-lg active:scale-95 transition-all"
+              title="Next Slide"
+              aria-label="Next Slide"
+            >
+              <ChevronRight size={20} className="drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]" />
+            </button>
+          </div>
+        )}
       </section>
 
       {/* Outside Bottom Black Vignette / Fade Transition (Outside the banner) */}

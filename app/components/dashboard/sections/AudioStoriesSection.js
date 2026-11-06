@@ -5,7 +5,7 @@ import MediaCard from '../cards/MediaCard';
 import MediaRowSkeleton from '../skeletons/MediaRowSkeleton';
 import { getDeterministicRating } from '../utils/dashboardHelpers';
 
-export default function AudioStoriesSection({
+function AudioStoriesSection({
   sortedAudioStories = [],
   loadingAudioStories = false,
   setShowAddAudioStoryModal,
@@ -26,7 +26,7 @@ export default function AudioStoriesSection({
   };
 
   return (
-    <section id="audios" className="space-y-4 scroll-mt-24">
+    <section id="audios" className="space-y-4 scroll-mt-24 dashboard-section-contain">
       <span id="audio-stories" className="sr-only" />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
@@ -122,3 +122,5 @@ export default function AudioStoriesSection({
     </section>
   );
 }
+
+export default React.memo(AudioStoriesSection);

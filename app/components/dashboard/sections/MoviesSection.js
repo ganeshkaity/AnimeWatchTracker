@@ -4,7 +4,7 @@ import { Film, ChevronRight, ChevronLeft, Plus } from 'lucide-react';
 import MediaCard from '../cards/MediaCard';
 import MediaRowSkeleton from '../skeletons/MediaRowSkeleton';
 
-export default function MoviesSection({
+function MoviesSection({
   sortedMovies = [],
   moviesCount = 0,
   loadingMovies = false,
@@ -26,7 +26,7 @@ export default function MoviesSection({
   };
 
   return (
-    <section id="movies" className="space-y-4 scroll-mt-24">
+    <section id="movies" className="space-y-4 scroll-mt-24 dashboard-section-contain">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div>
@@ -151,3 +151,5 @@ export default function MoviesSection({
     </section>
   );
 }
+
+export default React.memo(MoviesSection);

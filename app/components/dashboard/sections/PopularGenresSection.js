@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, Compass } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { POPULAR_GENRES } from '../data/popularCategoriesData';
 
-export default function PopularGenresSection() {
+function PopularGenresSection() {
   const router = useRouter();
   const scrollRef = useRef(null);
 
@@ -18,7 +18,7 @@ export default function PopularGenresSection() {
   };
 
   return (
-    <section id="popular-genres" className="space-y-3">
+    <section id="popular-genres" className="space-y-3 dashboard-section-contain">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -108,3 +108,5 @@ export default function PopularGenresSection() {
     </section>
   );
 }
+
+export default React.memo(PopularGenresSection);

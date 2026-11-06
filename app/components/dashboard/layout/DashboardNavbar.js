@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, memo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -11,7 +11,7 @@ import CachedImage from '../../../utils/imageCache';
 import { toFanartBigPreview, toFanartPreview, toSearchThumbnail } from '../../../lib/fanartUtils';
 import { getInitials } from '../utils/dashboardHelpers';
 
-export default function DashboardNavbar({
+function DashboardNavbar({
   isScrolled,
   search,
   setSearch,
@@ -1155,3 +1155,5 @@ export default function DashboardNavbar({
     </header>
   );
 }
+
+export default memo(DashboardNavbar);

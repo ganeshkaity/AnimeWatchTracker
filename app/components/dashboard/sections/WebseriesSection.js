@@ -4,7 +4,7 @@ import { Tv, ChevronRight, ChevronLeft, Plus } from 'lucide-react';
 import MediaCard from '../cards/MediaCard';
 import MediaRowSkeleton from '../skeletons/MediaRowSkeleton';
 
-export default function WebseriesSection({
+function WebseriesSection({
   sortedWebseries = [],
   webseriesCount = 0,
   loadingWebseries = false,
@@ -26,7 +26,7 @@ export default function WebseriesSection({
   };
 
   return (
-    <section id="webseries" className="space-y-4 scroll-mt-24">
+    <section id="webseries" className="space-y-4 scroll-mt-24 dashboard-section-contain">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div>
@@ -150,3 +150,5 @@ export default function WebseriesSection({
     </section>
   );
 }
+
+export default React.memo(WebseriesSection);

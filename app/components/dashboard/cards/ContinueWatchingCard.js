@@ -1,10 +1,12 @@
-import React from 'react';
+"use client";
+
+import React, { memo } from 'react';
 import { Star, Check, Play, Film, Tv, BookOpen, Headphones, MoreVertical } from 'lucide-react';
 import CachedImage from '../../../utils/imageCache';
 import { toFanartBigPreview } from '../../../lib/fanartUtils';
 import { getEffectiveRating } from '../../../utils/ratingUtils';
 
-export default function ContinueWatchingCard({
+function ContinueWatchingCard({
   item,
   mediaType = 'anime',
   backdropImg,
@@ -39,7 +41,8 @@ export default function ContinueWatchingCard({
       onClick={onClick}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className="group relative flex-none w-44 sm:w-52 md:w-60 lg:w-64 aspect-[16/9] rounded-lg overflow-hidden bg-[#0d121f] border border-white/10 hover:border-amber-400/50 hover:shadow-2xl hover:shadow-black/90 hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col select-none"
+      className="group relative flex-none w-44 sm:w-52 md:w-60 lg:w-64 aspect-[16/9] rounded-lg overflow-hidden bg-[#0d121f] border border-white/10 hover:border-amber-400/50 hover:shadow-2xl hover:shadow-black/90 hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col select-none will-change-transform"
+      style={{ transform: 'translateZ(0)' }}
     >
       <div className="relative w-full h-full overflow-hidden bg-black/60">
         {backdropImg ? (
@@ -62,13 +65,13 @@ export default function ContinueWatchingCard({
 
         {/* Liquid Glass Rating Badge (Top-Left) */}
         {displayRating && (
-          <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-xl border border-white/20 text-[10px] font-black text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.8)] backdrop-saturate-150 pointer-events-none">
+          <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-full bg-black/80 sm:bg-black/60 sm:backdrop-blur-xl border border-white/20 text-[10px] font-black text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.8)] sm:backdrop-saturate-150 pointer-events-none">
             <Star size={10} className="fill-amber-400 text-amber-400 shrink-0" />
             <span className="leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">{displayRating}</span>
           </div>
         )}
 
-        {/* 3-Dot Options Button with Glassmorphism Effect (Mobile devices only) */}
+        {/* 3-Dot Options Button (Mobile devices only) */}
         {onMobileMenuToggle && (
           <div className="absolute top-2 right-2 z-20 md:hidden">
             <button
@@ -77,7 +80,7 @@ export default function ContinueWatchingCard({
                 e.stopPropagation();
                 onMobileMenuToggle(e);
               }}
-              className="p-1.5 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-xl border border-white/30 text-white shadow-[0_4px_16px_rgba(0,0,0,0.5)] backdrop-saturate-150 transition-all duration-200 active:scale-90 hover:scale-110 cursor-pointer"
+              className="p-1.5 rounded-full bg-black/80 hover:bg-black border border-white/30 text-white shadow-[0_4px_16px_rgba(0,0,0,0.5)] transition-all duration-200 active:scale-90 hover:scale-110 cursor-pointer"
               title="Media Options"
             >
               <MoreVertical size={13} />
@@ -87,12 +90,12 @@ export default function ContinueWatchingCard({
 
         {/* Hover Center Play Button Action */}
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-          <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center text-white shadow-2xl group-hover:scale-110 transition-transform">
+          <div className="w-10 h-10 rounded-full bg-black/70 sm:backdrop-blur-md border border-white/20 flex items-center justify-center text-white shadow-2xl group-hover:scale-110 transition-transform">
             <Play size={18} className="fill-white translate-x-0.5" />
           </div>
         </div>
 
-        {/* Logo or Title in bottom-left (Game of Thrones style from Image 3) */}
+        {/* Logo or Title in bottom-left */}
         <div className="absolute bottom-2.5 left-2.5 z-10 max-w-[75%] pointer-events-none">
           {logoUrl ? (
             <img
@@ -100,30 +103,28 @@ export default function ContinueWatchingCard({
               alt={title}
               loading="lazy"
               decoding="async"
-              className="max-h-7 sm:max-h-8 md:max-h-9 w-auto max-w-full object-contain object-left drop-shadow-[0_2px_14px_rgba(0,0,0,0.95)]"
+              className="max-h-7 sm:max-h-9 w-auto max-w-full object-contain object-left drop-shadow-[0_2px_10px_rgba(0,0,0,0.95)]"
             />
           ) : (
-            <div className="space-y-0.5">
-              <h3 className="text-xs sm:text-sm font-black text-white tracking-tight drop-shadow-[0_2px_10px_rgba(0,0,0,0.95)] line-clamp-1 group-hover:text-amber-300 transition-colors">
-                {title}
-              </h3>
-              {subText && (
-                <span className="text-[9px] sm:text-[10px] font-bold text-gray-300 drop-shadow line-clamp-1 block">
-                  {subText}
-                </span>
-              )}
-            </div>
+            <span className="text-xs sm:text-sm font-black text-white line-clamp-1 drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]">
+              {title}
+            </span>
+          )}
+          {subText && (
+            <span className="text-[10px] text-amber-300/90 font-medium block mt-0.5 line-clamp-1 drop-shadow">
+              {subText}
+            </span>
           )}
         </div>
 
-        {/* Green Small Tick in Bottom-Left Side if watched (Request 2) */}
+        {/* Green Small Tick in Bottom-Right Side if watched */}
         {isCompleted && (
-          <div className="absolute bottom-2 left-2 z-20 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center shadow-md shadow-emerald-950/50 pointer-events-none">
+          <div className="absolute bottom-2.5 right-2.5 z-20 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center shadow-md shadow-emerald-950/50 pointer-events-none">
             <Check size={10} strokeWidth={3} className="text-black" />
           </div>
         )}
 
-        {/* Watch Track Bar at Bottom (Original gradient color, 100% width if completed) */}
+        {/* Progress Track Bar */}
         {(isCompleted || pct > 0) && (
           <div className="absolute bottom-0 inset-x-0 h-1 sm:h-1.5 bg-black/60 z-20 overflow-hidden">
             <div
@@ -136,3 +137,5 @@ export default function ContinueWatchingCard({
     </div>
   );
 }
+
+export default memo(ContinueWatchingCard);

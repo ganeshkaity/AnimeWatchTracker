@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { collection, query, onSnapshot, writeBatch, doc, deleteDoc, updateDoc, setDoc, getDocs, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
@@ -31,16 +32,16 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import AnimeCoverSearch from '../components/AnimeCoverSearch';
-import MangaCoverSearch from '../components/MangaCoverSearch';
-import AddMovieModal from '../components/AddMovieModal';
-import EditMovieModal from '../components/EditMovieModal';
-import AddWebseriesModal from '../components/AddWebseriesModal';
-import EditWebseriesModal from '../components/EditWebseriesModal';
-import AddWatchlistModal from '../components/AddWatchlistModal';
-import EditWatchlistModal from '../components/EditWatchlistModal';
-import TransferWatchlistModal from '../components/TransferWatchlistModal';
-import MediaPreviewModal from '../components/MediaPreviewModal';
+const AnimeCoverSearch = dynamic(() => import('../components/AnimeCoverSearch'), { ssr: false });
+const MangaCoverSearch = dynamic(() => import('../components/MangaCoverSearch'), { ssr: false });
+const AddMovieModal = dynamic(() => import('../components/AddMovieModal'), { ssr: false });
+const EditMovieModal = dynamic(() => import('../components/EditMovieModal'), { ssr: false });
+const AddWebseriesModal = dynamic(() => import('../components/AddWebseriesModal'), { ssr: false });
+const EditWebseriesModal = dynamic(() => import('../components/EditWebseriesModal'), { ssr: false });
+const AddWatchlistModal = dynamic(() => import('../components/AddWatchlistModal'), { ssr: false });
+const EditWatchlistModal = dynamic(() => import('../components/EditWatchlistModal'), { ssr: false });
+const TransferWatchlistModal = dynamic(() => import('../components/TransferWatchlistModal'), { ssr: false });
+const MediaPreviewModal = dynamic(() => import('../components/MediaPreviewModal'), { ssr: false });
 import CachedImage from '../utils/imageCache';
 import { toFanartPreview, toFanartBigPreview, toFanartFull } from '../lib/fanartUtils';
 import { getEffectiveRating } from '../utils/ratingUtils';
@@ -83,18 +84,18 @@ import PopularLanguagesSection from '../components/dashboard/sections/PopularLan
 import PopularGenresSection from '../components/dashboard/sections/PopularGenresSection';
 import EndlessGenreSections from '../components/dashboard/sections/EndlessGenreSections';
 
-// Extracted Modal Components
-import AddAnimeModal from '../components/dashboard/modals/AddAnimeModal';
-import EditAnimeModal from '../components/dashboard/modals/EditAnimeModal';
-import AddMangaModal from '../components/dashboard/modals/AddMangaModal';
-import AddAudioStoryModal from '../components/dashboard/modals/AddAudioStoryModal';
-import SettingsModal from '../components/dashboard/modals/SettingsModal';
-import CustomAlertModal from '../components/dashboard/modals/CustomAlertModal';
-import MediaCompleteConfirmModal from '../components/dashboard/modals/MediaCompleteConfirmModal';
-import MobileMediaActionSheet from '../components/dashboard/modals/MobileMediaActionSheet';
-import HiddenVaultView from '../components/vault/HiddenVaultView';
-import AchievementsModal from '../components/AchievementsModal';
-import HelpShortcutsModal from '../components/HelpShortcutsModal';
+// Lazy-loaded Modal Components for Faster Initial Load & Lighter Memory Footprint
+const AddAnimeModal = dynamic(() => import('../components/dashboard/modals/AddAnimeModal'), { ssr: false });
+const EditAnimeModal = dynamic(() => import('../components/dashboard/modals/EditAnimeModal'), { ssr: false });
+const AddMangaModal = dynamic(() => import('../components/dashboard/modals/AddMangaModal'), { ssr: false });
+const AddAudioStoryModal = dynamic(() => import('../components/dashboard/modals/AddAudioStoryModal'), { ssr: false });
+const SettingsModal = dynamic(() => import('../components/dashboard/modals/SettingsModal'), { ssr: false });
+const CustomAlertModal = dynamic(() => import('../components/dashboard/modals/CustomAlertModal'), { ssr: false });
+const MediaCompleteConfirmModal = dynamic(() => import('../components/dashboard/modals/MediaCompleteConfirmModal'), { ssr: false });
+const MobileMediaActionSheet = dynamic(() => import('../components/dashboard/modals/MobileMediaActionSheet'), { ssr: false });
+const HiddenVaultView = dynamic(() => import('../components/vault/HiddenVaultView'), { ssr: false });
+const AchievementsModal = dynamic(() => import('../components/AchievementsModal'), { ssr: false });
+const HelpShortcutsModal = dynamic(() => import('../components/HelpShortcutsModal'), { ssr: false });
 
 export default function Dashboard({ onSelectAnime }) {
   const router = useRouter();
@@ -182,18 +183,21 @@ export default function Dashboard({ onSelectAnime }) {
   const [filterBy, setFilterBy] = useState('all'); // all, active, completed
   const [selectedGenre, setSelectedGenre] = useState('All');
   const [isScrolled, setIsScrolled] = useState(false);
+  const heroSentinelRef = useRef(null);
 
+  // Passive IntersectionObserver for Glassy Navbar (Zero scroll events, zero forced layout recalculations)
   useEffect(() => {
-    const handleWindowScroll = () => {
-      // Trigger glassy effect after scrolling 50% of the hero banner section
-      const heroElement = document.getElementById('hero');
-      const bannerHeight = heroElement ? heroElement.offsetHeight : window.innerHeight;
-      const threshold = bannerHeight * 0.2;
-      setIsScrolled(window.scrollY > threshold);
-    };
-    window.addEventListener('scroll', handleWindowScroll, { passive: true });
-    handleWindowScroll();
-    return () => window.removeEventListener('scroll', handleWindowScroll);
+    const sentinel = heroSentinelRef.current;
+    if (!sentinel || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsScrolled(!entry.isIntersecting);
+      },
+      { threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
   }, []);
 
   // Manga Modal & Form States
@@ -294,27 +298,32 @@ export default function Dashboard({ onSelectAnime }) {
   const [activeMobileMenu, setActiveMobileMenu] = useState(null); // { type, id, item }
   const hoverTimeoutRef = useRef(null);
   const closeTimeoutRef = useRef(null);
+  const activePreviewRef = useRef(activePreview);
 
-  const handleCardMouseEnter = (item, type, e) => {
+  useEffect(() => {
+    activePreviewRef.current = activePreview;
+  }, [activePreview]);
+
+  const handleCardMouseEnter = useCallback((item, type, e) => {
     if (typeof window !== 'undefined' && window.innerWidth < 768) return;
     if (closeTimeoutRef.current) {
       clearTimeout(closeTimeoutRef.current);
       closeTimeoutRef.current = null;
     }
-    if (activePreview?.item?.id === item.id) return;
+    if (activePreviewRef.current?.item?.id === item.id) return;
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
       hoverTimeoutRef.current = null;
     }
     const rect = e.currentTarget.getBoundingClientRect();
     // Fast switch (80ms) if already previewing another card, else 500ms initial hover
-    const delay = activePreview ? 80 : 500;
+    const delay = activePreviewRef.current ? 80 : 500;
     hoverTimeoutRef.current = setTimeout(() => {
       setActivePreview({ item, type, rect });
     }, delay);
-  };
+  }, []);
 
-  const handleCardMouseLeave = () => {
+  const handleCardMouseLeave = useCallback(() => {
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
       hoverTimeoutRef.current = null;
@@ -322,7 +331,7 @@ export default function Dashboard({ onSelectAnime }) {
     closeTimeoutRef.current = setTimeout(() => {
       setActivePreview(null);
     }, 140);
-  };
+  }, []);
 
   const handleModalMouseEnter = () => {
     if (closeTimeoutRef.current) {
@@ -686,20 +695,24 @@ export default function Dashboard({ onSelectAnime }) {
   // Get dynamic lists from database animes, mangas, audio stories, movies and web series
   const heroSlides = useMemo(() => getHeroSlides(animes, mangas, audioStories, movies, webseriesList), [animes, mangas, audioStories, movies, webseriesList]);
 
-  const legacyLocalTopRated = [...animes]
-    .sort((a, b) => parseFloat(b.rating || 0) - parseFloat(a.rating || 0))
-    .slice(0, 5)
-    .map(anime => ({
-      id: anime.id,
-      title: anime.title || 'Untitled Anime',
-      rating: getDeterministicRating(anime.id, anime.rating),
-      episode: anime.lastWatchedEpisode ? `Ep ${anime.lastWatchedEpisode}` : 'EP 0',
-      image: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop',
-    }));
+  const legacyLocalTopRated = useMemo(() => {
+    return [...animes]
+      .sort((a, b) => parseFloat(b.rating || 0) - parseFloat(a.rating || 0))
+      .slice(0, 5)
+      .map(anime => ({
+        id: anime.id,
+        title: anime.title || 'Untitled Anime',
+        rating: getDeterministicRating(anime.id, anime.rating),
+        episode: anime.lastWatchedEpisode ? `Ep ${anime.lastWatchedEpisode}` : 'EP 0',
+        image: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop',
+      }));
+  }, [animes]);
 
-  const autocompleteMatches = search.trim().length > 0
-    ? animes.filter(anime => (anime.title || '').toLowerCase().includes(search.toLowerCase()))
-    : [];
+  const autocompleteMatches = useMemo(() => {
+    if (!search || !search.trim()) return [];
+    const q = search.trim().toLowerCase();
+    return animes.filter(anime => (anime.title || '').toLowerCase().includes(q));
+  }, [animes, search]);
 
   const autocompleteMangaMatches = useMemo(() => {
     if (!search || !search.trim()) return [];
@@ -743,74 +756,7 @@ export default function Dashboard({ onSelectAnime }) {
     );
   }, [watchlist, search]);
 
-  // Auto Hero Slider Timer (Advances every 30 seconds)
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setSlideDirection(1);
-      setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
-    }, 30000);
-    return () => clearInterval(timer);
-  }, [heroSlides.length]);
 
-  // Aggressively prefetch and preload all hero slides' logo art and banners ahead of time
-  useEffect(() => {
-    if (typeof document === 'undefined' || !Array.isArray(heroSlides) || heroSlides.length === 0) return;
-
-    const createdPreloadLinks = [];
-
-    heroSlides.forEach((slide) => {
-      // 1. Preload logos with browser <link rel="preload"> and async Image() decode
-      if (slide.logoUrl) {
-        const logoUrl = toFanartBigPreview(slide.logoUrl);
-        try {
-          if (!document.querySelector(`link[rel="preload"][href="${CSS.escape ? CSS.escape(logoUrl) : logoUrl}"]`)) {
-            const link = document.createElement('link');
-            link.rel = 'preload';
-            link.as = 'image';
-            link.href = logoUrl;
-            document.head.appendChild(link);
-            createdPreloadLinks.push(link);
-          }
-        } catch (e) {}
-
-        const img = new Image();
-        img.decoding = 'async';
-        img.src = logoUrl;
-      }
-
-      // 2. Preload full wide backdrops and posters into HTTP disk & memory cache
-      if (slide.banner) {
-        const bImg = new Image();
-        bImg.decoding = 'async';
-        bImg.src = toFanartFull(slide.banner);
-      }
-      if (slide.poster) {
-        const pImg = new Image();
-        pImg.decoding = 'async';
-        pImg.src = toFanartFull(slide.poster);
-      }
-    });
-
-    return () => {
-      createdPreloadLinks.forEach((link) => {
-        try {
-          if (link.parentNode) link.parentNode.removeChild(link);
-        } catch (e) {}
-      });
-    };
-  }, [heroSlides]);
-
-  // Immediately warm upcoming next slide's logo whenever slide changes
-  useEffect(() => {
-    if (!Array.isArray(heroSlides) || heroSlides.length === 0) return;
-    const nextIdx = (currentSlide + 1) % heroSlides.length;
-    const nextSlide = heroSlides[nextIdx];
-    if (nextSlide?.logoUrl) {
-      const img = new Image();
-      img.decoding = 'async';
-      img.src = toFanartBigPreview(nextSlide.logoUrl);
-    }
-  }, [currentSlide, heroSlides]);
 
   // Sync state with currentUser when it updates
   useEffect(() => {
@@ -3287,30 +3233,32 @@ export default function Dashboard({ onSelectAnime }) {
   };
 
   // Process sorting & filtering (search does not filter the page sections; search only shows in navbar dropdown)
-  const filteredAnimes = animes
-    .filter(anime => {
-      if (selectedGenre !== 'All') {
-        let genres = [];
-        if (Array.isArray(anime?.genres)) {
-          genres = anime.genres;
-        } else if (typeof anime?.genres === 'string' && anime.genres.trim()) {
-          genres = anime.genres.split(',').map(g => g.trim());
-        } else {
-          genres = [];
+  const filteredAnimes = useMemo(() => {
+    return animes
+      .filter(anime => {
+        if (selectedGenre !== 'All') {
+          let genres = [];
+          if (Array.isArray(anime?.genres)) {
+            genres = anime.genres;
+          } else if (typeof anime?.genres === 'string' && anime.genres.trim()) {
+            genres = anime.genres.split(',').map(g => g.trim());
+          } else {
+            genres = [];
+          }
+          if (!genres.includes(selectedGenre)) return false;
         }
-        if (!genres.includes(selectedGenre)) return false;
-      }
 
-      const pct = getAnimeProgressPercent(anime);
-      if (filterBy === 'active') return pct > 0 && pct < 100;
-      if (filterBy === 'completed') return pct === 100;
-      return true;
-    })
-    .sort((a, b) => {
-      if (sortBy === 'alpha') return (a?.title || '').localeCompare(b?.title || '');
-      if (sortBy === 'progress') return getAnimeProgressPercent(b) - getAnimeProgressPercent(a);
-      return new Date(b.lastOpenedAt || 0) - new Date(a.lastOpenedAt || 0);
-    });
+        const pct = getAnimeProgressPercent(anime);
+        if (filterBy === 'active') return pct > 0 && pct < 100;
+        if (filterBy === 'completed') return pct === 100;
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'alpha') return (a?.title || '').localeCompare(b?.title || '');
+        if (sortBy === 'progress') return getAnimeProgressPercent(b) - getAnimeProgressPercent(a);
+        return new Date(b.lastOpenedAt || 0) - new Date(a.lastOpenedAt || 0);
+      });
+  }, [animes, selectedGenre, filterBy, sortBy]);
 
   // Tracked anime prioritized by recently watched first, then latest added (Max 10 for horizontal slider)
   const sortedTrackedAnimes = useMemo(() => {
@@ -3707,14 +3655,12 @@ export default function Dashboard({ onSelectAnime }) {
         isSyncing={isSyncing}
       />
 
+      {/* Passive Sentinel for Glassy Navbar (Zero forced reflows) */}
+      <div ref={heroSentinelRef} className="absolute top-28 left-0 w-full h-1 pointer-events-none opacity-0" aria-hidden="true" />
+
       {/* 3. HERO SPOTLIGHT BANNER */}
       <DashboardHero
         heroSlides={heroSlides}
-        currentSlide={currentSlide}
-        setCurrentSlide={setCurrentSlide}
-        slideDirection={slideDirection}
-        setSlideDirection={setSlideDirection}
-        currentHero={currentHero}
         animesCount={animes.length}
         onSelectAnime={onSelectAnime}
         setShowAddModal={setShowAddModal}
@@ -3862,448 +3808,462 @@ export default function Dashboard({ onSelectAnime }) {
       />
 
       {/* Desktop Card Hover Preview Modal */}
-      <MediaPreviewModal
-        isOpen={Boolean(activePreview)}
-        item={activePreview?.item}
-        type={activePreview?.type}
-        cardRect={activePreview?.rect}
-        onClose={() => setActivePreview(null)}
-        onMouseEnter={handleModalMouseEnter}
-        onMouseLeave={handleModalMouseLeave}
-        onOpenDetails={(item) => {
-          setActivePreview(null);
-          if (activePreview?.type === 'movie') {
-            router.push(`/movies/${item.id}`);
-          } else if (activePreview?.type === 'webseries') {
-            router.push(`/webseries/${item.id}`);
-          } else if (activePreview?.type === 'anime') {
-            onSelectAnime(item.id);
-          } else if (activePreview?.type === 'manga') {
-            router.push(`/manga/${item.id}`);
-          } else if (activePreview?.type === 'audioStory') {
-            router.push(`/audio-story/${item.id}`);
-          } else {
-            router.push(`/watchlist/${item.id}`);
-          }
-        }}
-        onAskComplete={(item) => {
-          if (activePreview?.type === 'movie') {
-            setMovieCompleteConfirm(item);
-          } else if (activePreview?.type === 'webseries') {
-            setWebseriesCompleteConfirm(item);
-          } else if (activePreview?.type === 'anime') {
-            handleToggleAnimeComplete(item);
-          } else if (activePreview?.type === 'manga') {
-            setMangaCompleteConfirm(item);
-          } else if (activePreview?.type === 'audioStory') {
-            setAudioStoryCompleteConfirm(item);
-          } else {
-            setWatchlistCompleteConfirm(item);
-          }
-        }}
-        onEdit={(item) => {
-          setActivePreview(null);
-          if (activePreview?.type === 'movie') {
-            setMovieEditing(item);
-          } else if (activePreview?.type === 'webseries') {
-            setWebseriesEditing(item);
-          } else if (activePreview?.type === 'anime') {
-            handleOpenEditModal(item);
-          } else {
-            setEditingWatchlistItem(item);
-          }
-        }}
-        onDelete={(item) => {
-          setActivePreview(null);
-          if (activePreview?.type === 'movie') {
-            handleDeleteMovie(item);
-          } else if (activePreview?.type === 'webseries') {
-            handleDeleteWebseries(item);
-          } else if (activePreview?.type === 'anime') {
-            handleDeleteAnime(item);
-          } else if (activePreview?.type === 'manga') {
-            handleDeleteManga(item);
-          } else if (activePreview?.type === 'audioStory') {
-            handleDeleteAudioStory(item);
-          } else {
-            handleDeleteWatchlist(item);
-          }
-        }}
-        onTransfer={(item) => {
-          setActivePreview(null);
-          setTransferringWatchlistItem(item);
-        }}
-      />
+      {Boolean(activePreview) && (
+        <MediaPreviewModal
+          isOpen={Boolean(activePreview)}
+          item={activePreview?.item}
+          type={activePreview?.type}
+          cardRect={activePreview?.rect}
+          onClose={() => setActivePreview(null)}
+          onMouseEnter={handleModalMouseEnter}
+          onMouseLeave={handleModalMouseLeave}
+          onOpenDetails={(item) => {
+            setActivePreview(null);
+            if (activePreview?.type === 'movie') {
+              router.push(`/movies/${item.id}`);
+            } else if (activePreview?.type === 'webseries') {
+              router.push(`/webseries/${item.id}`);
+            } else if (activePreview?.type === 'anime') {
+              onSelectAnime(item.id);
+            } else if (activePreview?.type === 'manga') {
+              router.push(`/manga/${item.id}`);
+            } else if (activePreview?.type === 'audioStory') {
+              router.push(`/audio-story/${item.id}`);
+            } else {
+              router.push(`/watchlist/${item.id}`);
+            }
+          }}
+          onAskComplete={(item) => {
+            if (activePreview?.type === 'movie') {
+              setMovieCompleteConfirm(item);
+            } else if (activePreview?.type === 'webseries') {
+              setWebseriesCompleteConfirm(item);
+            } else if (activePreview?.type === 'anime') {
+              handleToggleAnimeComplete(item);
+            } else if (activePreview?.type === 'manga') {
+              setMangaCompleteConfirm(item);
+            } else if (activePreview?.type === 'audioStory') {
+              setAudioStoryCompleteConfirm(item);
+            } else {
+              setWatchlistCompleteConfirm(item);
+            }
+          }}
+          onEdit={(item) => {
+            setActivePreview(null);
+            if (activePreview?.type === 'movie') {
+              setMovieEditing(item);
+            } else if (activePreview?.type === 'webseries') {
+              setWebseriesEditing(item);
+            } else if (activePreview?.type === 'anime') {
+              handleOpenEditModal(item);
+            } else {
+              setEditingWatchlistItem(item);
+            }
+          }}
+          onDelete={(item) => {
+            setActivePreview(null);
+            if (activePreview?.type === 'movie') {
+              handleDeleteMovie(item);
+            } else if (activePreview?.type === 'webseries') {
+              handleDeleteWebseries(item);
+            } else if (activePreview?.type === 'anime') {
+              handleDeleteAnime(item);
+            } else if (activePreview?.type === 'manga') {
+              handleDeleteManga(item);
+            } else if (activePreview?.type === 'audioStory') {
+              handleDeleteAudioStory(item);
+            } else {
+              handleDeleteWatchlist(item);
+            }
+          }}
+          onTransfer={(item) => {
+            setActivePreview(null);
+            setTransferringWatchlistItem(item);
+          }}
+        />
+      )}
 
       {/* Add Anime Modal */}
-      <AddAnimeModal
-        showAddModal={showAddModal}
-        setShowAddModal={setShowAddModal}
-        addModalTab={addModalTab}
-        setAddModalTab={setAddModalTab}
-        handleAddAnime={handleAddAnime}
-        animeSearchQuery={animeSearchQuery}
-        setAnimeSearchQuery={setAnimeSearchQuery}
-        handleSearchAnimeOnline={handleSearchAnimeOnline}
-        animeSearching={animeSearching}
-        animeFetchingDetails={animeFetchingDetails}
-        animeSearchError={animeSearchError}
-        selectedAnimeOnline={selectedAnimeOnline}
-        setSelectedAnimeOnline={setSelectedAnimeOnline}
-        animeSearchResults={animeSearchResults}
-        handleSelectAnimeOnline={handleSelectAnimeOnline}
-        folderPath={folderPath}
-        setFolderPath={setFolderPath}
-        handleBrowseFolder={handleBrowseFolder}
-        handleScan={handleScan}
-        scanResult={scanResult}
-        parsedEpsCount={parsedEpsCount}
-        namingPattern={namingPattern}
-        setNamingPattern={setNamingPattern}
-        animeTitle={animeTitle}
-        setAnimeTitle={setAnimeTitle}
-        animeRomajiTitle={animeRomajiTitle}
-        setAnimeRomajiTitle={setAnimeRomajiTitle}
-        addTotalSeasons={addTotalSeasons}
-        setAddTotalSeasons={setAddTotalSeasons}
-        addTotalEpisodes={addTotalEpisodes}
-        setAddTotalEpisodes={setAddTotalEpisodes}
-        animeYear={animeYear}
-        setAnimeYear={setAnimeYear}
-        animeOverview={animeOverview}
-        setAnimeOverview={setAnimeOverview}
-        showOnlineSearchAdd={showOnlineSearchAdd}
-        setShowOnlineSearchAdd={setShowOnlineSearchAdd}
-        handleAnimeCoverUpload={handleAnimeCoverUpload}
-        coverUrl={coverUrl}
-        setCoverUrl={setCoverUrl}
-        animeImages={animeImages}
-        handleAnimeBannerUpload={handleAnimeBannerUpload}
-        animeBannerUrl={animeBannerUrl}
-        setAnimeBannerUrl={setAnimeBannerUrl}
-        enableAnimeLogo={enableAnimeLogo}
-        setEnableAnimeLogo={setEnableAnimeLogo}
-        handleAnimeLogoUpload={handleAnimeLogoUpload}
-        animeLogoUrl={animeLogoUrl}
-        setAnimeLogoUrl={setAnimeLogoUrl}
-        addGenres={addGenres}
-        setAddGenres={setAddGenres}
-        setAlertMessage={setAlertMessage}
-        scanning={scanning}
-        ytPlaylistUrl={ytPlaylistUrl}
-        setYtPlaylistUrl={setYtPlaylistUrl}
-        handleFetchYouTubePlaylist={handleFetchYouTubePlaylist}
-        ytFetching={ytFetching}
-        ytError={ytError}
-        ytPlaylistData={ytPlaylistData}
-        ytQualitiesFetching={ytQualitiesFetching}
-        ytSelectedQuality={ytSelectedQuality}
-        setYtSelectedQuality={setYtSelectedQuality}
-        ytAvailableQualities={ytAvailableQualities}
-        fetchYouTubeQualities={fetchYouTubeQualities}
-        ytSelectedVideoIds={ytSelectedVideoIds}
-        toggleSelectAllYt={toggleSelectAllYt}
-        toggleVideoSelection={toggleVideoSelection}
-        handleImportYouTubePlaylist={handleImportYouTubePlaylist}
-      />
+      {showAddModal && (
+        <AddAnimeModal
+          showAddModal={showAddModal}
+          setShowAddModal={setShowAddModal}
+          addModalTab={addModalTab}
+          setAddModalTab={setAddModalTab}
+          handleAddAnime={handleAddAnime}
+          animeSearchQuery={animeSearchQuery}
+          setAnimeSearchQuery={setAnimeSearchQuery}
+          handleSearchAnimeOnline={handleSearchAnimeOnline}
+          animeSearching={animeSearching}
+          animeFetchingDetails={animeFetchingDetails}
+          animeSearchError={animeSearchError}
+          selectedAnimeOnline={selectedAnimeOnline}
+          setSelectedAnimeOnline={setSelectedAnimeOnline}
+          animeSearchResults={animeSearchResults}
+          handleSelectAnimeOnline={handleSelectAnimeOnline}
+          folderPath={folderPath}
+          setFolderPath={setFolderPath}
+          handleBrowseFolder={handleBrowseFolder}
+          handleScan={handleScan}
+          scanResult={scanResult}
+          parsedEpsCount={parsedEpsCount}
+          namingPattern={namingPattern}
+          setNamingPattern={setNamingPattern}
+          animeTitle={animeTitle}
+          setAnimeTitle={setAnimeTitle}
+          animeRomajiTitle={animeRomajiTitle}
+          setAnimeRomajiTitle={setAnimeRomajiTitle}
+          addTotalSeasons={addTotalSeasons}
+          setAddTotalSeasons={setAddTotalSeasons}
+          addTotalEpisodes={addTotalEpisodes}
+          setAddTotalEpisodes={setAddTotalEpisodes}
+          animeYear={animeYear}
+          setAnimeYear={setAnimeYear}
+          animeOverview={animeOverview}
+          setAnimeOverview={setAnimeOverview}
+          showOnlineSearchAdd={showOnlineSearchAdd}
+          setShowOnlineSearchAdd={setShowOnlineSearchAdd}
+          handleAnimeCoverUpload={handleAnimeCoverUpload}
+          coverUrl={coverUrl}
+          setCoverUrl={setCoverUrl}
+          animeImages={animeImages}
+          handleAnimeBannerUpload={handleAnimeBannerUpload}
+          animeBannerUrl={animeBannerUrl}
+          setAnimeBannerUrl={setAnimeBannerUrl}
+          enableAnimeLogo={enableAnimeLogo}
+          setEnableAnimeLogo={setEnableAnimeLogo}
+          handleAnimeLogoUpload={handleAnimeLogoUpload}
+          animeLogoUrl={animeLogoUrl}
+          setAnimeLogoUrl={setAnimeLogoUrl}
+          addGenres={addGenres}
+          setAddGenres={setAddGenres}
+          setAlertMessage={setAlertMessage}
+          scanning={scanning}
+          ytPlaylistUrl={ytPlaylistUrl}
+          setYtPlaylistUrl={setYtPlaylistUrl}
+          handleFetchYouTubePlaylist={handleFetchYouTubePlaylist}
+          ytFetching={ytFetching}
+          ytError={ytError}
+          ytPlaylistData={ytPlaylistData}
+          ytQualitiesFetching={ytQualitiesFetching}
+          ytSelectedQuality={ytSelectedQuality}
+          setYtSelectedQuality={setYtSelectedQuality}
+          ytAvailableQualities={ytAvailableQualities}
+          fetchYouTubeQualities={fetchYouTubeQualities}
+          ytSelectedVideoIds={ytSelectedVideoIds}
+          toggleSelectAllYt={toggleSelectAllYt}
+          toggleVideoSelection={toggleVideoSelection}
+          handleImportYouTubePlaylist={handleImportYouTubePlaylist}
+        />
+      )}
 
       {/* Edit Anime Modal */}
-      <EditAnimeModal
-        editingAnime={editingAnime}
-        setEditingAnime={setEditingAnime}
-        handleSaveEdit={handleSaveEdit}
-        editTitle={editTitle}
-        setEditTitle={setEditTitle}
-        editTotalSeasons={editTotalSeasons}
-        setEditTotalSeasons={setEditTotalSeasons}
-        editTotalEpisodes={editTotalEpisodes}
-        setEditTotalEpisodes={setEditTotalEpisodes}
-        editGenres={editGenres}
-        setEditGenres={setEditGenres}
-        setAlertMessage={setAlertMessage}
-        showOnlineSearchEdit={showOnlineSearchEdit}
-        setShowOnlineSearchEdit={setShowOnlineSearchEdit}
-        handleEditCoverUpload={handleEditCoverUpload}
-        handleEditCoverBrowse={handleEditCoverBrowse}
-        editCoverUrl={editCoverUrl}
-        setEditCoverUrl={setEditCoverUrl}
-        uploadingEditCover={uploadingEditCover}
-        uploadToImgBB={uploadToImgBB}
-        searchingEditArtwork={searchingEditArtwork}
-        editArtworkSearchQuery={editArtworkSearchQuery}
-        setEditArtworkSearchQuery={setEditArtworkSearchQuery}
-        fetchEditAnimeArtwork={fetchEditAnimeArtwork}
-        handleEditBannerUpload={handleEditBannerUpload}
-        handleEditBannerBrowse={handleEditBannerBrowse}
-        editBannerUrl={editBannerUrl}
-        setEditBannerUrl={setEditBannerUrl}
-        editAnimeImages={editAnimeImages}
-        enableEditAnimeLogo={enableEditAnimeLogo}
-        setEnableEditAnimeLogo={setEnableEditAnimeLogo}
-        handleEditLogoUpload={handleEditLogoUpload}
-        handleEditLogoBrowse={handleEditLogoBrowse}
-        editLogoUrl={editLogoUrl}
-        setEditLogoUrl={setEditLogoUrl}
-      />
+      {Boolean(editingAnime) && (
+        <EditAnimeModal
+          editingAnime={editingAnime}
+          setEditingAnime={setEditingAnime}
+          handleSaveEdit={handleSaveEdit}
+          editTitle={editTitle}
+          setEditTitle={setEditTitle}
+          editTotalSeasons={editTotalSeasons}
+          setEditTotalSeasons={setEditTotalSeasons}
+          editTotalEpisodes={editTotalEpisodes}
+          setEditTotalEpisodes={setEditTotalEpisodes}
+          editGenres={editGenres}
+          setEditGenres={setEditGenres}
+          setAlertMessage={setAlertMessage}
+          showOnlineSearchEdit={showOnlineSearchEdit}
+          setShowOnlineSearchEdit={setShowOnlineSearchEdit}
+          handleEditCoverUpload={handleEditCoverUpload}
+          handleEditCoverBrowse={handleEditCoverBrowse}
+          editCoverUrl={editCoverUrl}
+          setEditCoverUrl={setEditCoverUrl}
+          uploadingEditCover={uploadingEditCover}
+          uploadToImgBB={uploadToImgBB}
+          searchingEditArtwork={searchingEditArtwork}
+          editArtworkSearchQuery={editArtworkSearchQuery}
+          setEditArtworkSearchQuery={setEditArtworkSearchQuery}
+          fetchEditAnimeArtwork={fetchEditAnimeArtwork}
+          handleEditBannerUpload={handleEditBannerUpload}
+          handleEditBannerBrowse={handleEditBannerBrowse}
+          editBannerUrl={editBannerUrl}
+          setEditBannerUrl={setEditBannerUrl}
+          editAnimeImages={editAnimeImages}
+          enableEditAnimeLogo={enableEditAnimeLogo}
+          setEnableEditAnimeLogo={setEnableEditAnimeLogo}
+          handleEditLogoUpload={handleEditLogoUpload}
+          handleEditLogoBrowse={handleEditLogoBrowse}
+          editLogoUrl={editLogoUrl}
+          setEditLogoUrl={setEditLogoUrl}
+        />
+      )}
 
       {/* Add Manga Modal */}
-      <AddMangaModal
-        showAddMangaModal={showAddMangaModal}
-        setShowAddMangaModal={setShowAddMangaModal}
-        handleAddManga={handleAddManga}
-        mangaSearchQuery={mangaSearchQuery}
-        setMangaSearchQuery={setMangaSearchQuery}
-        handleSearchMangaOnline={handleSearchMangaOnline}
-        mangaSearching={mangaSearching}
-        mangaFetchingDetails={mangaFetchingDetails}
-        mangaSearchError={mangaSearchError}
-        selectedMangaOnline={selectedMangaOnline}
-        setSelectedMangaOnline={setSelectedMangaOnline}
-        mangaSearchResults={mangaSearchResults}
-        handleSelectMangaOnline={handleSelectMangaOnline}
-        mangaFolderPath={mangaFolderPath}
-        setMangaFolderPath={setMangaFolderPath}
-        handleBrowseMangaFolder={handleBrowseMangaFolder}
-        handleScanManga={handleScanManga}
-        mangaScanning={mangaScanning}
-        mangaScanResult={mangaScanResult}
-        mangaTitle={mangaTitle}
-        setMangaTitle={setMangaTitle}
-        mangaRomajiTitle={mangaRomajiTitle}
-        setMangaRomajiTitle={setMangaRomajiTitle}
-        mangaTotalVolumes={mangaTotalVolumes}
-        setMangaTotalVolumes={setMangaTotalVolumes}
-        mangaTotalChapters={mangaTotalChapters}
-        setMangaTotalChapters={setMangaTotalChapters}
-        mangaYear={mangaYear}
-        setMangaYear={setMangaYear}
-        mangaDescription={mangaDescription}
-        setMangaDescription={setMangaDescription}
-        showMangaCoverSearch={showMangaCoverSearch}
-        setShowMangaCoverSearch={setShowMangaCoverSearch}
-        handleMangaCoverUpload={handleMangaCoverUpload}
-        mangaCoverUrl={mangaCoverUrl}
-        setMangaCoverUrl={setMangaCoverUrl}
-        mangaImages={mangaImages}
-        handleMangaBannerUpload={handleMangaBannerUpload}
-        mangaBannerUrl={mangaBannerUrl}
-        setMangaBannerUrl={setMangaBannerUrl}
-        enableMangaLogo={enableMangaLogo}
-        setEnableMangaLogo={setEnableMangaLogo}
-        handleMangaLogoUpload={handleMangaLogoUpload}
-        mangaLogoUrl={mangaLogoUrl}
-        setMangaLogoUrl={setMangaLogoUrl}
-        mangaGenres={mangaGenres}
-        setMangaGenres={setMangaGenres}
-        uploadToImgBB={uploadToImgBB}
-      />
+      {showAddMangaModal && (
+        <AddMangaModal
+          showAddMangaModal={showAddMangaModal}
+          setShowAddMangaModal={setShowAddMangaModal}
+          handleAddManga={handleAddManga}
+          mangaSearchQuery={mangaSearchQuery}
+          setMangaSearchQuery={setMangaSearchQuery}
+          handleSearchMangaOnline={handleSearchMangaOnline}
+          mangaSearching={mangaSearching}
+          mangaFetchingDetails={mangaFetchingDetails}
+          mangaSearchError={mangaSearchError}
+          selectedMangaOnline={selectedMangaOnline}
+          setSelectedMangaOnline={setSelectedMangaOnline}
+          mangaSearchResults={mangaSearchResults}
+          handleSelectMangaOnline={handleSelectMangaOnline}
+          mangaFolderPath={mangaFolderPath}
+          setMangaFolderPath={setMangaFolderPath}
+          handleBrowseMangaFolder={handleBrowseMangaFolder}
+          handleScanManga={handleScanManga}
+          mangaScanning={mangaScanning}
+          mangaScanResult={mangaScanResult}
+          mangaTitle={mangaTitle}
+          setMangaTitle={setMangaTitle}
+          mangaRomajiTitle={mangaRomajiTitle}
+          setMangaRomajiTitle={setMangaRomajiTitle}
+          mangaTotalVolumes={mangaTotalVolumes}
+          setMangaTotalVolumes={setMangaTotalVolumes}
+          mangaTotalChapters={mangaTotalChapters}
+          setMangaTotalChapters={setMangaTotalChapters}
+          mangaYear={mangaYear}
+          setMangaYear={setMangaYear}
+          mangaDescription={mangaDescription}
+          setMangaDescription={setMangaDescription}
+          showMangaCoverSearch={showMangaCoverSearch}
+          setShowMangaCoverSearch={setShowMangaCoverSearch}
+          handleMangaCoverUpload={handleMangaCoverUpload}
+          mangaCoverUrl={mangaCoverUrl}
+          setMangaCoverUrl={setMangaCoverUrl}
+          mangaImages={mangaImages}
+          handleMangaBannerUpload={handleMangaBannerUpload}
+          mangaBannerUrl={mangaBannerUrl}
+          setMangaBannerUrl={setMangaBannerUrl}
+          enableMangaLogo={enableMangaLogo}
+          setEnableMangaLogo={setEnableMangaLogo}
+          handleMangaLogoUpload={handleMangaLogoUpload}
+          mangaLogoUrl={mangaLogoUrl}
+          setMangaLogoUrl={setMangaLogoUrl}
+          mangaGenres={mangaGenres}
+          setMangaGenres={setMangaGenres}
+          uploadToImgBB={uploadToImgBB}
+        />
+      )}
 
       {/* Add Audio Story Modal */}
-      <AddAudioStoryModal
-        showAddAudioStoryModal={showAddAudioStoryModal}
-        setShowAddAudioStoryModal={setShowAddAudioStoryModal}
-        handleAddAudioStory={handleAddAudioStory}
-        audioStoryFolderPath={audioStoryFolderPath}
-        setAudioStoryFolderPath={setAudioStoryFolderPath}
-        handleBrowseAudioStoryFolder={handleBrowseAudioStoryFolder}
-        handleScanAudioStory={handleScanAudioStory}
-        audioStoryScanning={audioStoryScanning}
-        audioStoryScanResult={audioStoryScanResult}
-        audioStoryTitle={audioStoryTitle}
-        setAudioStoryTitle={setAudioStoryTitle}
-        handleFetchAudioStoryOnline={handleFetchAudioStoryOnline}
-        fetchingAudioOnline={fetchingAudioOnline}
-        audioStoryOnlineMessage={audioStoryOnlineMessage}
-        audioStoryTotalTracks={audioStoryTotalTracks}
-        setAudioStoryTotalTracks={setAudioStoryTotalTracks}
-        audioStoryDescription={audioStoryDescription}
-        setAudioStoryDescription={setAudioStoryDescription}
-        showAudioCoverSearch={showAudioCoverSearch}
-        setShowAudioCoverSearch={setShowAudioCoverSearch}
-        handleNewAudioCoverUpload={handleNewAudioCoverUpload}
-        handleAudioCoverBrowse={handleAudioCoverBrowse}
-        audioStoryCoverUrl={audioStoryCoverUrl}
-        setAudioStoryCoverUrl={setAudioStoryCoverUrl}
-        audioStoryGenres={audioStoryGenres}
-        setAudioStoryGenres={setAudioStoryGenres}
-        uploadToImgBB={uploadToImgBB}
-      />
+      {showAddAudioStoryModal && (
+        <AddAudioStoryModal
+          showAddAudioStoryModal={showAddAudioStoryModal}
+          setShowAddAudioStoryModal={setShowAddAudioStoryModal}
+          handleAddAudioStory={handleAddAudioStory}
+          audioStoryFolderPath={audioStoryFolderPath}
+          setAudioStoryFolderPath={setAudioStoryFolderPath}
+          handleBrowseAudioStoryFolder={handleBrowseAudioStoryFolder}
+          handleScanAudioStory={handleScanAudioStory}
+          audioStoryScanning={audioStoryScanning}
+          audioStoryScanResult={audioStoryScanResult}
+          audioStoryTitle={audioStoryTitle}
+          setAudioStoryTitle={setAudioStoryTitle}
+          handleFetchAudioStoryOnline={handleFetchAudioStoryOnline}
+          fetchingAudioOnline={fetchingAudioOnline}
+          audioStoryOnlineMessage={audioStoryOnlineMessage}
+          audioStoryTotalTracks={audioStoryTotalTracks}
+          setAudioStoryTotalTracks={setAudioStoryTotalTracks}
+          audioStoryDescription={audioStoryDescription}
+          setAudioStoryDescription={setAudioStoryDescription}
+          showAudioCoverSearch={showAudioCoverSearch}
+          setShowAudioCoverSearch={setShowAudioCoverSearch}
+          handleNewAudioCoverUpload={handleNewAudioCoverUpload}
+          handleAudioCoverBrowse={handleAudioCoverBrowse}
+          audioStoryCoverUrl={audioStoryCoverUrl}
+          setAudioStoryCoverUrl={setAudioStoryCoverUrl}
+          audioStoryGenres={audioStoryGenres}
+          setAudioStoryGenres={setAudioStoryGenres}
+          uploadToImgBB={uploadToImgBB}
+        />
+      )}
 
       {/* Add/Edit Movie Modals */}
-      <AddMovieModal
-        isOpen={showAddMovieModal}
-        onClose={() => setShowAddMovieModal(false)}
-        onAddMovie={handleAddMovie}
-        existingMovies={movies}
-      />
-      <EditMovieModal
-        isOpen={Boolean(movieEditing)}
-        movie={movieEditing}
-        onClose={() => setMovieEditing(null)}
-        onSaveMovie={handleSaveMovieEdit}
-      />
+      {showAddMovieModal && (
+        <AddMovieModal
+          isOpen={showAddMovieModal}
+          onClose={() => setShowAddMovieModal(false)}
+          onAddMovie={handleAddMovie}
+          existingMovies={movies}
+        />
+      )}
+      {Boolean(movieEditing) && (
+        <EditMovieModal
+          isOpen={Boolean(movieEditing)}
+          movie={movieEditing}
+          onClose={() => setMovieEditing(null)}
+          onSaveMovie={handleSaveMovieEdit}
+        />
+      )}
 
       {/* Add/Edit Web-series Modals */}
-      <AddWebseriesModal
-        isOpen={showAddWebseriesModal}
-        onClose={() => setShowAddWebseriesModal(false)}
-        onAddWebseries={handleAddWebseries}
-        existingSeries={webseriesList}
-      />
-      <EditWebseriesModal
-        isOpen={Boolean(webseriesEditing)}
-        series={webseriesEditing}
-        onClose={() => setWebseriesEditing(null)}
-        onSaveWebseries={handleSaveWebseriesEdit}
-      />
+      {showAddWebseriesModal && (
+        <AddWebseriesModal
+          isOpen={showAddWebseriesModal}
+          onClose={() => setShowAddWebseriesModal(false)}
+          onAddWebseries={handleAddWebseries}
+          existingSeries={webseriesList}
+        />
+      )}
+      {Boolean(webseriesEditing) && (
+        <EditWebseriesModal
+          isOpen={Boolean(webseriesEditing)}
+          series={webseriesEditing}
+          onClose={() => setWebseriesEditing(null)}
+          onSaveWebseries={handleSaveWebseriesEdit}
+        />
+      )}
 
       {/* Watchlist Modals */}
-      <AddWatchlistModal
-        isOpen={showAddWatchlistModal}
-        onClose={() => setShowAddWatchlistModal(false)}
-        onAddWatchlist={async (item) => {
-          setWatchlist(prev => [item, ...prev.filter(i => i.id !== item.id)]);
-          upsertLocalWatchlist(item);
-          if (db) {
-            const uid = currentUser?.uid || getUserId();
-            if (uid) {
-              try {
-                await setDoc(doc(db, 'users', uid, 'watchlist', item.id), item, { merge: true });
-              } catch (err) {
-                console.warn('Dashboard save to watchlist error:', err);
+      {showAddWatchlistModal && (
+        <AddWatchlistModal
+          isOpen={showAddWatchlistModal}
+          onClose={() => setShowAddWatchlistModal(false)}
+          onAddWatchlist={async (item) => {
+            setWatchlist(prev => [item, ...prev.filter(i => i.id !== item.id)]);
+            upsertLocalWatchlist(item);
+            if (db) {
+              const uid = currentUser?.uid || getUserId();
+              if (uid) {
+                try {
+                  await setDoc(doc(db, 'users', uid, 'watchlist', item.id), item, { merge: true });
+                } catch (err) {
+                  console.warn('Dashboard save to watchlist error:', err);
+                }
               }
             }
-          }
-        }}
-      />
-      <EditWatchlistModal
-        isOpen={Boolean(editingWatchlistItem)}
-        onClose={() => setEditingWatchlistItem(null)}
-        item={editingWatchlistItem}
-        onSave={handleSaveWatchlistEdit}
-      />
-      <TransferWatchlistModal
-        isOpen={Boolean(transferringWatchlistItem)}
-        onClose={() => setTransferringWatchlistItem(null)}
-        item={transferringWatchlistItem}
-        onTransferred={(deletedId) => {
-          setWatchlist(prev => prev.filter(i => i.id !== deletedId));
-          setTransferringWatchlistItem(null);
-          setWebseriesList(getLocalWebseries() || []);
-          setMovies(getLocalMovies() || []);
-          setAnimes(getLocalAnimes() || []);
-          setMangas(getLocalMangas() || []);
-          setAudioStories(getLocalAudioStories() || []);
-        }}
-      />
+          }}
+        />
+      )}
+      {Boolean(editingWatchlistItem) && (
+        <EditWatchlistModal
+          isOpen={Boolean(editingWatchlistItem)}
+          onClose={() => setEditingWatchlistItem(null)}
+          item={editingWatchlistItem}
+          onSave={handleSaveWatchlistEdit}
+        />
+      )}
+      {Boolean(transferringWatchlistItem) && (
+        <TransferWatchlistModal
+          isOpen={Boolean(transferringWatchlistItem)}
+          onClose={() => setTransferringWatchlistItem(null)}
+          item={transferringWatchlistItem}
+          onTransferred={(deletedId) => {
+            setWatchlist(prev => prev.filter(i => i.id !== deletedId));
+            setTransferringWatchlistItem(null);
+            setWebseriesList(getLocalWebseries() || []);
+            setMovies(getLocalMovies() || []);
+            setAnimes(getLocalAnimes() || []);
+            setMangas(getLocalMangas() || []);
+            setAudioStories(getLocalAudioStories() || []);
+          }}
+        />
+      )}
 
-      {/* Confirmation Dialogs for Complete/Incomplete */}
-      <MediaCompleteConfirmModal
-        item={mangaCompleteConfirm}
-        type="manga"
-        onClose={() => setMangaCompleteConfirm(null)}
-        onConfirm={(target) => {
-          setMangaCompleteConfirm(null);
-          handleToggleMangaComplete(target);
-        }}
-      />
-      <MediaCompleteConfirmModal
-        item={audioStoryCompleteConfirm}
-        type="audioStory"
-        onClose={() => setAudioStoryCompleteConfirm(null)}
-        onConfirm={(target) => {
-          setAudioStoryCompleteConfirm(null);
-          handleToggleAudioStoryComplete(target);
-        }}
-      />
-      <MediaCompleteConfirmModal
-        item={movieCompleteConfirm}
-        type="movie"
-        onClose={() => setMovieCompleteConfirm(null)}
-        onConfirm={(target) => {
-          setMovieCompleteConfirm(null);
-          handleToggleMovieWatched(target);
-        }}
-      />
-      <MediaCompleteConfirmModal
-        item={webseriesCompleteConfirm}
-        type="webseries"
-        onClose={() => setWebseriesCompleteConfirm(null)}
-        onConfirm={(target) => {
-          setWebseriesCompleteConfirm(null);
-          handleToggleWebseriesWatched(target);
-        }}
-      />
-      <MediaCompleteConfirmModal
-        item={watchlistCompleteConfirm}
-        type="watchlist"
-        onClose={() => setWatchlistCompleteConfirm(null)}
-        onConfirm={(target) => {
-          setWatchlistCompleteConfirm(null);
-          handleToggleWatchlistStatus(target);
-        }}
-      />
+      {/* Consolidated Confirmation Dialog for Complete/Incomplete */}
+      {Boolean(mangaCompleteConfirm || audioStoryCompleteConfirm || movieCompleteConfirm || webseriesCompleteConfirm || watchlistCompleteConfirm) && (
+        <MediaCompleteConfirmModal
+          item={mangaCompleteConfirm || audioStoryCompleteConfirm || movieCompleteConfirm || webseriesCompleteConfirm || watchlistCompleteConfirm}
+          type={mangaCompleteConfirm ? 'manga' : audioStoryCompleteConfirm ? 'audioStory' : movieCompleteConfirm ? 'movie' : webseriesCompleteConfirm ? 'webseries' : 'watchlist'}
+          onClose={() => {
+            setMangaCompleteConfirm(null);
+            setAudioStoryCompleteConfirm(null);
+            setMovieCompleteConfirm(null);
+            setWebseriesCompleteConfirm(null);
+            setWatchlistCompleteConfirm(null);
+          }}
+          onConfirm={(target) => {
+            if (mangaCompleteConfirm) handleToggleMangaComplete(target);
+            else if (audioStoryCompleteConfirm) handleToggleAudioStoryComplete(target);
+            else if (movieCompleteConfirm) handleToggleMovieWatched(target);
+            else if (webseriesCompleteConfirm) handleToggleWebseriesWatched(target);
+            else if (watchlistCompleteConfirm) handleToggleWatchlistStatus(target);
+            setMangaCompleteConfirm(null);
+            setAudioStoryCompleteConfirm(null);
+            setMovieCompleteConfirm(null);
+            setWebseriesCompleteConfirm(null);
+            setWatchlistCompleteConfirm(null);
+          }}
+        />
+      )}
 
       {/* Settings Modal */}
-      <SettingsModal
-        showSettings={showSettings}
-        setShowSettings={setShowSettings}
-        handleSaveSettings={handleSaveSettings}
-        customVlc={customVlc}
-        setCustomVlc={setCustomVlc}
-        defaultPlayer={defaultPlayer}
-        setDefaultPlayer={setDefaultPlayer}
-        exportFormat={exportFormat}
-        setExportFormat={setExportFormat}
-        handleExportData={handleExportData}
-        exporting={exporting}
-        isOffline={isOffline}
-        onOpenVault={() => setIsVaultOpen(true)}
-        onOpenAchievements={() => setShowAchievementsModal(true)}
-      />
+      {showSettings && (
+        <SettingsModal
+          showSettings={showSettings}
+          setShowSettings={setShowSettings}
+          handleSaveSettings={handleSaveSettings}
+          customVlc={customVlc}
+          setCustomVlc={setCustomVlc}
+          defaultPlayer={defaultPlayer}
+          setDefaultPlayer={setDefaultPlayer}
+          exportFormat={exportFormat}
+          setExportFormat={setExportFormat}
+          handleExportData={handleExportData}
+          exporting={exporting}
+          isOffline={isOffline}
+          onOpenVault={() => setIsVaultOpen(true)}
+          onOpenAchievements={() => setShowAchievementsModal(true)}
+        />
+      )}
 
       {/* Action Blocked Custom Alert Modal */}
-      <CustomAlertModal
-        alertMessage={alertMessage}
-        onClose={() => setAlertMessage('')}
-      />
+      {Boolean(alertMessage) && (
+        <CustomAlertModal
+          alertMessage={alertMessage}
+          onClose={() => setAlertMessage('')}
+        />
+      )}
 
       {/* Achievements Modal */}
-      <AchievementsModal
-        isOpen={showAchievementsModal}
-        onClose={() => setShowAchievementsModal(false)}
-      />
+      {showAchievementsModal && (
+        <AchievementsModal
+          isOpen={showAchievementsModal}
+          onClose={() => setShowAchievementsModal(false)}
+        />
+      )}
 
       {/* Keyboard Shortcuts Help Modal */}
-      <HelpShortcutsModal
-        isOpen={showShortcutsModal}
-        onClose={() => setShowShortcutsModal(false)}
-      />
+      {showShortcutsModal && (
+        <HelpShortcutsModal
+          isOpen={showShortcutsModal}
+          onClose={() => setShowShortcutsModal(false)}
+        />
+      )}
 
       {/* Mobile 3-Dot Options Bottom Sheet */}
-      <MobileMediaActionSheet
-        activeMobileMenu={activeMobileMenu}
-        onClose={() => setActiveMobileMenu(null)}
-        router={router}
-        onSelectAnime={onSelectAnime}
-        handleOpenEditModal={handleOpenEditModal}
-        handleDeleteAnime={handleDeleteAnime}
-        handleDeleteMovie={handleDeleteMovie}
-        handleDeleteWebseries={handleDeleteWebseries}
-        handleDeleteManga={handleDeleteManga}
-        handleDeleteAudioStory={handleDeleteAudioStory}
-        handleDeleteWatchlist={handleDeleteWatchlist}
-        handleToggleAnimeComplete={handleToggleAnimeComplete}
-        setMovieCompleteConfirm={setMovieCompleteConfirm}
-        setWebseriesCompleteConfirm={setWebseriesCompleteConfirm}
-        setMangaCompleteConfirm={setMangaCompleteConfirm}
-        setAudioStoryCompleteConfirm={setAudioStoryCompleteConfirm}
-        setWatchlistCompleteConfirm={setWatchlistCompleteConfirm}
-        setMovieEditing={setMovieEditing}
-        setWebseriesEditing={setWebseriesEditing}
-        setEditingWatchlistItem={setEditingWatchlistItem}
-        setTransferringWatchlistItem={setTransferringWatchlistItem}
-      />
+      {Boolean(activeMobileMenu) && (
+        <MobileMediaActionSheet
+          activeMobileMenu={activeMobileMenu}
+          onClose={() => setActiveMobileMenu(null)}
+          router={router}
+          onSelectAnime={onSelectAnime}
+          handleOpenEditModal={handleOpenEditModal}
+          handleDeleteAnime={handleDeleteAnime}
+          handleDeleteMovie={handleDeleteMovie}
+          handleDeleteWebseries={handleDeleteWebseries}
+          handleDeleteManga={handleDeleteManga}
+          handleDeleteAudioStory={handleDeleteAudioStory}
+          handleDeleteWatchlist={handleDeleteWatchlist}
+          handleToggleAnimeComplete={handleToggleAnimeComplete}
+          setMovieCompleteConfirm={setMovieCompleteConfirm}
+          setWebseriesCompleteConfirm={setWebseriesCompleteConfirm}
+          setMangaCompleteConfirm={setMangaCompleteConfirm}
+          setAudioStoryCompleteConfirm={setAudioStoryCompleteConfirm}
+          setWatchlistCompleteConfirm={setWatchlistCompleteConfirm}
+          setMovieEditing={setMovieEditing}
+          setWebseriesEditing={setWebseriesEditing}
+          setEditingWatchlistItem={setEditingWatchlistItem}
+          setTransferringWatchlistItem={setTransferringWatchlistItem}
+        />
+      )}
 
     </div>
   );

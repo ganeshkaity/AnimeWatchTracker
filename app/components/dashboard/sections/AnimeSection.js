@@ -6,7 +6,7 @@ import MediaCard from '../cards/MediaCard';
 import MediaRowSkeleton from '../skeletons/MediaRowSkeleton';
 import { getAnimeProgressPercent, getDeterministicRating } from '../utils/dashboardHelpers';
 
-export default function AnimeSection({
+function AnimeSection({
   topTrackedAnimes = [],
   animesCount = 0,
   loading = false,
@@ -30,7 +30,7 @@ export default function AnimeSection({
   };
 
   return (
-    <section id="anime" className="space-y-4 scroll-mt-24">
+    <section id="anime" className="space-y-4 scroll-mt-24 dashboard-section-contain">
       <span id="catalog" className="sr-only" />
       {/* Header Controls Panel */}
       <div className="flex items-center justify-between">
@@ -166,3 +166,5 @@ export default function AnimeSection({
     </section>
   );
 }
+
+export default React.memo(AnimeSection);

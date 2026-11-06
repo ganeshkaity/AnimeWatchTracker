@@ -1,7 +1,9 @@
-import React from 'react';
+"use client";
+
+import React, { memo } from 'react';
 import { Compass, Tv, Film, BookOpen, Headphones, Bookmark, ChevronDown } from 'lucide-react';
 
-export default function MediaCategoriesBar({
+function MediaCategoriesBar({
   animesCount = 0,
   moviesCount = 0,
   webseriesCount = 0,
@@ -179,3 +181,4 @@ export default function MediaCategoriesBar({
   );
 }
 
+export default memo(MediaCategoriesBar);
