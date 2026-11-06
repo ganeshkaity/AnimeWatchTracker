@@ -273,9 +273,13 @@ export default function MediaServerPlayer({
   }, []);
   const [internalTheatreMode, setInternalTheatreMode] = useState(false);
   const theatreMode = externalTheatreMode !== undefined ? externalTheatreMode : internalTheatreMode;
+  const theatreModeRef = useRef(theatreMode);
+  useEffect(() => {
+    theatreModeRef.current = theatreMode;
+  }, [theatreMode]);
 
   const toggleTheatreMode = useCallback((desiredState) => {
-    const next = typeof desiredState === 'boolean' ? desiredState : !theatreMode;
+    const next = typeof desiredState === 'boolean' ? desiredState : !theatreModeRef.current;
 
     if (onTheatreModeChange) {
       onTheatreModeChange(next);
@@ -1723,6 +1727,11 @@ export default function MediaServerPlayer({
           e.preventDefault();
           toggleFullscreen();
           break;
+        case 't':
+        case 'T':
+          e.preventDefault();
+          toggleTheatreMode();
+          break;
         default:
           break;
       }
@@ -1730,7 +1739,7 @@ export default function MediaServerPlayer({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, seekRelative, volume, toggleMute, playbackSpeed, handleSpeedChange]);
+  }, [togglePlay, seekRelative, volume, toggleMute, playbackSpeed, handleSpeedChange, toggleFullscreen, toggleTheatreMode, handleVolumeChange]);
 
   // Auto-hide controls
   const handleMouseMove = useCallback(() => {
@@ -2837,7 +2846,7 @@ export default function MediaServerPlayer({
                       <button
                         onClick={() => toggleTheatreMode()}
                         className={`hidden sm:flex p-1 transition cursor-pointer items-center justify-center ${theatreMode ? 'text-[#f472b6]' : 'text-gray-300 hover:text-[#ffd000]'}`}
-                        title={theatreMode ? "Exit Theatre Mode (Esc)" : "Theatre Mode"}
+                        title={theatreMode ? "Exit Theatre Mode (T / Esc)" : "Theatre Mode (T)"}
                       >
                         {theatreMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                       </button>
@@ -2937,6 +2946,7 @@ export default function MediaServerPlayer({
               <button
                 onClick={() => toggleTheatreMode()}
                 className="flex items-center gap-1.5 hover:text-white transition cursor-pointer font-medium"
+                title="Theatre Mode (T)"
               >
                 <Maximize2 size={14} className={theatreMode ? 'text-[#f472b6]' : 'text-gray-400'} />
                 <span>Theatre Mode</span>
@@ -3510,7 +3520,7 @@ export default function MediaServerPlayer({
             >
               {theatreMode ? <Minimize2 size={15} className="text-[#f472b6]" /> : <Maximize2 size={15} className="text-gray-400" />}
               <span className={theatreMode ? 'text-[#f472b6]' : 'text-gray-200'}>
-                {theatreMode ? 'Exit Theatre Mode' : 'Theatre Mode'}
+                {theatreMode ? 'Exit Theatre Mode (T)' : 'Theatre Mode (T)'}
               </span>
             </button>
 

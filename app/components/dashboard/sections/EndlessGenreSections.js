@@ -385,32 +385,26 @@ function EndlessGenreSections({
                 const runtimeStr = item.runtime ? `${Math.floor(item.runtime / 60)}h ${item.runtime % 60}m` : 'Feature';
 
                 return (
-                  <div key={`${groupRow.id}-${item.id}`} className="relative group/wrapper">
-                    {/* Sequential Order Number Tag */}
-                    <div className="absolute top-2 right-2 z-20 px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md border border-amber-500/50 text-[10px] font-black text-amber-400 shadow-lg pointer-events-none">
-                      #{item.groupOrder}
-                    </div>
-
-                    <MediaCard
-                      item={item}
-                      type="movie"
-                      coverImg={coverImg}
-                      rating={rating}
-                      isCompleted={isWatched}
-                      pct={pct}
-                      subLeft={movieYear}
-                      subRight={runtimeStr}
-                      accentBorder="hover:border-amber-400/50"
-                      onClick={() => router.push(`/movies/${item.id}`)}
-                      onMouseEnter={(e) => handleCardMouseEnter && handleCardMouseEnter(item, 'movie', e)}
-                      onMouseLeave={handleCardMouseLeave}
-                      onMobileMenuToggle={() => {
-                        if (setActiveMobileMenu) {
-                          setActiveMobileMenu(activeMobileMenu?.id === item.id ? null : { type: 'movie', id: item.id, item });
-                        }
-                      }}
-                    />
-                  </div>
+                  <MediaCard
+                    key={`${groupRow.id}-${item.id}`}
+                    item={item}
+                    type="movie"
+                    coverImg={coverImg}
+                    rating={rating}
+                    isCompleted={isWatched}
+                    pct={pct}
+                    subLeft={movieYear}
+                    subRight={runtimeStr}
+                    accentBorder="hover:border-amber-400/50"
+                    onClick={() => router.push(`/movies/${item.id}`)}
+                    onMouseEnter={(e) => handleCardMouseEnter && handleCardMouseEnter(item, 'movie', e)}
+                    onMouseLeave={handleCardMouseLeave}
+                    onMobileMenuToggle={() => {
+                      if (setActiveMobileMenu) {
+                        setActiveMobileMenu(activeMobileMenu?.id === item.id ? null : { type: 'movie', id: item.id, item });
+                      }
+                    }}
+                  />
                 );
               })}
 
