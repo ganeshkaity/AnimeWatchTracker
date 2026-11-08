@@ -725,6 +725,29 @@ export default function MangaDetail({ mangaId, onBack, onReadChapter }) {
         summaryText = `No chapter changes applied. Library metadata refreshed.`;
       }
       setRescanMessage(`Rescan complete! ${summaryText} (${total} total chapters, ${completed} completed).`);
+
+      // Send notification with cinematic banner if new chapters were found & added
+      if (chaptersToAdd.length > 0) {
+        try {
+          const { triggerAppEventNotification } = await import('../utils/notifications');
+          triggerAppEventNotification('episodes_added', {
+            id: mangaId,
+            mediaType: 'manga',
+            title: manga.title || manga.name || 'Manga',
+            newEpisodesCount: chaptersToAdd.length,
+            backdropUrl: manga.bannerUrl || manga.coverUrl || manga.posterUrl,
+            posterUrl: manga.coverUrl || manga.posterUrl,
+            logoUrl: manga.logoUrl || manga.logo || null,
+            genres: manga.genres || [],
+            rating: manga.rating || manga.score,
+            year: manga.year,
+            ageRating: manga.ageRating,
+            url: `/manga/${mangaId}`,
+          });
+        } catch (notifErr) {
+          console.warn('[MangaDetail] Rescan notification warning:', notifErr);
+        }
+      }
     } catch (err) {
       console.error("Error applying manga rescan changes:", err);
       setRescanStatus('error');

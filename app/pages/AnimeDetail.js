@@ -1523,6 +1523,29 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
         summaryText = `No episode changes applied. Library metadata refreshed.`;
       }
       setRescanMessage(`Rescan complete! ${summaryText} (${total} total episodes, ${watched} watched).`);
+
+      // Send notification with cinematic new episodes banner if new episodes were found & added
+      if (episodesToAdd.length > 0) {
+        try {
+          const { triggerAppEventNotification } = await import('../utils/notifications');
+          triggerAppEventNotification('episodes_added', {
+            id: animeId,
+            mediaType: 'anime',
+            title: anime.title || anime.name || 'Anime',
+            newEpisodesCount: episodesToAdd.length,
+            backdropUrl: anime.backdropUrl || anime.bannerUrl || anime.banner || anime.coverUrl || anime.posterUrl,
+            posterUrl: anime.posterUrl || anime.coverUrl,
+            logoUrl: anime.logoUrl || anime.logo || null,
+            genres: anime.genres || [],
+            rating: anime.rating || anime.score,
+            year: anime.year,
+            ageRating: anime.ageRating,
+            url: `/anime/${animeId}`,
+          });
+        } catch (notifErr) {
+          console.warn('[AnimeDetail] Rescan notification warning:', notifErr);
+        }
+      }
     } catch (err) {
       console.error("Error applying rescan changes:", err);
       setRescanStatus('error');

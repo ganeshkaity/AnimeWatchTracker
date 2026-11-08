@@ -110,6 +110,9 @@ export async function generateCinematicBanner({
   ageRating,
   overview = '',
   mediaType = 'movie',
+  isNewEpisodes = false,
+  newEpisodesCount = 0,
+  newEpisodesText = '',
 } = {}) {
   if (typeof window === 'undefined') return null;
 
@@ -160,33 +163,34 @@ export async function generateCinematicBanner({
 
     // 4. Draw Logo or Stylized Title (Left Column)
     const startX = 64;
-    let currentY = 190;
+    let currentY = isNewEpisodes ? 200 : 190;
 
     let logoDrawn = false;
     if (logoUrl) {
       try {
         const logoImg = await loadImageSafe(logoUrl);
-        const maxLogoW = 320;
-        const maxLogoH = 110;
+        // Make the logo significantly bigger in new episodes mode
+        const maxLogoW = isNewEpisodes ? 480 : 320;
+        const maxLogoH = isNewEpisodes ? 170 : 110;
         const logoRatio = Math.min(maxLogoW / logoImg.width, maxLogoH / logoImg.height);
         const logoW = logoImg.width * logoRatio;
         const logoH = logoImg.height * logoRatio;
 
         ctx.drawImage(logoImg, startX, currentY - logoH + 40, logoW, logoH);
-        currentY += 60;
+        currentY += isNewEpisodes ? Math.max(75, logoH * 0.45 + 32) : 60;
         logoDrawn = true;
       } catch (_) {}
     }
 
     if (!logoDrawn) {
-      // Draw stylized glowing title
-      ctx.font = '900 42px Inter, sans-serif';
+      // Draw stylized glowing title (larger font when isNewEpisodes is active)
+      ctx.font = isNewEpisodes ? '900 52px Inter, sans-serif' : '900 42px Inter, sans-serif';
       ctx.fillStyle = '#ffffff';
-      ctx.shadowColor = 'rgba(0,0,0,0.8)';
-      ctx.shadowBlur = 16;
+      ctx.shadowColor = 'rgba(0,0,0,0.85)';
+      ctx.shadowBlur = 18;
       ctx.fillText(title, startX, currentY);
       ctx.shadowBlur = 0;
-      currentY += 28;
+      currentY += isNewEpisodes ? 38 : 28;
     }
 
     // 5. Category / Genre Tags (e.g. | THRILLER   | ACTION)
@@ -197,7 +201,7 @@ export async function generateCinematicBanner({
       : [];
 
     if (genreList.length > 0) {
-      currentY += 24;
+      currentY += isNewEpisodes ? 28 : 24;
       ctx.font = '800 13px Inter, sans-serif';
       ctx.fillStyle = '#e2e8f0';
 
@@ -221,13 +225,15 @@ export async function generateCinematicBanner({
       metaX += ctx.measureText(`★ ${parsedRating}`).width + 22;
     }
 
-    // Duration / Episodes
-    const formattedDuration = formatDuration(duration);
-    if (formattedDuration) {
-      ctx.font = 'bold 14px Inter, sans-serif';
-      ctx.fillStyle = '#fde047'; // Yellow-300
-      ctx.fillText(`⏱ ${formattedDuration}`, metaX, currentY);
-      metaX += ctx.measureText(`⏱ ${formattedDuration}`).width + 22;
+    // Duration / Episodes (omitted in new episodes mode since we display the new episodes count badge)
+    if (!isNewEpisodes) {
+      const formattedDuration = formatDuration(duration);
+      if (formattedDuration) {
+        ctx.font = 'bold 14px Inter, sans-serif';
+        ctx.fillStyle = '#fde047'; // Yellow-300
+        ctx.fillText(`⏱ ${formattedDuration}`, metaX, currentY);
+        metaX += ctx.measureText(`⏱ ${formattedDuration}`).width + 22;
+      }
     }
 
     // Year
@@ -247,8 +253,47 @@ export async function generateCinematicBanner({
       ctx.fillText(safeAgeRating, metaX, currentY);
     }
 
-    // 7. Overview Text (Word wrapped, max 3 lines)
-    if (overview) {
+    // 7. Update Text: In new episodes mode, ONLY write how many episodes added (no description)
+    if (isNewEpisodes) {
+      currentY += 32;
+      const count = newEpisodesCount || 1;
+      const mediaLabel = mediaType === 'manga' ? 'Chapter' : (mediaType === 'audioStory' || mediaType === 'audiobook' ? 'Track' : 'Episode');
+      const epAddedText = newEpisodesText || `${count} New ${mediaLabel}${count > 1 ? 's' : ''} Added`;
+
+      // Draw prominent glowing pill
+      ctx.font = '900 22px Inter, sans-serif';
+      const textMetrics = ctx.measureText(epAddedText);
+      const textWidth = textMetrics.width;
+      const badgeW = textWidth + 64;
+      const badgeH = 50;
+
+      // Radiant modern gradient: Cyan / Indigo / Violet
+      const badgeGrad = ctx.createLinearGradient(startX, 0, startX + badgeW, 0);
+      badgeGrad.addColorStop(0, '#0284c7'); // Sky-600
+      badgeGrad.addColorStop(0.5, '#6366f1'); // Indigo-500
+      badgeGrad.addColorStop(1, '#a855f7'); // Purple-500
+
+      ctx.save();
+      ctx.shadowColor = 'rgba(99, 102, 241, 0.7)';
+      ctx.shadowBlur = 24;
+      drawRoundedRect(ctx, startX, currentY, badgeW, badgeH, 14);
+      ctx.fillStyle = badgeGrad;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.stroke();
+      ctx.restore();
+
+      // High-contrast white text with star/sparkle icon
+      ctx.font = '900 22px Inter, sans-serif';
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+      ctx.shadowBlur = 6;
+      ctx.fillText('✦  ' + epAddedText, startX + 22, currentY + 34);
+      ctx.shadowBlur = 0;
+
+      currentY += badgeH + 28;
+    } else if (overview) {
       currentY += 32;
       ctx.font = 'normal 13px Inter, sans-serif';
       ctx.fillStyle = '#94a3b8'; // Slate-400

@@ -1148,6 +1148,29 @@ export default function WebseriesDetail({ seriesId, onBack }) {
 
       setRescanStatus('completed');
       setRescanMessage(`Rescan complete! Library updated with ${total} total episodes.`);
+
+      // Send notification with cinematic new episodes banner if new episodes were found & added
+      if (episodesToAdd.length > 0) {
+        try {
+          const { triggerAppEventNotification } = await import('../utils/notifications');
+          triggerAppEventNotification('episodes_added', {
+            id: seriesId,
+            mediaType: 'webseries',
+            title: series.title || series.name || 'Web Series',
+            newEpisodesCount: episodesToAdd.length,
+            backdropUrl: series.backdropUrl || series.bannerUrl || series.coverUrl || series.posterUrl,
+            posterUrl: series.posterUrl || series.coverUrl,
+            logoUrl: series.logoUrl || series.logo || null,
+            genres: series.genres || [],
+            rating: series.rating || series.score || series.imdbRating,
+            year: series.year,
+            ageRating: series.ageRating,
+            url: `/webseries/${seriesId}`,
+          });
+        } catch (notifErr) {
+          console.warn('[WebseriesDetail] Rescan notification warning:', notifErr);
+        }
+      }
       setTimeout(() => {
         setShowRescanModal(false);
       }, 1500);
@@ -1266,6 +1289,31 @@ export default function WebseriesDetail({ seriesId, onBack }) {
         }
       } catch (err) {
         console.error('Error saving updated webseries to Firestore:', err);
+      }
+    }
+
+    if (updatedEpisodes && updatedEpisodes.length > (episodes?.length || 0)) {
+      const addedCount = updatedEpisodes.length - (episodes?.length || 0);
+      if (addedCount > 0) {
+        try {
+          const { triggerAppEventNotification } = await import('../utils/notifications');
+          triggerAppEventNotification('episodes_added', {
+            id: seriesId,
+            mediaType: 'webseries',
+            title: updatedDoc.title || series?.title || 'Web Series',
+            newEpisodesCount: addedCount,
+            backdropUrl: updatedDoc.backdropUrl || series?.backdropUrl || series?.bannerUrl || series?.posterUrl,
+            posterUrl: updatedDoc.posterUrl || series?.posterUrl,
+            logoUrl: updatedDoc.logoUrl || series?.logoUrl || series?.logo || null,
+            genres: updatedDoc.genres || series?.genres || [],
+            rating: updatedDoc.rating || series?.rating,
+            year: updatedDoc.year || series?.year,
+            ageRating: updatedDoc.ageRating || series?.ageRating,
+            url: `/webseries/${seriesId}`,
+          });
+        } catch (notifErr) {
+          console.warn('[WebseriesDetail] Save edit rescan notification warning:', notifErr);
+        }
       }
     }
   };

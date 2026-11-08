@@ -366,6 +366,18 @@ export async function triggerAppEventNotification(eventType, eventData = {}) {
       }
       break;
 
+    case 'episodes_added':
+    case 'new_episodes':
+      if (prefs.episodeReleases) {
+        const count = eventData.newEpisodesCount || eventData.count || 1;
+        const mediaLabel = eventData.mediaType === 'manga' ? 'chapter' : (eventData.mediaType === 'audioStory' || eventData.mediaType === 'audiobook' ? 'track' : 'episode');
+        const countLabel = `${count} new ${mediaLabel}${count > 1 ? 's' : ''} found`;
+        title = eventData.title ? `${eventData.title}` : 'New Episodes Found';
+        body = `${countLabel} and added to your library.`;
+        url = eventData.url || (eventData.mediaType === 'webseries' ? `/webseries/${eventData.id}` : (eventData.mediaType === 'manga' ? `/manga/${eventData.id}` : (eventData.mediaType === 'audioStory' ? `/audio-story/${eventData.id}` : `/anime/${eventData.id}`)));
+      }
+      break;
+
     case 'episode_completed':
       if (prefs.episodeReleases) {
         title = 'Episode Completed';
@@ -402,6 +414,7 @@ export async function triggerAppEventNotification(eventType, eventData = {}) {
 
     if (hasBackdrop) {
       try {
+        const isNewEpisodes = eventType === 'episodes_added' || eventType === 'new_episodes' || Boolean(eventData.isNewEpisodes || eventData.newEpisodesCount);
         const { generateCinematicBanner } = await import('./mediaBannerGenerator');
         bannerImage = await generateCinematicBanner({
           title: eventData.title || title,
@@ -418,8 +431,11 @@ export async function triggerAppEventNotification(eventType, eventData = {}) {
           duration: eventData.duration || eventData.runtime,
           year: eventData.year || eventData.releaseDate,
           ageRating: eventData.ageRating,
-          overview: eventData.overview || eventData.description || '',
-          mediaType: eventType.replace('_added', ''),
+          overview: isNewEpisodes ? '' : (eventData.overview || eventData.description || ''),
+          mediaType: eventData.mediaType || eventType.replace('_added', ''),
+          isNewEpisodes,
+          newEpisodesCount: eventData.newEpisodesCount || eventData.count || 0,
+          newEpisodesText: eventData.newEpisodesText || '',
         });
       } catch (err) {
         console.warn('[Notifications] Banner generation warning:', err);

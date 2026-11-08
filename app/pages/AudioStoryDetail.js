@@ -292,6 +292,25 @@ export default function AudioStoryDetail({ storyId, onBack, onPlayTrack }) {
         upsertLocalAudioStory(updatedStory);
 
         setRescanMessage(`✓ Scanned successfully. Found ${mergedTracks.length} tracks (${data.audioCount} audio, ${data.videoCount} video).`);
+
+        const newTracksCount = mergedTracks.length - tracks.length;
+        if (newTracksCount > 0) {
+          try {
+            const { triggerAppEventNotification } = await import('../utils/notifications');
+            triggerAppEventNotification('episodes_added', {
+              id: storyId,
+              mediaType: 'audioStory',
+              title: story.title || story.name || 'Audio Story',
+              newEpisodesCount: newTracksCount,
+              backdropUrl: story.coverUrl || story.posterUrl,
+              posterUrl: story.coverUrl || story.posterUrl,
+              genres: story.genres || [],
+              url: `/audio-story/${storyId}`,
+            });
+          } catch (notifErr) {
+            console.warn('[AudioStoryDetail] Rescan notification warning:', notifErr);
+          }
+        }
       } else {
         setRescanMessage('Scan error: ' + (data.error || 'Failed to scan'));
       }
