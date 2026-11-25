@@ -148,7 +148,7 @@ export function saveNotificationPreferences(prefs) {
  * or falls back to native Notification constructor.
  */
 export async function showLocalNotification({
-  title = 'WatchAnime',
+  title = 'GaneshSpace',
   body = '',
   icon = '/icons/icon-192x192.png',
   badge = '/icons/icon-96x96.png',
@@ -230,7 +230,7 @@ export async function showLocalNotification({
  */
 export function scheduleLocalReminder({
   id = `reminder_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-  title = 'WatchAnime Reminder',
+  title = 'GaneshSpace Reminder',
   body = 'Time to continue watching your favorite series!',
   delayMs = 10000,
   url = '/',

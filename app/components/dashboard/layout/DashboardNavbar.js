@@ -5,8 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, Wifi, WifiOff, Plus, ChevronDown, Settings,
   SlidersHorizontal, Menu, Bookmark, Tv, Film, Headphones, BookOpen,
-  FolderPlus, Layers, Trophy, Keyboard
+  FolderPlus, Layers, Trophy, Keyboard, Lock
 } from 'lucide-react';
+import { getVaultPin } from '../../../utils/localStore';
 import CachedImage from '../../../utils/imageCache';
 import { toFanartBigPreview, toFanartPreview, toSearchThumbnail } from '../../../lib/fanartUtils';
 import { getInitials } from '../utils/dashboardHelpers';
@@ -40,10 +41,12 @@ function DashboardNavbar({
   setShowSettings,
   onOpenAchievements,
   onOpenShortcuts,
+  onOpenVault,
 }) {
   const router = useRouter();
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [vaultPin, setVaultPinState] = useState(() => (typeof window !== 'undefined' ? getVaultPin() : null));
   const desktopSearchRef = useRef(null);
   const mobileSearchRef = useRef(null);
   const actionModalTimerRef = useRef(null);
@@ -72,12 +75,24 @@ function DashboardNavbar({
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('touchstart', handleClickOutside);
     document.addEventListener('keydown', handleKeyDown);
+    const handlePinSync = () => setVaultPinState(getVaultPin());
+    window.addEventListener('vault_pin_updated', handlePinSync);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('vault_pin_updated', handlePinSync);
     };
   }, []);
+
+  const isVaultPinMatch = Boolean(vaultPin && search.trim() === vaultPin);
+
+  const handleTriggerOpenVault = () => {
+    setSearch('');
+    setIsSearchOpen(false);
+    setMobileSearchOpen(false);
+    if (onOpenVault) onOpenVault();
+  };
 
   return (
     <header
@@ -91,7 +106,7 @@ function DashboardNavbar({
         <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group shrink-0">
           <img
             src="/logo.png"
-            alt="AnimeWatch Logo"
+            alt="GaneshSpace Logo"
             className="h-8 sm:h-9 md:h-10 w-auto group-hover:scale-105 transition-transform duration-300 drop-shadow-[0_0_10px_rgba(124,92,255,0.5)] shrink-0"
           />
           <div className="shrink-0">
@@ -108,7 +123,7 @@ function DashboardNavbar({
           <Link href="/" className="shrink-0">
             <img
               src="/logo.png"
-              alt="AnimeWatch Logo"
+              alt="GaneshSpace Logo"
               className="h-9 w-auto"
             />
           </Link>
@@ -128,6 +143,10 @@ function DashboardNavbar({
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && search.trim()) {
+                  if (isVaultPinMatch) {
+                    handleTriggerOpenVault();
+                    return;
+                  }
                   router.push(`/results?filter=${encodeURIComponent(search.trim())}`);
                   setIsSearchOpen(false);
                 }
@@ -150,12 +169,31 @@ function DashboardNavbar({
             {/* Mobile Search Results Dropdown */}
             {search.trim().length > 0 && isSearchOpen && (
               <div className="absolute top-full left-0 right-0 mt-2 bg-[#0e131f]/95 backdrop-blur-xl border border-white/15 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.85)] z-50 max-h-[min(65dvh,calc(100dvh-4.5rem))] overflow-y-auto custom-scrollbar overscroll-contain">
-                {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 && autocompleteMovieMatches.length === 0 && autocompleteWebseriesMatches.length === 0 && autocompleteWatchlistMatches.length === 0 ? (
+                {!isVaultPinMatch && autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 && autocompleteMovieMatches.length === 0 && autocompleteWebseriesMatches.length === 0 && autocompleteWatchlistMatches.length === 0 ? (
                   <div className="p-4 text-center text-xs text-gray-400">
                     No anime, manga, audio story, movie, webseries, or watchlist matches found
                   </div>
                 ) : (
                   <div className="p-2 space-y-1">
+                    {isVaultPinMatch && (
+                      <button
+                        type="button"
+                        onClick={handleTriggerOpenVault}
+                        className="w-full flex items-center gap-3 p-2.5 rounded-xl bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/45 hover:to-indigo-600/45 border border-purple-400/50 transition cursor-pointer text-left"
+                      >
+                        <div className="w-10 h-10 rounded-lg bg-purple-500/25 border border-purple-400/40 flex items-center justify-center text-purple-200 flex-shrink-0">
+                          <Lock size={17} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[9px] font-black uppercase tracking-wider text-purple-300 block">
+                            Secret Vault Unlocked
+                          </span>
+                          <span className="text-xs font-extrabold text-white block">
+                            Open Secret Vault
+                          </span>
+                        </div>
+                      </button>
+                    )}
                     {autocompleteWatchlistMatches.slice(0, 4).map((item) => {
                       const coverImg = toSearchThumbnail(item.posterUrl || (item.images?.posters?.[0]?.url || item.backdropUrl || null));
                       return (
@@ -393,6 +431,10 @@ function DashboardNavbar({
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && search.trim()) {
+                if (isVaultPinMatch) {
+                  handleTriggerOpenVault();
+                  return;
+                }
                 router.push(`/results?filter=${encodeURIComponent(search.trim())}`);
                 setIsSearchOpen(false);
               }
@@ -415,12 +457,31 @@ function DashboardNavbar({
           {/* Search Recommendations Dropdown */}
           {search.trim().length > 0 && isSearchOpen && (
             <div className="absolute top-full right-0 w-80 lg:w-96 mt-2 bg-[#0e131f]/95 backdrop-blur-xl border border-white/15 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.85)] z-50 max-h-[min(26rem,calc(100dvh-5.5rem))] overflow-y-auto custom-scrollbar overscroll-contain">
-              {autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 && autocompleteMovieMatches.length === 0 && autocompleteWebseriesMatches.length === 0 && autocompleteWatchlistMatches.length === 0 ? (
+              {!isVaultPinMatch && autocompleteMatches.length === 0 && autocompleteMangaMatches.length === 0 && autocompleteAudioStoryMatches.length === 0 && autocompleteMovieMatches.length === 0 && autocompleteWebseriesMatches.length === 0 && autocompleteWatchlistMatches.length === 0 ? (
                 <div className="p-4 text-center text-xs text-gray-400">
                   No anime, manga, audio story, movie, webseries, or watchlist matches found
                 </div>
               ) : (
                 <div className="p-2 space-y-1">
+                  {isVaultPinMatch && (
+                    <button
+                      type="button"
+                      onClick={handleTriggerOpenVault}
+                      className="w-full flex items-center gap-3 p-2.5 rounded-xl bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/45 hover:to-indigo-600/45 border border-purple-400/50 transition cursor-pointer text-left"
+                    >
+                      <div className="w-10 h-10 rounded-lg bg-purple-500/25 border border-purple-400/40 flex items-center justify-center text-purple-200 flex-shrink-0">
+                        <Lock size={18} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-[9px] font-black uppercase tracking-wider text-purple-300 block">
+                          Secret Vault Unlocked
+                        </span>
+                        <span className="text-xs font-extrabold text-white block">
+                          Open Secret Vault
+                        </span>
+                      </div>
+                    </button>
+                  )}
                   {autocompleteWatchlistMatches.slice(0, 4).map((item) => {
                     const coverImg = toSearchThumbnail(item.posterUrl || (item.images?.posters?.[0]?.url || item.backdropUrl || null));
                     return (

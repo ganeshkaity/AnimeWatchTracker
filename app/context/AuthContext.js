@@ -8,6 +8,7 @@ import {
   setUserId,
   getLocalSettings,
   setLocalSettings,
+  subscribeVaultFromDB,
 } from '../utils/localStore';
 
 const AuthContext = createContext();
@@ -67,6 +68,10 @@ export function AuthProvider({ children }) {
     }
 
     setLoading(false);
+    const unsubVault = subscribeVaultFromDB(uid);
+    return () => {
+      unsubVault();
+    };
   }, []);
 
   async function updateVlcPath(vlcPath) {

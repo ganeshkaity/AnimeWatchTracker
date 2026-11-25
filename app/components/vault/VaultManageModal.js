@@ -3,13 +3,14 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Lock, X, Search, Check, Plus, Film, Tv, Sparkles, BookOpen, Bookmark
+  Lock, X, Search, Check, Plus, Film, Tv, Sparkles, BookOpen, Bookmark, Headphones
 } from 'lucide-react';
 import {
   getLocalMovies,
   getLocalAnimes,
   getLocalWebseries,
-  getLocalManga,
+  getLocalMangas,
+  getLocalAudioStories,
   getLocalWatchlist,
   getVaultItems,
   toggleVaultItem
@@ -21,6 +22,7 @@ const CATEGORIES = [
   { id: 'anime', label: 'Anime', icon: Sparkles },
   { id: 'webseries', label: 'Web-series', icon: Tv },
   { id: 'manga', label: 'Manga', icon: BookOpen },
+  { id: 'audiostory', label: 'Audio Stories', icon: Headphones },
   { id: 'watchlist', label: 'Watchlist', icon: Bookmark },
 ];
 
@@ -36,10 +38,11 @@ export default function VaultManageModal({ isOpen, onClose, onVaultUpdated }) {
     const movies = (getLocalMovies() || []).map((m) => ({ ...m, mediaType: 'movie' }));
     const animes = (getLocalAnimes() || []).map((a) => ({ ...a, mediaType: 'anime' }));
     const webseries = (getLocalWebseries() || []).map((w) => ({ ...w, mediaType: 'webseries' }));
-    const mangas = (getLocalManga() || []).map((m) => ({ ...m, mediaType: 'manga' }));
+    const mangas = (getLocalMangas() || []).map((m) => ({ ...m, mediaType: 'manga' }));
+    const audioStories = (getLocalAudioStories() || []).map((a) => ({ ...a, mediaType: 'audiostory' }));
     const watchlist = (getLocalWatchlist() || []).map((w) => ({ ...w, mediaType: 'watchlist' }));
 
-    return [...movies, ...animes, ...webseries, ...mangas, ...watchlist];
+    return [...movies, ...animes, ...webseries, ...mangas, ...audioStories, ...watchlist];
   }, [isOpen]);
 
   // Read currently vaulted item IDs
@@ -153,7 +156,7 @@ export default function VaultManageModal({ isOpen, onClose, onVaultUpdated }) {
             ) : (
               filtered.map((item) => {
                 const isVaulted = vaultedIds.has(item.id);
-                const coverImg = item.posterUrl || item.posterPath || item.coverUrl || item.thumbnailBase64 || null;
+                const coverImg = item.posterUrl || item.posterPath || item.coverUrl || item.thumbnailBase64 || (item.thumbnailPath ? `/api/image?path=${encodeURIComponent(item.thumbnailPath)}` : null);
 
                 return (
                   <div

@@ -92,7 +92,7 @@ function ThisWeekSection() {
       </div>
 
       {/* Upcoming 7 Days Row (Horizontally scrollable on mobile, 7-col grid on sm+) */}
-      <div className="flex sm:grid sm:grid-cols-7 gap-2.5 sm:gap-3 overflow-x-auto sm:overflow-visible no-scrollbar smooth-scroll-gpu pb-1 sm:pb-0">
+      <div className="flex sm:grid sm:grid-cols-7 gap-2.5 sm:gap-3 overflow-x-auto sm:overflow-visible no-scrollbar smooth-scroll-gpu px-1 py-1 -mx-1 sm:mx-0 sm:p-0">
         {upcomingDays.map((day) => {
           const daySchedule = schedule?.[day.id];
           const items = getDayAllItems(daySchedule);
@@ -121,7 +121,7 @@ function ThisWeekSection() {
               <div
                 className={`relative w-full aspect-[2/3] rounded-xl overflow-hidden transition-all duration-200 bg-white/[0.04] ${
                   day.isToday
-                    ? 'ring-2 ring-[#65e335] shadow-[0_0_18px_rgba(101,227,53,0.3)]'
+                    ? 'border-2 border-[#65e335] shadow-[0_0_14px_rgba(101,227,53,0.3)]'
                     : 'border border-white/10 group-hover:border-white/30 group-hover:-translate-y-0.5'
                 }`}
               >

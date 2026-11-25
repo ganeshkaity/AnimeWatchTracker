@@ -15,7 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOffline } from '../context/OfflineContext';
 import {
   getLocalAnimes, getLocalEpisodes, setLocalEpisodes, upsertLocalAnime, deleteLocalAnime,
-  addToDirtyQueue, getUserId
+  addToDirtyQueue, getUserId, isItemInVault
 } from '../utils/localStore';
 import AnimeCoverSearch from '../components/AnimeCoverSearch';
 import MediaPreviewModal from '../components/MediaPreviewModal';
@@ -542,6 +542,7 @@ export default function AnimesLibrary() {
 
     return (animes || [])
       .filter((anime) => {
+        if (isItemInVault(anime.id)) return false;
         // 1. Text Search
         if (q) {
           const matchTitle = (anime.title || '').toLowerCase().includes(q);

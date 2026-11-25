@@ -93,7 +93,7 @@ export default function HiddenVaultView({ onExitVault, onSelectAnime }) {
         {/* Filter bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white/[0.02] border border-white/5 p-3 rounded-2xl">
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
-            {['all', 'movie', 'anime', 'webseries', 'manga', 'watchlist'].map((tab) => (
+            {['all', 'movie', 'anime', 'webseries', 'manga', 'audiostory', 'watchlist'].map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -104,7 +104,7 @@ export default function HiddenVaultView({ onExitVault, onSelectAnime }) {
                     : 'bg-white/5 text-gray-400 hover:text-white'
                 }`}
               >
-                {tab === 'all' ? 'All Items' : tab}
+                {tab === 'all' ? 'All Items' : tab === 'audiostory' ? 'Audio' : tab}
               </button>
             ))}
           </div>
@@ -170,7 +170,7 @@ export default function HiddenVaultView({ onExitVault, onSelectAnime }) {
                     coverImg={coverImg}
                     rating={rating}
                     subLeft={movieYear}
-                    subRight={runtimeStr || (item.mediaType === 'webseries' ? 'Series' : item.mediaType === 'anime' ? 'Anime' : 'Movie')}
+                    subRight={runtimeStr || (item.mediaType === 'webseries' ? 'Series' : item.mediaType === 'anime' ? 'Anime' : item.mediaType === 'manga' ? 'Manga' : item.mediaType === 'audiostory' ? 'Audio' : item.mediaType === 'watchlist' ? 'Watchlist' : 'Movie')}
                     accentBorder="hover:border-purple-400/50"
                     onClick={() => {
                       if (item.mediaType === 'movie') {
@@ -179,6 +179,10 @@ export default function HiddenVaultView({ onExitVault, onSelectAnime }) {
                         router.push(`/webseries/${item.id}`);
                       } else if (item.mediaType === 'anime' && onSelectAnime) {
                         onSelectAnime(item.id);
+                      } else if (item.mediaType === 'manga') {
+                        router.push(`/manga/${item.id}`);
+                      } else if (item.mediaType === 'audiostory') {
+                        router.push(`/audio-story/${item.id}`);
                       } else if (item.mediaType === 'watchlist') {
                         router.push(`/watchlist/${item.id}`);
                       }

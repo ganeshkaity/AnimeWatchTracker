@@ -2,12 +2,34 @@ import {
   getLocalMovies,
   getLocalAnimes,
   getLocalWebseries,
-  getLocalManga,
+  getLocalMangas,
   getLocalWatchlist,
   getLocalMovieGroups,
+  getLocalAudioStories,
 } from './localStore';
+import { getWeeklySchedule, getDayAllItems } from './scheduleStore';
 
 export const BADGE_DEFINITIONS = [
+  {
+    id: 'first_step',
+    title: 'First Spark',
+    icon: '✨',
+    category: 'Starter',
+    rarity: 'Uncommon',
+    description: 'Add your very first title to any library',
+    target: 1,
+    check: (data) => data.movies.length + data.animes.length + data.webseries.length + data.mangas.length,
+  },
+  {
+    id: 'movie_buff',
+    title: 'Cinema Enthusiast',
+    icon: '🎥',
+    category: 'Movies',
+    rarity: 'Uncommon',
+    description: 'Add 25 movies to your personal library',
+    target: 25,
+    check: (data) => data.movies.length,
+  },
   {
     id: 'century_movies',
     title: 'Century Club',
@@ -27,6 +49,16 @@ export const BADGE_DEFINITIONS = [
     description: 'Watch and complete 25 movies',
     target: 25,
     check: (data) => data.movies.filter((m) => m.watched || m.completed || m.watchStatus === 'Completed' || (m.watchProgress && m.watchProgress >= 95)).length,
+  },
+  {
+    id: 'anime_initiate',
+    title: 'Anime Initiate',
+    icon: '🌸',
+    category: 'Anime',
+    rarity: 'Uncommon',
+    description: 'Track 10 anime series in your collection',
+    target: 10,
+    check: (data) => data.animes.length,
   },
   {
     id: 'otaku_master',
@@ -52,6 +84,19 @@ export const BADGE_DEFINITIONS = [
     }).length,
   },
   {
+    id: 'isekai_traveler',
+    title: 'Isekai Traveler',
+    icon: '🌀',
+    category: 'Anime',
+    rarity: 'Rare',
+    description: 'Collect 5 Fantasy or Isekai anime titles',
+    target: 5,
+    check: (data) => data.animes.filter((a) => {
+      const g = Array.isArray(a.genres) ? a.genres : (typeof a.genres === 'string' ? a.genres.split(',') : []);
+      return g.some((genre) => typeof genre === 'string' && (genre.toLowerCase().includes('isekai') || genre.toLowerCase().includes('fantasy')));
+    }).length,
+  },
+  {
     id: 'manga_scholar',
     title: 'Manga Scholar',
     icon: '📚',
@@ -60,6 +105,16 @@ export const BADGE_DEFINITIONS = [
     description: 'Read & track 15 manga or webtoon series',
     target: 15,
     check: (data) => data.mangas.length,
+  },
+  {
+    id: 'audio_wanderer',
+    title: 'Audio Storyteller',
+    icon: '🎧',
+    category: 'Audio',
+    rarity: 'Uncommon',
+    description: 'Add 3 or more audio stories to your library',
+    target: 3,
+    check: (data) => data.audioStories.length,
   },
   {
     id: 'binge_legend',
@@ -82,6 +137,16 @@ export const BADGE_DEFINITIONS = [
     check: (data) => data.movies.length + data.animes.length + data.webseries.length + data.mangas.length,
   },
   {
+    id: 'multiverse_vault',
+    title: 'Omnibus Collector',
+    icon: '🌌',
+    category: 'Collector',
+    rarity: 'Mythic',
+    description: 'Amass 250 total titles across your entire library',
+    target: 250,
+    check: (data) => data.movies.length + data.animes.length + data.webseries.length + data.mangas.length + data.audioStories.length,
+  },
+  {
     id: 'curator',
     title: 'Franchise Curator',
     icon: '🗂️',
@@ -100,6 +165,16 @@ export const BADGE_DEFINITIONS = [
     description: 'Save 20 titles to your Plan to Watch list',
     target: 20,
     check: (data) => data.watchlist.length,
+  },
+  {
+    id: 'planner_pro',
+    title: 'Schedule Strategist',
+    icon: '🗓️',
+    category: 'Organization',
+    rarity: 'Rare',
+    description: 'Schedule 5 or more watch sessions in your planner',
+    target: 5,
+    check: (data) => data.scheduledCount,
   },
   {
     id: 'star_reviewer',
@@ -151,17 +226,22 @@ export function calculateAchievements() {
   let mangas = [];
   let watchlist = [];
   let movieGroups = [];
+  let audioStories = [];
+  let scheduledCount = 0;
 
   if (typeof window !== 'undefined') {
     movies = getLocalMovies() || [];
     animes = getLocalAnimes() || [];
     webseries = getLocalWebseries() || [];
-    mangas = getLocalManga() || [];
+    mangas = getLocalMangas() || [];
     watchlist = getLocalWatchlist() || [];
     movieGroups = getLocalMovieGroups() || [];
+    audioStories = getLocalAudioStories() || [];
+    const sch = getWeeklySchedule() || {};
+    scheduledCount = Object.values(sch).reduce((acc, day) => acc + getDayAllItems(day).length, 0);
   }
 
-  const data = { movies, animes, webseries, mangas, watchlist, movieGroups };
+  const data = { movies, animes, webseries, mangas, watchlist, movieGroups, audioStories, scheduledCount };
 
   let unlockedCount = 0;
   const badges = BADGE_DEFINITIONS.map((b) => {
@@ -181,24 +261,28 @@ export function calculateAchievements() {
   // Calculate Rank / Tier
   let rank = 'Novice Collector';
   let rankLevel = 1;
-  let nextRankTarget = 3;
+  let nextRankTarget = 4;
 
-  if (unlockedCount >= 10) {
+  if (unlockedCount >= 15) {
+    rank = 'Mythic Archivist';
+    rankLevel = 6;
+    nextRankTarget = BADGE_DEFINITIONS.length;
+  } else if (unlockedCount >= 11) {
     rank = 'Legendary Otaku';
     rankLevel = 5;
-    nextRankTarget = BADGE_DEFINITIONS.length;
-  } else if (unlockedCount >= 7) {
+    nextRankTarget = 15;
+  } else if (unlockedCount >= 8) {
     rank = 'Grand Cinephile';
     rankLevel = 4;
-    nextRankTarget = 10;
-  } else if (unlockedCount >= 4) {
+    nextRankTarget = 11;
+  } else if (unlockedCount >= 5) {
     rank = 'Seasoned Watcher';
     rankLevel = 3;
-    nextRankTarget = 7;
+    nextRankTarget = 8;
   } else if (unlockedCount >= 2) {
     rank = 'Dedicated Explorer';
     rankLevel = 2;
-    nextRankTarget = 4;
+    nextRankTarget = 5;
   }
 
   return {
@@ -211,4 +295,3 @@ export function calculateAchievements() {
     nextRankTarget,
   };
 }
-

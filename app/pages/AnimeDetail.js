@@ -5293,7 +5293,7 @@ export default function AnimeDetail({ animeId, onBack, onPlayEpisode }) {
                         <div className="text-center py-6 text-gray-400 text-xs space-y-1">
                           <CheckCircle2 size={24} className="text-emerald-400 mx-auto mb-1" />
                           <p className="font-bold text-gray-200">No file or folder changes detected.</p>
-                          <p className="text-[11px] text-gray-500">Your WatchAnime library is 100% in sync with your local folder / playlist.</p>
+                          <p className="text-[11px] text-gray-500">Your GaneshSpace library is 100% in sync with your local folder / playlist.</p>
                         </div>
                       )}
                     </div>

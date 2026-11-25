@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bookmark, Search, Filter, ArrowUpDown, ChevronLeft, Plus,
   Star, Clock, CheckCircle2, AlertTriangle, X, Play,
   Edit3, Trash2, RotateCcw, Sparkles, SlidersHorizontal,
-  Eye, Check, Calendar, Tv, Loader2, HardDrive, Globe,
+  Eye, Check, Calendar, Tv, HardDrive, Globe,
   CreditCard, DollarSign, Film, BookOpen, Headphones, Layers, BookMarked,
   MoreVertical
 } from 'lucide-react';
@@ -16,14 +17,17 @@ import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import {
   getLocalWatchlist, setLocalWatchlist, upsertLocalWatchlist, deleteLocalWatchlist,
-  getUserId
+  getUserId, isItemInVault
 } from '../utils/localStore';
-import AddWatchlistModal from '../components/AddWatchlistModal';
-import EditWatchlistModal from '../components/EditWatchlistModal';
-import TransferWatchlistModal from '../components/TransferWatchlistModal';
-import MediaPreviewModal from '../components/MediaPreviewModal';
 import CachedImage from '../utils/imageCache';
+import { toFanartPreview } from '../lib/fanartUtils';
 import { getEffectiveRating } from '../utils/ratingUtils';
+import MediaCardSkeleton from '../components/dashboard/skeletons/MediaCardSkeleton';
+
+const AddWatchlistModal = dynamic(() => import('../components/AddWatchlistModal'), { ssr: false });
+const EditWatchlistModal = dynamic(() => import('../components/EditWatchlistModal'), { ssr: false });
+const TransferWatchlistModal = dynamic(() => import('../components/TransferWatchlistModal'), { ssr: false });
+const MediaPreviewModal = dynamic(() => import('../components/MediaPreviewModal'), { ssr: false });
 
 const ALL_GENRES = [
   "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary",
@@ -110,26 +114,23 @@ export default function WatchlistLibrary() {
   const hoverTimeoutRef = useRef(null);
   const closeTimeoutRef = useRef(null);
 
-  const handleCardMouseEnter = (item, type, e) => {
+  const handleCardMouseEnter = useCallback((item, type, e) => {
     if (typeof window !== 'undefined' && window.innerWidth < 768) return;
     if (closeTimeoutRef.current) {
       clearTimeout(closeTimeoutRef.current);
       closeTimeoutRef.current = null;
     }
-    if (activePreview?.item?.id === item.id) return;
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
       hoverTimeoutRef.current = null;
     }
     const rect = e.currentTarget.getBoundingClientRect();
-    // Fast switch (80ms) if already previewing another card, else 500ms initial hover
-    const delay = activePreview ? 80 : 500;
     hoverTimeoutRef.current = setTimeout(() => {
       setActivePreview({ item, type, rect });
-    }, delay);
-  };
+    }, 280);
+  }, []);
 
-  const handleCardMouseLeave = () => {
+  const handleCardMouseLeave = useCallback(() => {
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
       hoverTimeoutRef.current = null;
@@ -137,7 +138,7 @@ export default function WatchlistLibrary() {
     closeTimeoutRef.current = setTimeout(() => {
       setActivePreview(null);
     }, 140);
-  };
+  }, []);
 
   const handleModalMouseEnter = () => {
     if (closeTimeoutRef.current) {
@@ -272,6 +273,7 @@ export default function WatchlistLibrary() {
   // Filter & Sort Logic
   const filteredAndSorted = useMemo(() => {
     return watchlist.filter((item) => {
+      if (isItemInVault(item.id)) return false;
       // 1. Text Search
       if (search.trim()) {
         const q = search.toLowerCase();
@@ -338,7 +340,10 @@ export default function WatchlistLibrary() {
     return () => observer.disconnect();
   }, [visibleCount, filteredAndSorted.length]);
 
-  const displayedItems = filteredAndSorted.slice(0, visibleCount);
+  const displayedItems = useMemo(
+    () => filteredAndSorted.slice(0, visibleCount),
+    [filteredAndSorted, visibleCount]
+  );
 
   const resetAllFilters = () => {
     setSearch('');
@@ -573,11 +578,11 @@ export default function WatchlistLibrary() {
       </div>
 
       {/* ── Main Media Grid ─────────────────────────────────────────────────── */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 md:px-8 pb-16">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 md:px-8 pb-24 md:pb-16">
         {loading ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-5 pt-2">
-            {Array.from({ length: 16 }).map((_, idx) => (
-              <div key={idx} className="aspect-[2/3] rounded-2xl bg-white/5 animate-pulse" />
+            {Array.from({ length: 12 }).map((_, idx) => (
+              <MediaCardSkeleton key={idx} className="!w-full" />
             ))}
           </div>
         ) : filteredAndSorted.length === 0 ? (
@@ -620,7 +625,8 @@ export default function WatchlistLibrary() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-5 pt-2">
             {displayedItems.map((item) => {
-              const coverImg = item.posterUrl || (item.images?.posters?.[0]?.url || null);
+              const rawCover = item.posterUrl || (item.images?.posters?.[0]?.url || null);
+              const coverImg = rawCover ? toFanartPreview(rawCover) : null;
               const isCompleted = item.status === 'Completed';
               const pct = item.progressPercent || item.watchProgress || 0;
 
@@ -630,14 +636,15 @@ export default function WatchlistLibrary() {
                   onClick={() => router.push(`/watchlist/${item.id}`)}
                   onMouseEnter={(e) => handleCardMouseEnter(item, 'watchlist', e)}
                   onMouseLeave={handleCardMouseLeave}
-                  className="group relative rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-amber-400/50 hover:shadow-2xl hover:shadow-black/70 transition-all duration-300 cursor-pointer flex flex-col"
+                  style={{ contentVisibility: 'auto', containIntrinsicSize: '180px 270px' }}
+                  className="group relative rounded-2xl overflow-hidden bg-[#0d121f] border border-white/10 hover:border-amber-400/50 transition-colors duration-200 cursor-pointer flex flex-col"
                 >
                   <div className="relative aspect-[2/3] w-full overflow-hidden bg-black/60">
                     {coverImg ? (
                       <CachedImage
                         src={coverImg}
                         alt={item.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-1.5 p-3">
@@ -649,22 +656,22 @@ export default function WatchlistLibrary() {
                     {/* Top Badges */}
                     <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-10">
                       {getEffectiveRating(item) ? (
-                        <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
+                        <div className="px-1.5 py-0.5 rounded-md bg-black/85 text-[10px] font-bold text-amber-400 flex items-center gap-0.5 border border-white/10 shadow">
                           <Star size={10} className="fill-amber-400" />
                           <span>{getEffectiveRating(item).value}</span>
                         </div>
                       ) : <span />}
 
                       {isCompleted ? (
-                        <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
+                        <div className="px-1.5 py-0.5 rounded-md bg-emerald-600/95 text-white text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 shadow">
                           <Check size={9} /> DONE
                         </div>
                       ) : pct > 0 ? (
-                        <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
+                        <div className="px-1.5 py-0.5 rounded-md bg-black/85 text-amber-400 text-[9px] font-extrabold tracking-wider border border-white/10 shadow">
                           {Math.round(pct)}%
                         </div>
                       ) : item.contentType ? (
-                        <div className="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-300 text-[9px] font-extrabold uppercase tracking-wider border border-white/10 shadow">
+                        <div className="px-1.5 py-0.5 rounded-md bg-black/85 text-amber-300 text-[9px] font-extrabold uppercase tracking-wider border border-white/10 shadow">
                           {item.contentType}
                         </div>
                       ) : null}
@@ -716,11 +723,12 @@ export default function WatchlistLibrary() {
           </div>
         )}
 
-        {/* Load More Trigger */}
+        {/* Load More Skeletons */}
         {visibleCount < filteredAndSorted.length && (
-          <div ref={loadMoreRef} className="py-8 text-center text-xs text-gray-500 flex items-center justify-center gap-2">
-            <Loader2 size={16} className="animate-spin text-amber-400" />
-            <span>Loading more watchlist items...</span>
+          <div ref={loadMoreRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-5 pt-4">
+            {Array.from({ length: 6 }).map((_, idx) => (
+              <MediaCardSkeleton key={`more-${idx}`} className="!w-full" />
+            ))}
           </div>
         )}
       </main>

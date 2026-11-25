@@ -15,7 +15,7 @@ import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import {
   getLocalWebseries, setLocalWebseries, upsertLocalWebseries, deleteLocalWebseries,
-  setLocalWebseriesEpisodes, getUserId
+  setLocalWebseriesEpisodes, getUserId, isItemInVault
 } from '../utils/localStore';
 import AddWebseriesModal from '../components/AddWebseriesModal';
 import EditWebseriesModal from '../components/EditWebseriesModal';
@@ -263,6 +263,7 @@ export default function WebseriesLibrary() {
   // Filter & Sort Logic
   const filteredAndSorted = useMemo(() => {
     return webseriesList.filter((item) => {
+      if (isItemInVault(item.id)) return false;
       // Search
       if (search.trim()) {
         const q = search.toLowerCase();

@@ -34,6 +34,7 @@ import {
   getLocalWatchlist,
   getLocalMangas,
   getLocalAudioStories,
+  isItemInVault,
 } from '../utils/localStore';
 import { toFanartPreview } from '../lib/fanartUtils';
 
@@ -191,6 +192,7 @@ export default function SchedulePage() {
   const filteredLibrary = useMemo(() => {
     const q = libSearch.trim().toLowerCase();
     return libraryItems.filter((item) => {
+      if (isItemInVault(item.id)) return false;
       if (libFilter !== 'all' && item.mediaType !== libFilter) return false;
       if (showUnwatchedOnly && isLibraryItemWatched(item.raw, item.mediaType)) return false;
       if (q && !item.title.toLowerCase().includes(q)) return false;

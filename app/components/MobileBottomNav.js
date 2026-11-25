@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Home, Film, Tv, Bookmark, CalendarDays } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 const NAV_ITEMS = [
   { label: 'Home', href: '/', icon: Home, match: (p) => p === '/' },
@@ -15,9 +16,11 @@ const NAV_ITEMS = [
 
 export default function MobileBottomNav() {
   const pathname = usePathname() || '/';
+  const { loading } = useAuth();
 
-  // Hide on immersive full-screen player/reader routes
+  // Hide during initial auth/boot loading or on immersive full-screen player/reader routes
   if (
+    loading ||
     pathname.startsWith('/player') ||
     pathname.startsWith('/reader') ||
     pathname.startsWith('/audio-player')

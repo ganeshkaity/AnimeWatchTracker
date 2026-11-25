@@ -14,6 +14,7 @@ import {
   getLocalWebseries,
   getLocalWatchlist,
   getUserId,
+  isItemInVault,
 } from '../utils/localStore';
 import MediaCard from '../components/dashboard/cards/MediaCard';
 import MediaPreviewModal from '../components/MediaPreviewModal';
@@ -176,6 +177,7 @@ function ResultsContent() {
   const filteredMovies = useMemo(() => {
     if (singleMediaType && singleMediaType !== 'movie') return [];
     return (movies || []).filter((m) => {
+      if (isItemInVault(m.id)) return false;
       if (effectiveGenre && !matchesGenre(m.genres || m.genre, effectiveGenre)) return false;
       if (langParam && !matchesLang(m.language || m.lang, langParam)) return false;
       if (searchTerm && !matchesSearch(m, searchTerm)) return false;
@@ -186,6 +188,7 @@ function ResultsContent() {
   const filteredAnimes = useMemo(() => {
     if (singleMediaType && singleMediaType !== 'anime') return [];
     return (animes || []).filter((a) => {
+      if (isItemInVault(a.id)) return false;
       if (effectiveGenre && !matchesGenre(a.genres || a.genre, effectiveGenre)) return false;
       if (langParam && !matchesLang(a.language || a.lang, langParam)) return false;
       if (searchTerm && !matchesSearch(a, searchTerm)) return false;
@@ -196,6 +199,7 @@ function ResultsContent() {
   const filteredWebseries = useMemo(() => {
     if (singleMediaType && singleMediaType !== 'webseries') return [];
     return (webseriesList || []).filter((w) => {
+      if (isItemInVault(w.id)) return false;
       if (effectiveGenre && !matchesGenre(w.genres || w.genre, effectiveGenre)) return false;
       if (langParam && !matchesLang(w.language || w.lang, langParam)) return false;
       if (searchTerm && !matchesSearch(w, searchTerm)) return false;
@@ -206,6 +210,7 @@ function ResultsContent() {
   const filteredMangas = useMemo(() => {
     if (singleMediaType && singleMediaType !== 'manga') return [];
     return (mangas || []).filter((m) => {
+      if (isItemInVault(m.id)) return false;
       if (effectiveGenre && !matchesGenre(m.genres || m.genre, effectiveGenre)) return false;
       if (langParam && !matchesLang(m.language || m.lang, langParam)) return false;
       if (searchTerm && !matchesSearch(m, searchTerm)) return false;
@@ -216,6 +221,7 @@ function ResultsContent() {
   const filteredWatchlist = useMemo(() => {
     if (singleMediaType && singleMediaType !== 'watchlist') return [];
     return (watchlist || []).filter((item) => {
+      if (isItemInVault(item.id)) return false;
       if (effectiveGenre && !matchesGenre(item.genres || item.genre, effectiveGenre)) return false;
       if (langParam && !matchesLang(item.language || item.lang, langParam)) return false;
       if (searchTerm && !matchesSearch(item, searchTerm)) return false;

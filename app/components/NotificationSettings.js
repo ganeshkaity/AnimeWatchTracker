@@ -58,7 +58,7 @@ export default function NotificationSettings({ isCompact = false }) {
   const [copiedToken, setCopiedToken] = useState(false);
 
   // Local testing states
-  const [testTitle, setTestTitle] = useState('WatchAnime Test');
+  const [testTitle, setTestTitle] = useState('GaneshSpace Test');
   const [testMessage, setTestMessage] = useState('This is a test notification!');
   const [scheduledSeconds, setScheduledSeconds] = useState(5);
   const [pendingReminders, setPendingReminders] = useState([]);
@@ -156,7 +156,7 @@ export default function NotificationSettings({ isCompact = false }) {
     }
 
     const res = await showLocalNotification({
-      title: testTitle || 'WatchAnime Test',
+      title: testTitle || 'GaneshSpace Test',
       body: testMessage || 'Local browser notification working properly!',
       url: '/',
       tag: 'test-local',
@@ -177,7 +177,7 @@ export default function NotificationSettings({ isCompact = false }) {
 
     const delayMs = Math.max(1, parseInt(scheduledSeconds, 10) || 5) * 1000;
     const { id, scheduledFor } = scheduleLocalReminder({
-      title: 'WatchAnime Scheduled Reminder',
+      title: 'GaneshSpace Scheduled Reminder',
       body: `Reminder triggered after ${scheduledSeconds} seconds!`,
       delayMs,
       url: '/',

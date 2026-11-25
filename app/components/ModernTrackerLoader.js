@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 
 export default function ModernTrackerLoader({ text = "Booting Tracker..." }) {
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center bg-[#07090f] relative overflow-hidden select-none">
+    <div className="fixed inset-0 z-[100] min-h-screen w-full flex flex-col items-center justify-center bg-[#07090f] overflow-hidden select-none">
       {/* Dynamic Background Aura Lights */}
       <div className="absolute w-[500px] h-[500px] rounded-full bg-gradient-to-tr from-[#7c5cff]/15 via-cyan-500/10 to-transparent blur-3xl pointer-events-none animate-pulse" />
       <div className="absolute w-[350px] h-[350px] rounded-full bg-gradient-to-br from-pink-500/10 via-purple-600/15 to-transparent blur-2xl pointer-events-none" />

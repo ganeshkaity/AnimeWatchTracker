@@ -59,11 +59,6 @@ export default function LanguagesPage() {
                   {lang.name}
                 </span>
               )}
-              {lang.region && (
-                <span className="text-[10px] text-gray-400 font-medium mt-1 truncate">
-                  {lang.region}
-                </span>
-              )}
             </div>
           </div>
         ))}

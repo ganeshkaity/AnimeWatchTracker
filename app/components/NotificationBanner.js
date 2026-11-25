@@ -26,7 +26,7 @@ export default function NotificationBanner() {
       const title =
         payload?.notification?.title ||
         payload?.data?.title ||
-        'New WatchAnime Alert';
+        'New GaneshSpace Alert';
       const body =
         payload?.notification?.body ||
         payload?.data?.body ||
@@ -72,7 +72,7 @@ export default function NotificationBanner() {
     const handleCustomPush = (e) => {
       const payload = e.detail;
       if (!payload) return;
-      const title = payload?.notification?.title || payload?.data?.title || 'WatchAnime Alert';
+      const title = payload?.notification?.title || payload?.data?.title || 'GaneshSpace Alert';
       const body = payload?.notification?.body || payload?.data?.body || payload?.data?.message || '';
       const url = payload?.data?.url || '/';
       setActiveNotification({ id: Date.now(), title, body, url });
@@ -110,7 +110,7 @@ export default function NotificationBanner() {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-0.5">
             <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1">
-              <Sparkles size={11} /> WatchAnime
+              <Sparkles size={11} /> GaneshSpace
             </span>
           </div>
           <h4 className="text-xs font-bold text-white truncate">

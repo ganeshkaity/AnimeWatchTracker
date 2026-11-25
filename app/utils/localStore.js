@@ -17,6 +17,8 @@ import {
   idbDelete,
   idbClear,
 } from './mediaIndexedDB';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 // ─── Keys for Small Preferences (localStorage) ──────────────────────────────
 const PREF_KEYS = {
@@ -903,7 +905,11 @@ export function deleteLocalMovieGroup(groupId) {
   }
 }
 
-// ─── Secret Vault / Hidden Shelf (IndexedDB + localStorage PIN) ────────────────
+// ─── Secret Vault / Hidden Shelf (IndexedDB + Firestore DB PIN & Items) ───────
+
+let vaultPinUnsubscribe = null;
+let vaultItemsUnsubscribe = null;
+let vaultSubscribedUid = null;
 
 export function getVaultPin() {
   if (typeof window === 'undefined') return null;
@@ -914,7 +920,7 @@ export function getVaultPin() {
   }
 }
 
-export function setVaultPin(pin) {
+function applyVaultPinLocal(pin) {
   if (typeof window === 'undefined') return;
   try {
     if (!pin) {
@@ -924,7 +930,25 @@ export function setVaultPin(pin) {
     }
     window.dispatchEvent(new CustomEvent('vault_pin_updated'));
   } catch (err) {
-    console.error('Failed to set vault pin:', err);
+    console.error('Failed to apply vault pin locally:', err);
+  }
+}
+
+export function setVaultPin(pin, explicitUid = null) {
+  if (typeof window === 'undefined') return;
+  const cleanPin = pin ? String(pin).trim() : null;
+  applyVaultPinLocal(cleanPin);
+
+  try {
+    const uid = explicitUid || getUserId();
+    if (db && uid) {
+      const ref = doc(db, 'users', uid, 'settings', 'vault');
+      void setDoc(ref, { pin: cleanPin, updatedAt: Date.now() }, { merge: true }).catch((err) => {
+        console.warn('[localStore] Failed to sync vault pin to Firestore:', err);
+      });
+    }
+  } catch (err) {
+    console.warn('[localStore] Vault pin Firestore error:', err);
   }
 }
 
@@ -932,13 +956,101 @@ export function getVaultItems() {
   return memoryStore.vault_items || [];
 }
 
-export function setVaultItems(items) {
+export function getVaultIdSet() {
+  return new Set((memoryStore.vault_items || []).map((it) => it.id));
+}
+
+function applyVaultItemsLocal(items) {
   const list = Array.isArray(items) ? items : [];
   memoryStore.vault_items = list;
   idbClear('vault_items').then(() => idbPutBatch('vault_items', list));
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('vault_items_updated'));
   }
+}
+
+export function setVaultItems(items, explicitUid = null) {
+  const list = Array.isArray(items) ? items : [];
+  applyVaultItemsLocal(list);
+
+  try {
+    const uid = explicitUid || getUserId();
+    if (db && uid) {
+      const cleanList = JSON.parse(JSON.stringify(list));
+      const ref = doc(db, 'users', uid, 'settings', 'vault_items');
+      void setDoc(ref, { items: cleanList, updatedAt: Date.now() }).catch((err) => {
+        console.warn('[localStore] Failed to sync vault items to Firestore:', err);
+      });
+    }
+  } catch (err) {
+    console.warn('[localStore] Vault items Firestore error:', err);
+  }
+}
+
+export async function resetVaultWithDataDelete(explicitUid = null) {
+  applyVaultItemsLocal([]);
+  applyVaultPinLocal(null);
+
+  try {
+    const uid = explicitUid || getUserId();
+    if (db && uid) {
+      await Promise.all([
+        setDoc(doc(db, 'users', uid, 'settings', 'vault'), { pin: null, updatedAt: Date.now() }),
+        setDoc(doc(db, 'users', uid, 'settings', 'vault_items'), { items: [], updatedAt: Date.now() }),
+      ]);
+    }
+  } catch (err) {
+    console.warn('[localStore] Failed to reset vault in Firestore:', err);
+  }
+}
+
+export function subscribeVaultFromDB(explicitUid = null) {
+  if (typeof window === 'undefined' || !db) return () => {};
+  const uid = explicitUid || getUserId();
+  if (!uid) return () => {};
+
+  if (vaultSubscribedUid === uid && vaultPinUnsubscribe && vaultItemsUnsubscribe) {
+    return () => {};
+  }
+
+  if (vaultPinUnsubscribe) vaultPinUnsubscribe();
+  if (vaultItemsUnsubscribe) vaultItemsUnsubscribe();
+  vaultSubscribedUid = uid;
+
+  vaultPinUnsubscribe = onSnapshot(
+    doc(db, 'users', uid, 'settings', 'vault'),
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        const remotePin = data?.pin ? String(data.pin).trim() : null;
+        if (remotePin !== getVaultPin()) {
+          applyVaultPinLocal(remotePin);
+        }
+      }
+    },
+    (err) => console.warn('[localStore] Vault pin snapshot error:', err)
+  );
+
+  vaultItemsUnsubscribe = onSnapshot(
+    doc(db, 'users', uid, 'settings', 'vault_items'),
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (Array.isArray(data?.items)) {
+          applyVaultItemsLocal(data.items);
+        }
+      }
+    },
+    (err) => console.warn('[localStore] Vault items snapshot error:', err)
+  );
+
+  return () => {
+    if (vaultPinUnsubscribe) vaultPinUnsubscribe();
+    if (vaultItemsUnsubscribe) vaultItemsUnsubscribe();
+    vaultPinUnsubscribe = null;
+    vaultItemsUnsubscribe = null;
+    vaultSubscribedUid = null;
+  };
 }
 
 export function isItemInVault(itemId) {

@@ -1045,7 +1045,7 @@ export default function Stream({ onBack }) {
               <div className="max-w-md space-y-1.5">
                 <h3 className="text-lg font-bold text-white">Scan QR Code on PC Host</h3>
                 <p className="text-xs text-gray-400">
-                  Open WatchAnime on your PC, click "Start Stream Host", and scan the displayed QR code with your phone camera.
+                  Open GaneshSpace on your PC, click "Start Stream Host", and scan the displayed QR code with your phone camera.
                 </p>
               </div>
               <div className="flex flex-col sm:flex-row items-center gap-3 mt-1">

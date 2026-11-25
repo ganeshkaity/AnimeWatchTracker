@@ -17,7 +17,7 @@ import {
   getLocalMovies, setLocalMovies, upsertLocalMovie, deleteLocalMovie,
   getLocalWebseries, setLocalWebseries, upsertLocalWebseries, deleteLocalWebseries, setLocalWebseriesEpisodes,
   getLocalWatchlist, setLocalWatchlist, upsertLocalWatchlist, deleteLocalWatchlist,
-  addToDirtyQueue, getUserId
+  addToDirtyQueue, getUserId, getVaultIdSet
 } from '../utils/localStore';
 import {
   Plus, Search, Settings, FolderOpen, Loader2, Play,
@@ -141,8 +141,26 @@ export default function Dashboard({ onSelectAnime }) {
 
   // Secret Vault, Achievements & Shortcuts Modal States
   const [isVaultOpen, setIsVaultOpen] = useState(false);
+  const [vaultVersion, setVaultVersion] = useState(0);
   const [showAchievementsModal, setShowAchievementsModal] = useState(false);
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
+
+  useEffect(() => {
+    const onVaultChange = () => setVaultVersion((v) => v + 1);
+    window.addEventListener('vault_items_updated', onVaultChange);
+    return () => window.removeEventListener('vault_items_updated', onVaultChange);
+  }, []);
+
+  const vaultIdSet = useMemo(() => {
+    void vaultVersion;
+    return typeof window !== 'undefined' ? getVaultIdSet() : new Set();
+  }, [vaultVersion]);
+
+  const visibleAnimes = useMemo(() => (animes || []).filter((it) => !vaultIdSet.has(it.id)), [animes, vaultIdSet]);
+  const visibleMovies = useMemo(() => (movies || []).filter((it) => !vaultIdSet.has(it.id)), [movies, vaultIdSet]);
+  const visibleMangas = useMemo(() => (mangas || []).filter((it) => !vaultIdSet.has(it.id)), [mangas, vaultIdSet]);
+  const visibleAudioStories = useMemo(() => (audioStories || []).filter((it) => !vaultIdSet.has(it.id)), [audioStories, vaultIdSet]);
+  const visibleWatchlist = useMemo(() => (watchlist || []).filter((it) => !vaultIdSet.has(it.id)), [watchlist, vaultIdSet]);
 
   // Global Keyboard Shortcuts (Ctrl+N, Ctrl+M, Ctrl+W, Ctrl+L, Ctrl+H, Esc)
   useEffect(() => {
@@ -744,11 +762,15 @@ export default function Dashboard({ onSelectAnime }) {
     }));
   }, [animes]);
 
-  // Get dynamic lists from database animes, mangas, audio stories, movies and web series
-  const heroSlides = useMemo(() => getHeroSlides(animes, mangas, audioStories, movies, webseriesList), [animes, mangas, audioStories, movies, webseriesList]);
+  // Get dynamic lists from database animes, mangas, audio stories, movies and web series (excluding vault items)
+  const visibleWebseries = useMemo(() => (webseriesList || []).filter((it) => !vaultIdSet.has(it.id)), [webseriesList, vaultIdSet]);
+  const heroSlides = useMemo(
+    () => getHeroSlides(visibleAnimes, visibleMangas, visibleAudioStories, visibleMovies, visibleWebseries),
+    [visibleAnimes, visibleMangas, visibleAudioStories, visibleMovies, visibleWebseries]
+  );
 
   const legacyLocalTopRated = useMemo(() => {
-    return [...animes]
+    return [...visibleAnimes]
       .sort((a, b) => parseFloat(b.rating || 0) - parseFloat(a.rating || 0))
       .slice(0, 5)
       .map(anime => ({
@@ -758,55 +780,55 @@ export default function Dashboard({ onSelectAnime }) {
         episode: anime.lastWatchedEpisode ? `Ep ${anime.lastWatchedEpisode}` : 'EP 0',
         image: anime.thumbnailBase64 || (anime.thumbnailPath ? `/api/image?path=${encodeURIComponent(anime.thumbnailPath)}` : null) || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop',
       }));
-  }, [animes]);
+  }, [visibleAnimes]);
 
   const autocompleteMatches = useMemo(() => {
     if (!search || !search.trim()) return [];
     const q = search.trim().toLowerCase();
-    return animes.filter(anime => (anime.title || '').toLowerCase().includes(q));
-  }, [animes, search]);
+    return visibleAnimes.filter(anime => (anime.title || '').toLowerCase().includes(q));
+  }, [visibleAnimes, search]);
 
   const autocompleteMangaMatches = useMemo(() => {
     if (!search || !search.trim()) return [];
     const q = search.trim().toLowerCase();
-    return (mangas || []).filter(m => (m?.title || '').toLowerCase().includes(q));
-  }, [mangas, search]);
+    return visibleMangas.filter(m => (m?.title || '').toLowerCase().includes(q));
+  }, [visibleMangas, search]);
 
   const autocompleteAudioStoryMatches = useMemo(() => {
     if (!search || !search.trim()) return [];
     const q = search.trim().toLowerCase();
-    return (audioStories || []).filter(a => (a?.title || '').toLowerCase().includes(q));
-  }, [audioStories, search]);
+    return visibleAudioStories.filter(a => (a?.title || '').toLowerCase().includes(q));
+  }, [visibleAudioStories, search]);
 
   const autocompleteMovieMatches = useMemo(() => {
     if (!search || !search.trim()) return [];
     const q = search.trim().toLowerCase();
-    return (movies || []).filter(m =>
+    return visibleMovies.filter(m =>
       (m?.title || '').toLowerCase().includes(q) ||
       (m?.originalTitle || '').toLowerCase().includes(q)
     );
-  }, [movies, search]);
+  }, [visibleMovies, search]);
 
   const autocompleteWebseriesMatches = useMemo(() => {
     if (!search || !search.trim()) return [];
     const q = search.trim().toLowerCase();
-    return (webseriesList || []).filter(w =>
+    return visibleWebseries.filter(w =>
       (w?.title || '').toLowerCase().includes(q) ||
       (w?.originalTitle || '').toLowerCase().includes(q)
     );
-  }, [webseriesList, search]);
+  }, [visibleWebseries, search]);
 
   const autocompleteWatchlistMatches = useMemo(() => {
     if (!search || !search.trim()) return [];
     const q = search.trim().toLowerCase();
-    return (watchlist || []).filter(item =>
+    return visibleWatchlist.filter(item =>
       (item?.title || '').toLowerCase().includes(q) ||
       (item?.originalTitle || '').toLowerCase().includes(q) ||
       (item?.englishTitle || '').toLowerCase().includes(q) ||
       (item?.romajiTitle || '').toLowerCase().includes(q) ||
       (item?.name || '').toLowerCase().includes(q)
     );
-  }, [watchlist, search]);
+  }, [visibleWatchlist, search]);
 
 
 
@@ -3205,76 +3227,167 @@ export default function Dashboard({ onSelectAnime }) {
     setShowSettings(false);
   };
 
-  // Export Data
+  // Export Data (All DB Collections & History)
   const [exporting, setExporting] = useState(false);
   const handleExportData = async () => {
     if (!currentUser) return;
     setExporting(true);
 
     try {
-      const animeSnap = await getDocs(collection(db, 'users', currentUser.uid, 'anime'));
-      const animeDocs = [];
-      animeSnap.forEach(d => animeDocs.push({ id: d.id, ...d.data() }));
-      animeDocs.sort((a, b) => (a?.title || '').localeCompare(b?.title || ''));
+      const uid = currentUser.uid;
       const dateStr = new Date().toISOString().slice(0, 10);
 
-      if (exportFormat === 'json') {
-        const exportData = [];
-        for (const anime of animeDocs) {
-          const epSnap = await getDocs(
-            collection(db, 'users', currentUser.uid, 'anime', anime.id, 'episodes')
-          );
-          const episodes = [];
-          epSnap.forEach(d => {
-            const epData = d.data();
-            episodes.push({
-              episodeNumber: epData.episodeNumber,
-              fileName: epData.fileName,
-              filePath: epData.filePath,
-              isWatched: epData.isWatched || false,
-              watchedSeconds: epData.watchedSeconds || 0,
-              durationSeconds: epData.durationSeconds || 0,
-              lastPositionSeconds: epData.lastPositionSeconds || 0,
-              isFlagged: epData.isFlagged || false,
-              flags: epData.flags || [],
-              note: epData.note || '',
-              isOffPattern: epData.isOffPattern || false,
-              updatedAt: epData.updatedAt || ''
-            });
-          });
-          exportData.push({ ...anime, episodes });
+      const fetchSubcollectionDocs = async (parentCol, parentId, subCol) => {
+        try {
+          const snap = await getDocs(collection(db, 'users', uid, parentCol, parentId, subCol));
+          const list = [];
+          snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+          return list;
+        } catch {
+          return [];
         }
-        const jsonContent = JSON.stringify(exportData, null, 2);
+      };
+
+      const fetchCollection = async (colName) => {
+        try {
+          const snap = await getDocs(collection(db, 'users', uid, colName));
+          const list = [];
+          snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+          return list;
+        } catch {
+          return [];
+        }
+      };
+
+      const [
+        userProfileSnap,
+        animeDocs,
+        moviesDocs,
+        webseriesDocs,
+        watchlistDocs,
+        mangasDocs,
+        audioStoriesDocs,
+        notesDocs,
+        movieGroupsDocs,
+        weeklyScheduleDocs,
+        settingsDocs,
+      ] = await Promise.all([
+        getDoc(doc(db, 'users', uid)).catch(() => null),
+        fetchCollection('anime'),
+        fetchCollection('movies'),
+        fetchCollection('webseries'),
+        fetchCollection('watchlist'),
+        fetchCollection('mangas'),
+        fetchCollection('audioStories'),
+        fetchCollection('notes'),
+        fetchCollection('movieGroups'),
+        fetchCollection('weeklySchedule'),
+        fetchCollection('settings'),
+      ]);
+
+      // Fetch nested subcollections in parallel
+      const [animeWithEps, webseriesWithEps, mangasWithChapters, audiosWithTracks] = await Promise.all([
+        Promise.all(
+          animeDocs.map(async (anime) => ({
+            ...anime,
+            episodes: await fetchSubcollectionDocs('anime', anime.id, 'episodes'),
+          }))
+        ),
+        Promise.all(
+          webseriesDocs.map(async (ws) => ({
+            ...ws,
+            episodes: await fetchSubcollectionDocs('webseries', ws.id, 'episodes'),
+          }))
+        ),
+        Promise.all(
+          mangasDocs.map(async (mg) => ({
+            ...mg,
+            chapters: await fetchSubcollectionDocs('mangas', mg.id, 'chapters'),
+          }))
+        ),
+        Promise.all(
+          audioStoriesDocs.map(async (au) => ({
+            ...au,
+            tracks: await fetchSubcollectionDocs('audioStories', au.id, 'tracks'),
+          }))
+        ),
+      ]);
+
+      if (exportFormat === 'json') {
+        const fullBackup = {
+          exportedAt: new Date().toISOString(),
+          userId: uid,
+          profile: userProfileSnap?.exists() ? userProfileSnap.data() : null,
+          anime: animeWithEps,
+          movies: moviesDocs,
+          webseries: webseriesWithEps,
+          watchlist: watchlistDocs,
+          mangas: mangasWithChapters,
+          audioStories: audiosWithTracks,
+          notes: notesDocs,
+          movieGroups: movieGroupsDocs,
+          weeklySchedule: weeklyScheduleDocs,
+          settings: settingsDocs,
+        };
+        const jsonContent = JSON.stringify(fullBackup, null, 2);
         const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `watchanime_tracking_${dateStr}.json`;
+        link.download = `ganeshspace_full_backup_${dateStr}.json`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        URL.revokeObjectURL(url);
       } else {
         const esc = (val) => {
           if (val === null || val === undefined) return '';
-          const str = String(val);
+          const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
           if (str.includes(',') || str.includes('"') || str.includes('\n')) {
             return '"' + str.replace(/"/g, '""') + '"';
           }
           return str;
         };
-        const rows = [['Title', 'FolderPath', 'EpisodeCount', 'ProgressPercent']];
-        for (const anime of animeDocs) {
-          rows.push([esc(anime.title), esc(anime.folderPath), esc(anime.episodeCount), esc(anime.progressPercent)]);
+        const rows = [['Category', 'ID', 'Title', 'Status', 'ProgressPercent', 'Rating', 'Year', 'ItemCount', 'UpdatedAt']];
+
+        for (const a of animeWithEps) {
+          rows.push([esc('Anime'), esc(a.id), esc(a.title), esc(a.status || ''), esc(a.progressPercent || 0), esc(a.rating || ''), esc(a.year || ''), esc(a.episodes?.length || a.episodeCount || 0), esc(a.updatedAt || a.lastOpenedAt || '')]);
         }
+        for (const m of moviesDocs) {
+          rows.push([esc('Movie'), esc(m.id), esc(m.title), esc(m.watchStatus || (m.watched ? 'Completed' : '')), esc(m.watchProgress || (m.watched ? 100 : 0)), esc(m.rating || ''), esc(m.year || ''), esc(1), esc(m.updatedAt || m.lastWatchedAt || '')]);
+        }
+        for (const w of webseriesWithEps) {
+          rows.push([esc('WebSeries'), esc(w.id), esc(w.title), esc(w.watchStatus || ''), esc(w.progressPercent || 0), esc(w.rating || ''), esc(w.year || ''), esc(w.episodes?.length || w.episodeCount || 0), esc(w.updatedAt || w.lastWatchedAt || '')]);
+        }
+        for (const wl of watchlistDocs) {
+          rows.push([esc('Watchlist'), esc(wl.id), esc(wl.title || wl.name), esc(wl.status || ''), esc(wl.progressPercent || 0), esc(wl.rating || ''), esc(wl.year || ''), esc(1), esc(wl.updatedAt || wl.addedAt || '')]);
+        }
+        for (const mg of mangasWithChapters) {
+          rows.push([esc('Manga'), esc(mg.id), esc(mg.title), esc(mg.status || ''), esc(mg.progressPercent || 0), esc(mg.rating || ''), esc(mg.year || ''), esc(mg.chapters?.length || mg.totalChapters || 0), esc(mg.updatedAt || mg.createdAt || '')]);
+        }
+        for (const au of audiosWithTracks) {
+          rows.push([esc('AudioStory'), esc(au.id), esc(au.title), esc(au.status || ''), esc(au.progressPercent || 0), esc(''), esc(''), esc(au.tracks?.length || au.totalTracks || 0), esc(au.updatedAt || au.createdAt || '')]);
+        }
+        for (const nt of notesDocs) {
+          rows.push([esc('Note'), esc(nt.id), esc(nt.title || 'Note'), esc(''), esc(''), esc(''), esc(''), esc(1), esc(nt.updatedAt || nt.createdAt || '')]);
+        }
+        for (const gr of movieGroupsDocs) {
+          rows.push([esc('MovieGroup'), esc(gr.id), esc(gr.name || gr.title), esc(''), esc(''), esc(''), esc(''), esc(gr.movieIds?.length || 0), esc(gr.updatedAt || gr.createdAt || '')]);
+        }
+        for (const sch of weeklyScheduleDocs) {
+          rows.push([esc('WeeklySchedule'), esc(sch.id), esc(sch.id), esc(''), esc(''), esc(''), esc(''), esc(sch.slots ? Object.values(sch.slots).flat().length : 0), esc(sch.updatedAt || '')]);
+        }
+
         const csvContent = rows.map(r => r.join(',')).join('\n');
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `watchanime_tracking_${dateStr}.csv`;
+        link.download = `ganeshspace_full_backup_${dateStr}.csv`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        URL.revokeObjectURL(url);
       }
     } catch (err) {
       console.error(err);
@@ -3342,12 +3455,12 @@ export default function Dashboard({ onSelectAnime }) {
   }, [animes, selectedGenre]);
 
   const topTrackedAnimes = useMemo(() => {
-    return sortedTrackedAnimes.slice(0, 10);
-  }, [sortedTrackedAnimes]);
+    return sortedTrackedAnimes.filter(a => !vaultIdSet.has(a.id)).slice(0, 10);
+  }, [sortedTrackedAnimes, vaultIdSet]);
 
   // Continue Watching, Reading & Listening items (user's active tracked anime, manga & audio)
   const continueWatchingList = useMemo(() => {
-    const activeAnimes = (animes || [])
+    const activeAnimes = (visibleAnimes || [])
       .filter(a => {
         const pct = getAnimeProgressPercent(a);
         return pct > 0 && pct < 100;
@@ -3359,7 +3472,7 @@ export default function Dashboard({ onSelectAnime }) {
         lastActivity: new Date(a.lastOpenedAt || a.updatedAt || a.createdAt || 0).getTime(),
       }));
 
-    const activeMangas = (mangas || [])
+    const activeMangas = (visibleMangas || [])
       .filter(m => {
         const pct = Number(m.progressPercent || 0);
         const isCompleted = Boolean(m.isWatched || m.isCompleted || pct === 100);
@@ -3376,7 +3489,7 @@ export default function Dashboard({ onSelectAnime }) {
         };
       });
 
-    const activeAudioStories = (audioStories || [])
+    const activeAudioStories = (visibleAudioStories || [])
       .filter(a => {
         const pct = Number(a.progressPercent || 0);
         const isCompleted = Boolean(a.isWatched || a.isCompleted || pct === 100);
@@ -3402,7 +3515,7 @@ export default function Dashboard({ onSelectAnime }) {
         };
       });
 
-    const activeMovies = (movies || [])
+    const activeMovies = (visibleMovies || [])
       .filter(m => {
         const pct = Number(m.watchProgress || 0);
         const isCompleted = Boolean(m.watched || m.completed || m.watchStatus === 'Completed' || pct >= 95);
@@ -3419,7 +3532,7 @@ export default function Dashboard({ onSelectAnime }) {
         };
       });
 
-    const activeWebseries = (webseriesList || [])
+    const activeWebseries = (visibleWebseries || [])
       .filter(w => {
         const pct = Number(w.progressPercent || 0);
         const isCompleted = Boolean(w.watched || w.isWatched || w.watchStatus === 'Completed' || pct >= 100);
@@ -3443,17 +3556,17 @@ export default function Dashboard({ onSelectAnime }) {
 
   // ── Manga List (Sorted new to old) ──────────────────────
   const sortedMangas = useMemo(() => {
-    return (mangas || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-  }, [mangas]);
+    return (visibleMangas || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }, [visibleMangas]);
 
   // ── Audio Stories List (Sorted new to old) ──────────────
   const sortedAudioStories = useMemo(() => {
-    return (audioStories || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-  }, [audioStories]);
+    return (visibleAudioStories || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }, [visibleAudioStories]);
 
   // ── Movies List (Filtered by genre & status; recently watched first priority, then latest added) ──────
   const sortedMovies = useMemo(() => {
-    return (movies || [])
+    return (visibleMovies || [])
       .filter((m) => {
         const matchGenre = selectedGenre === 'All' || (Array.isArray(m?.genres) && m.genres.some(g => (typeof g === 'string' ? g : g?.name || '').toLowerCase() === selectedGenre.toLowerCase()));
         const isWatched = Boolean(m.watched || m.completed || m.watchStatus === 'Completed' || (m.watchProgress && m.watchProgress >= 95));
@@ -3487,7 +3600,7 @@ export default function Dashboard({ onSelectAnime }) {
 
   // ── Webseries List (Filtered by genre & status; recently watched first priority, then latest added) ──────
   const sortedWebseries = useMemo(() => {
-    return (webseriesList || [])
+    return (visibleWebseries || [])
       .filter((w) => {
         const matchGenre = selectedGenre === 'All' || (Array.isArray(w?.genres) && w.genres.some(g => (typeof g === 'string' ? g : g?.name || '').toLowerCase() === selectedGenre.toLowerCase()));
         const isWatched = Boolean(w.watched || w.isWatched || w.watchStatus === 'Completed' || (w.progressPercent && w.progressPercent >= 100));
@@ -3519,10 +3632,10 @@ export default function Dashboard({ onSelectAnime }) {
 
   // ── Watchlist List (Sorted new to old) ──────────────────
   const sortedWatchlist = useMemo(() => {
-    return (watchlist || [])
+    return (visibleWatchlist || [])
       .slice()
       .sort((a, b) => new Date(b.addedAt || b.createdAt || b.updatedAt || 0) - new Date(a.addedAt || a.createdAt || a.updatedAt || 0));
-  }, [watchlist]);
+  }, [visibleWatchlist]);
 
   // ── Lazy-Load Chunking for Anime Catalog (Initial 24, +24 on scroll) ───────
   const [visibleCount, setVisibleCount] = useState(24);
@@ -3672,6 +3785,7 @@ export default function Dashboard({ onSelectAnime }) {
         setShowSettings={setShowSettings}
         onOpenAchievements={() => setShowAchievementsModal(true)}
         onOpenShortcuts={() => setShowShortcutsModal(true)}
+        onOpenVault={() => setIsVaultOpen(true)}
       />
 
       {/* 2. MOBILE MENU & QUICK ACTIONS */}
@@ -3857,9 +3971,9 @@ export default function Dashboard({ onSelectAnime }) {
 
         {/* Endless Scroll Genre Sections (Requirement 5 & Image 4) */}
         <EndlessGenreSections
-          movies={movies}
-          animes={animes}
-          webseriesList={webseriesList}
+          movies={visibleMovies}
+          animes={visibleAnimes}
+          webseriesList={visibleWebseries}
           onSelectAnime={onSelectAnime}
           handleCardMouseEnter={handleCardMouseEnter}
           handleCardMouseLeave={handleCardMouseLeave}

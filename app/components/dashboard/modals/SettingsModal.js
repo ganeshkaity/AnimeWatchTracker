@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Settings, X, Download, Lock, KeyRound, Trophy, Check, AlertCircle, Shield, Bell } from 'lucide-react';
-import { getVaultPin, setVaultPin } from '../../../utils/localStore';
+import { Settings, X, Download, Lock, KeyRound, Trophy, Check, AlertCircle, Shield, Bell, Trash2 } from 'lucide-react';
+import { getVaultPin, setVaultPin, resetVaultWithDataDelete } from '../../../utils/localStore';
 import NotificationSettings from '../../NotificationSettings';
 
 export default function SettingsModal({
@@ -27,6 +27,8 @@ export default function SettingsModal({
   const [oldPinInput, setOldPinInput] = useState('');
   const [newPinInput, setNewPinInput] = useState('');
   const [pinSuccessMsg, setPinSuccessMsg] = useState('');
+  const [showForgotConfirm, setShowForgotConfirm] = useState(false);
+  const [resettingVault, setResettingVault] = useState(false);
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
 
   useEffect(() => {
@@ -35,8 +37,12 @@ export default function SettingsModal({
       setPinInput('');
       setPinError('');
       setShowPinChange(false);
+      setShowForgotConfirm(false);
       setPinSuccessMsg('');
     }
+    const handlePinSync = () => setCurrentSavedPin(getVaultPin());
+    window.addEventListener('vault_pin_updated', handlePinSync);
+    return () => window.removeEventListener('vault_pin_updated', handlePinSync);
   }, [showSettings]);
 
   // Handle Unlocking Secret Vault
@@ -87,6 +93,24 @@ export default function SettingsModal({
     setShowPinChange(false);
     setPinSuccessMsg('Passcode updated successfully!');
     setTimeout(() => setPinSuccessMsg(''), 3000);
+  };
+
+  const handleConfirmForgotPassword = async () => {
+    setResettingVault(true);
+    setPinError('');
+    try {
+      await resetVaultWithDataDelete();
+      setCurrentSavedPin(null);
+      setPinInput('');
+      setOldPinInput('');
+      setNewPinInput('');
+      setShowForgotConfirm(false);
+      setShowPinChange(false);
+      setPinSuccessMsg('Vault wiped & passcode cleared. Create a new passcode below.');
+      setTimeout(() => setPinSuccessMsg(''), 4000);
+    } finally {
+      setResettingVault(false);
+    }
   };
   return (
     <AnimatePresence>
@@ -144,10 +168,15 @@ export default function SettingsModal({
 
               {/* Export Data Box */}
               <div className="p-4 rounded-2xl bg-[#111827]/80 border border-white/10 space-y-3">
-                <h3 className="text-xs font-bold text-[#7c5cff] flex items-center gap-2">
-                  <Download size={14} className="text-cyan-400" />
-                  Export Viewing History
-                </h3>
+                <div>
+                  <h3 className="text-xs font-bold text-[#7c5cff] flex items-center gap-2">
+                    <Download size={14} className="text-cyan-400" />
+                    Export Data
+                  </h3>
+                  <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">
+                    Download a complete backup of all your DB data (Anime, Movies, Web Series, Watchlist, Manga, Audio, Notes, Schedule, Groups &amp; Settings).
+                  </p>
+                </div>
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-gray-400 text-[11px]">Format</span>
                   <div className="flex gap-1">
@@ -210,7 +239,38 @@ export default function SettingsModal({
                   </div>
                 )}
 
-                {!showPinChange ? (
+                {showForgotConfirm ? (
+                  <div className="space-y-3 p-3 rounded-xl bg-rose-950/30 border border-rose-500/40">
+                    <div className="flex items-start gap-2 text-rose-300">
+                      <AlertCircle size={16} className="shrink-0 mt-0.5 text-rose-400" />
+                      <div className="space-y-1">
+                        <p className="text-xs font-bold text-rose-200">Delete All Vault Data &amp; Reset Passcode?</p>
+                        <p className="text-[11px] text-rose-300/80 leading-relaxed">
+                          This will permanently delete all hidden items inside your Secret Vault across all devices and clear your passcode so you can set a new one.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowForgotConfirm(false)}
+                        disabled={resettingVault}
+                        className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-bold cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmForgotPassword}
+                        disabled={resettingVault}
+                        className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                      >
+                        <Trash2 size={12} />
+                        <span>{resettingVault ? 'Deleting...' : 'Yes, Delete All & Reset'}</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : !showPinChange ? (
                   <div className="space-y-2">
                     <div className="flex flex-col gap-2">
                       <input
@@ -239,17 +299,30 @@ export default function SettingsModal({
                     )}
 
                     {currentSavedPin && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowPinChange(true);
-                          setPinError('');
-                        }}
-                        className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 font-semibold cursor-pointer transition pt-0.5"
-                      >
-                        <KeyRound size={11} />
-                        <span>Change Vault Passcode</span>
-                      </button>
+                      <div className="flex items-center justify-between gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowPinChange(true);
+                            setPinError('');
+                          }}
+                          className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 font-semibold cursor-pointer transition"
+                        >
+                          <KeyRound size={11} />
+                          <span>Change Vault Passcode</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowForgotConfirm(true);
+                            setPinError('');
+                          }}
+                          className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold cursor-pointer transition"
+                        >
+                          Forgot Password?
+                        </button>
+                      </div>
                     )}
                   </div>
                 ) : (

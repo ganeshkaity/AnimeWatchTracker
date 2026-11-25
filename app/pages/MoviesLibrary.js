@@ -14,7 +14,7 @@ import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import {
   getLocalMovies, setLocalMovies, upsertLocalMovie, deleteLocalMovie,
-  addToDirtyQueue, getUserId
+  addToDirtyQueue, getUserId, isItemInVault
 } from '../utils/localStore';
 import AddMovieModal from '../components/AddMovieModal';
 import EditMovieModal from '../components/EditMovieModal';
@@ -300,6 +300,7 @@ export default function MoviesLibrary() {
 
     return (movies || [])
       .filter(m => {
+        if (isItemInVault(m.id)) return false;
         // 1. Text Search
         if (q) {
           const matchTitle = (m.title || '').toLowerCase().includes(q);

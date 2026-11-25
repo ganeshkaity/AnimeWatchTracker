@@ -12,7 +12,7 @@ export default function DashboardFooter({
           <div className="flex items-center gap-2">
             <img
               src="/logo.png"
-              alt="AnimeWatch Logo"
+              alt="GaneshSpace Logo"
               className="h-8 w-auto drop-shadow-[0_0_8px_rgba(124,92,255,0.4)]"
             />
             <span className="text-lg font-black text-white tracking-wider">
@@ -58,7 +58,7 @@ export default function DashboardFooter({
       </div>
 
       <div className="max-w-7xl mx-auto pt-6 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center text-xs text-gray-500 gap-4">
-        <p>© {new Date().getFullYear()} AnimeWatch Tracker. Designed for high performance local streaming.</p>
+        <p>© {new Date().getFullYear()} Ganesh Space. Designed for high performance local streaming.</p>
         <div className="flex gap-4">
           <span className="hover:text-gray-400">Privacy</span>
           <span className="hover:text-gray-400">Terms</span>
