@@ -28,9 +28,13 @@ export default function MobileBottomNav() {
   return (
     <nav
       aria-label="Mobile Navigation"
-      className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#080808]/95 backdrop-blur-xl border-t border-white/10 pb-[env(safe-area-inset-bottom)]"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-50 pb-[env(safe-area-inset-bottom)] border-t border-white/15 bg-black/45 backdrop-blur-2xl backdrop-saturate-150 shadow-[0_-8px_32px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.18)]"
+      style={{
+        background:
+          'linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 45%, rgba(10,10,14,0.72) 100%), rgba(8, 8, 12, 0.55)',
+      }}
     >
-      <div className="grid grid-cols-5 h-16 max-w-lg mx-auto">
+      <div className="grid grid-cols-5 h-[52px] max-w-lg mx-auto">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const isActive = item.match(pathname);
@@ -39,17 +43,17 @@ export default function MobileBottomNav() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex flex-col items-center justify-center gap-1 transition-colors ${
+              className={`flex flex-col items-center justify-center gap-0.5 transition-colors ${
                 isActive ? 'text-white' : 'text-gray-400 hover:text-gray-200'
               }`}
             >
               <Icon
-                size={21}
+                size={18}
                 strokeWidth={isActive ? 2.4 : 1.8}
-                className={isActive ? 'text-white' : 'text-gray-400'}
+                className={isActive ? 'text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.45)]' : 'text-gray-400'}
               />
               <span
-                className={`text-[10px] tracking-tight ${
+                className={`text-[9.5px] leading-none tracking-tight ${
                   isActive ? 'font-bold text-white' : 'font-medium text-gray-400'
                 }`}
               >

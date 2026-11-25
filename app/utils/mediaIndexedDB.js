@@ -14,7 +14,7 @@
  */
 
 const DB_NAME = 'watchanime_offline_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbPromise = null;
 
@@ -98,6 +98,11 @@ export function getMediaDB() {
           // 10. Media Posters Cache
           if (!db.objectStoreNames.contains('media_cache')) {
             db.createObjectStore('media_cache', { keyPath: 'key' });
+          }
+
+          // 11. Weekly Schedule (date-keyed YYYY-MM-DD)
+          if (!db.objectStoreNames.contains('weekly_schedule')) {
+            db.createObjectStore('weekly_schedule', { keyPath: 'id' });
           }
         };
 

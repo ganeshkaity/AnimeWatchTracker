@@ -6,12 +6,14 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import {
   CalendarDays, Clock, Plus, Trash2, Edit3, Search, X, ArrowLeft,
   Moon, Sunrise, Sun, SunMedium, Sunset, Sparkles, MoonStar,
-  Tv, Film, Bookmark, BookOpen, Headphones, Check, Layers
+  Tv, Film, Bookmark, BookOpen, Headphones, Check, Layers, Cloud
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import {
-  WEEK_DAYS,
+  getUpcoming7Days,
   TIME_SLOTS,
   getWeeklySchedule,
+  subscribeSchedule,
   addScheduleItem,
   updateScheduleItem,
   deleteScheduleItem,
@@ -19,13 +21,14 @@ import {
   clearScheduleDay,
   getSlotEstimatedMinutes,
   getDayEstimatedMinutes,
-  getWeekEstimatedMinutes,
+  getUpcoming7DaysEstimatedMinutes,
   formatDurationMinutes,
   getTodayDayId,
   estimateMediaUnitMinutes,
 } from '../utils/scheduleStore';
 import {
   getLocalAnimes,
+  getLocalEpisodes,
   getLocalMovies,
   getLocalWebseries,
   getLocalWatchlist,
@@ -54,6 +57,18 @@ const MEDIA_TYPE_META = {
   audiostory: { label: 'Audio', color: 'bg-sky-500/20 text-sky-300 border-sky-500/40', icon: Headphones },
 };
 
+function isLibraryItemWatched(raw, mediaType) {
+  if (!raw) return false;
+  if (raw.watched || raw.completed || raw.watchStatus === 'Completed') return true;
+  if (typeof raw.progressPercent === 'number' && raw.progressPercent >= 100) return true;
+  if (mediaType === 'movie' && typeof raw.watchProgress === 'number' && raw.watchProgress >= 95) return true;
+  if (mediaType === 'anime') {
+    const eps = getLocalEpisodes(raw.id);
+    if (Array.isArray(eps) && eps.length > 0 && eps.every((e) => !!e.isWatched)) return true;
+  }
+  return false;
+}
+
 function getMediaHref(mediaType, mediaId) {
   if (!mediaId) return '#';
   switch (mediaType) {
@@ -68,33 +83,36 @@ function getMediaHref(mediaType, mediaId) {
 }
 
 export default function SchedulePage() {
+  const { currentUser } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const upcomingDays = useMemo(() => getUpcoming7Days(), []);
   const todayId = getTodayDayId();
 
   const initialDay = useMemo(() => {
     const paramDay = searchParams?.get('day');
-    if (paramDay && WEEK_DAYS.some((d) => d.id === paramDay)) return paramDay;
+    if (paramDay && upcomingDays.some((d) => d.id === paramDay)) return paramDay;
     return todayId;
-  }, [searchParams, todayId]);
+  }, [searchParams, upcomingDays, todayId]);
 
   const [selectedDay, setSelectedDay] = useState(initialDay);
-  const [schedule, setSchedule] = useState(() => (typeof window !== 'undefined' ? getWeeklySchedule() : null));
+  const [schedule, setSchedule] = useState(() => getWeeklySchedule());
 
   // Library items
   const [libraryItems, setLibraryItems] = useState([]);
 
   // Add Modal State
-  const [addModalSlot, setAddModalSlot] = useState(null); // slotId | null
+  const [addModalSlot, setAddModalSlot] = useState(null);
   const [libSearch, setLibSearch] = useState('');
   const [libFilter, setLibFilter] = useState('all');
+  const [showUnwatchedOnly, setShowUnwatchedOnly] = useState(false);
   const [pickedItem, setPickedItem] = useState(null);
   const [addCount, setAddCount] = useState(1);
   const [addUnitMin, setAddUnitMin] = useState(24);
   const [addNote, setAddNote] = useState('');
 
   // Edit Modal State
-  const [editingTarget, setEditingTarget] = useState(null); // { dayId, slotId, entry }
+  const [editingTarget, setEditingTarget] = useState(null);
   const [editDayId, setEditDayId] = useState('');
   const [editSlotId, setEditSlotId] = useState('');
   const [editCount, setEditCount] = useState(1);
@@ -103,14 +121,14 @@ export default function SchedulePage() {
 
   useEffect(() => {
     const paramDay = searchParams?.get('day');
-    if (paramDay && WEEK_DAYS.some((d) => d.id === paramDay)) {
+    if (paramDay && upcomingDays.some((d) => d.id === paramDay)) {
       setSelectedDay(paramDay);
     }
-  }, [searchParams]);
+  }, [searchParams, upcomingDays]);
 
   useEffect(() => {
-    document.title = 'Weekly Schedule - GaneshSpace';
-    setSchedule(getWeeklySchedule());
+    document.title = 'Upcoming 7-Day Schedule - GaneshSpace';
+    const unsubscribe = subscribeSchedule(currentUser?.uid);
 
     const loadLibrary = () => {
       const animes = (getLocalAnimes() || []).map((a) => ({
@@ -164,22 +182,26 @@ export default function SchedulePage() {
       setSchedule(e?.detail || getWeeklySchedule());
     };
     window.addEventListener('weekly_schedule_updated', handleScheduleUpdate);
-    return () => window.removeEventListener('weekly_schedule_updated', handleScheduleUpdate);
-  }, []);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('weekly_schedule_updated', handleScheduleUpdate);
+    };
+  }, [currentUser?.uid]);
 
   const filteredLibrary = useMemo(() => {
     const q = libSearch.trim().toLowerCase();
     return libraryItems.filter((item) => {
       if (libFilter !== 'all' && item.mediaType !== libFilter) return false;
+      if (showUnwatchedOnly && isLibraryItemWatched(item.raw, item.mediaType)) return false;
       if (q && !item.title.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [libraryItems, libFilter, libSearch]);
+  }, [libraryItems, libFilter, libSearch, showUnwatchedOnly]);
 
   const currentDaySchedule = schedule?.[selectedDay] || {};
   const dayTotalMinutes = getDayEstimatedMinutes(currentDaySchedule);
-  const weekTotalMinutes = getWeekEstimatedMinutes(schedule);
-  const selectedDayMeta = WEEK_DAYS.find((d) => d.id === selectedDay) || WEEK_DAYS[0];
+  const weekTotalMinutes = getUpcoming7DaysEstimatedMinutes(schedule);
+  const selectedDayMeta = upcomingDays.find((d) => d.id === selectedDay) || upcomingDays[0];
 
   const openAddModal = (slotId) => {
     setAddModalSlot(slotId);
@@ -203,16 +225,21 @@ export default function SchedulePage() {
     if (!addModalSlot || !pickedItem) return;
     const count = Math.max(1, Number(addCount) || 1);
     const perUnit = Math.max(1, Number(addUnitMin) || 1);
-    const updated = addScheduleItem(selectedDay, addModalSlot, {
-      mediaId: pickedItem.id,
-      mediaType: pickedItem.mediaType,
-      title: pickedItem.title,
-      poster: pickedItem.poster,
-      episodeCount: count,
-      durationPerUnitMin: perUnit,
-      totalMinutes: count * perUnit,
-      note: addNote,
-    });
+    const updated = addScheduleItem(
+      selectedDay,
+      addModalSlot,
+      {
+        mediaId: pickedItem.id,
+        mediaType: pickedItem.mediaType,
+        title: pickedItem.title,
+        poster: pickedItem.poster,
+        episodeCount: count,
+        durationPerUnitMin: perUnit,
+        totalMinutes: count * perUnit,
+        note: addNote,
+      },
+      currentUser?.uid
+    );
     setSchedule(updated);
     setAddModalSlot(null);
     setPickedItem(null);
@@ -242,24 +269,25 @@ export default function SchedulePage() {
         note: editNote,
       },
       editDayId,
-      editSlotId
+      editSlotId,
+      currentUser?.uid
     );
     setSchedule(updated);
     setEditingTarget(null);
   };
 
   const handleDeleteEntry = (slotId, entryId) => {
-    const updated = deleteScheduleItem(selectedDay, slotId, entryId);
+    const updated = deleteScheduleItem(selectedDay, slotId, entryId, currentUser?.uid);
     setSchedule(updated);
   };
 
   const handleClearSlot = (slotId) => {
-    const updated = clearScheduleSlot(selectedDay, slotId);
+    const updated = clearScheduleSlot(selectedDay, slotId, currentUser?.uid);
     setSchedule(updated);
   };
 
   const handleClearDay = () => {
-    const updated = clearScheduleDay(selectedDay);
+    const updated = clearScheduleDay(selectedDay, currentUser?.uid);
     setSchedule(updated);
   };
 
@@ -278,19 +306,19 @@ export default function SchedulePage() {
             </Link>
             <div>
               <h1 className="text-lg sm:text-xl font-extrabold tracking-tight flex items-center gap-2">
-                <CalendarDays size={20} className="text-[#65e335]" />
-                <span>Weekly Watch Schedule</span>
+                <span>Upcoming 7-Day Schedule</span>
               </h1>
-              <p className="text-[11px] text-gray-400">
-                Plan your anime, movies & series time-wise across the week
-              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.05] border border-white/10 text-xs">
+              <Cloud size={13} className="text-[#65e335]" />
+              <span className="text-gray-400">Synced to DB</span>
+            </div>
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.05] border border-white/10 text-xs">
               <Clock size={13} className="text-[#7c5cff]" />
-              <span className="text-gray-400">Week Total:</span>
+              <span className="text-gray-400">7-Day Total:</span>
               <span className="font-bold text-white">{formatDurationMinutes(weekTotalMinutes)}</span>
             </div>
           </div>
@@ -298,11 +326,10 @@ export default function SchedulePage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 md:px-8 py-6 space-y-6">
-        {/* 7-Day Selector Tabs */}
+        {/* Upcoming 7 Days Selector Tabs */}
         <div className="grid grid-cols-7 gap-1.5 sm:gap-2.5">
-          {WEEK_DAYS.map((day) => {
+          {upcomingDays.map((day) => {
             const isSelected = day.id === selectedDay;
-            const isToday = day.id === todayId;
             const dayMins = getDayEstimatedMinutes(schedule?.[day.id]);
             const itemCount = TIME_SLOTS.reduce(
               (acc, s) => acc + (schedule?.[day.id]?.[s.id]?.length || 0),
@@ -320,21 +347,22 @@ export default function SchedulePage() {
                 className={`relative flex flex-col items-center justify-center py-2.5 px-1 sm:px-3 rounded-xl border transition-all cursor-pointer ${
                   isSelected
                     ? 'bg-white text-black border-white shadow-lg'
-                    : isToday
+                    : day.isToday
                     ? 'bg-[#65e335]/10 text-[#65e335] border-[#65e335]/50 hover:bg-[#65e335]/20'
                     : 'bg-white/[0.04] text-gray-300 border-white/10 hover:bg-white/[0.08] hover:text-white'
                 }`}
               >
                 <span className="text-[11px] sm:text-xs font-extrabold tracking-wider">{day.short}</span>
+                <span className={`text-[9px] font-semibold ${isSelected ? 'text-black/75' : 'text-gray-400'}`}>
+                  {day.dateLabel}
+                </span>
                 <span className={`text-[9px] sm:text-[10px] mt-0.5 font-semibold ${
-                  isSelected ? 'text-black/70' : 'text-gray-400'
+                  isSelected ? 'text-black/70' : 'text-gray-500'
                 }`}>
                   {dayMins > 0 ? formatDurationMinutes(dayMins) : `${itemCount} items`}
                 </span>
-                {isToday && (
-                  <span className={`absolute -top-1.5 px-1.5 py-0.2 rounded-full text-[8px] font-black uppercase ${
-                    isSelected ? 'bg-[#65e335] text-black' : 'bg-[#65e335] text-black'
-                  }`}>
+                {day.isToday && (
+                  <span className="absolute -top-1.5 px-1.5 py-0.2 rounded-full text-[8px] font-black uppercase bg-[#65e335] text-black">
                     Today
                   </span>
                 )}
@@ -351,7 +379,7 @@ export default function SchedulePage() {
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-extrabold text-white">
-                {selectedDayMeta.label} Schedule
+                {selectedDayMeta.label} ({selectedDayMeta.dateLabel})
               </h2>
               <p className="text-xs text-gray-400">
                 Estimated Day Duration:{' '}
@@ -530,7 +558,7 @@ export default function SchedulePage() {
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
               <div>
                 <h3 className="text-base font-extrabold text-white">
-                  Add to {selectedDayMeta.label} • {TIME_SLOTS.find((s) => s.id === addModalSlot)?.label}
+                  Add to {selectedDayMeta.label} ({selectedDayMeta.dateLabel}) • {TIME_SLOTS.find((s) => s.id === addModalSlot)?.label}
                 </h3>
                 <p className="text-xs text-gray-400">Choose any content from your library</p>
               </div>
@@ -545,16 +573,28 @@ export default function SchedulePage() {
 
             {!pickedItem ? (
               <div className="p-4 flex-1 overflow-hidden flex flex-col gap-3">
-                {/* Search & Type Filter */}
-                <div className="relative">
-                  <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    value={libSearch}
-                    onChange={(e) => setLibSearch(e.target.value)}
-                    placeholder="Search anime, movies, web series, watchlist..."
-                    className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-white/[0.06] border border-white/10 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-white/30"
-                  />
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      value={libSearch}
+                      onChange={(e) => setLibSearch(e.target.value)}
+                      placeholder="Search anime, movies, web series, watchlist..."
+                      className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-white/[0.06] border border-white/10 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-white/30"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowUnwatchedOnly((prev) => !prev)}
+                    className={`px-3 py-2.5 rounded-xl text-xs font-bold border whitespace-nowrap transition cursor-pointer ${
+                      showUnwatchedOnly
+                        ? 'bg-[#65e335] text-black border-[#65e335]'
+                        : 'bg-white/[0.06] text-gray-300 border-white/10 hover:bg-white/[0.12]'
+                    }`}
+                  >
+                    {showUnwatchedOnly ? 'Unwatched Only' : 'All Content'}
+                  </button>
                 </div>
 
                 <div className="flex flex-wrap gap-1.5">
@@ -582,7 +622,6 @@ export default function SchedulePage() {
                   ))}
                 </div>
 
-                {/* Library List */}
                 <div className="flex-1 overflow-y-auto space-y-2 pr-1">
                   {filteredLibrary.length === 0 ? (
                     <div className="py-12 text-center text-sm text-gray-500">
@@ -743,8 +782,10 @@ export default function SchedulePage() {
                     onChange={(e) => setEditDayId(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-[#141414] border border-white/15 text-sm text-white focus:outline-none"
                   >
-                    {WEEK_DAYS.map((d) => (
-                      <option key={d.id} value={d.id}>{d.label}</option>
+                    {upcomingDays.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.short} ({d.dateLabel}){d.isToday ? ' • Today' : ''}
+                      </option>
                     ))}
                   </select>
                 </div>
