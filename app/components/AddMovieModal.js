@@ -53,6 +53,7 @@ export default function AddMovieModal({
   onClose,
   onAddMovie,
   existingMovies = [],
+  initialMovie = null,
 }) {
   // TMDB Search State
   const [searchQuery, setSearchQuery] = useState('');
@@ -147,8 +148,10 @@ export default function AddMovieModal({
       setImages({ posters: [], backdrops: [], logos: [] });
       setVideos([]);
       setSubmitting(false);
+    } else if (isOpen && initialMovie) {
+      handleSelectMovie(initialMovie);
     }
-  }, [isOpen]);
+  }, [isOpen, initialMovie]);
 
   if (!isOpen) return null;
 

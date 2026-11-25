@@ -83,6 +83,8 @@ import TopRatedMasterpiecesSection from '../components/dashboard/sections/TopRat
 import TopRatedMoviesSection from '../components/dashboard/sections/TopRatedMoviesSection';
 import PopularLanguagesSection from '../components/dashboard/sections/PopularLanguagesSection';
 import PopularGenresSection from '../components/dashboard/sections/PopularGenresSection';
+import UpcomingMoviesSection from '../components/dashboard/sections/UpcomingMoviesSection';
+import UpcomingAnimesSection from '../components/dashboard/sections/UpcomingAnimesSection';
 import EndlessGenreSections from '../components/dashboard/sections/EndlessGenreSections';
 
 // Lazy-loaded Modal Components for Faster Initial Load & Lighter Memory Footprint
@@ -250,6 +252,7 @@ export default function Dashboard({ onSelectAnime }) {
 
   // Movie Modal & Action States
   const [showAddMovieModal, setShowAddMovieModal] = useState(false);
+  const [prefillUpcomingMovie, setPrefillUpcomingMovie] = useState(null);
   const [movieEditing, setMovieEditing] = useState(null);
   const [movieCompleteConfirm, setMovieCompleteConfirm] = useState(null);
   const movieScrollRef = useRef(null);
@@ -536,6 +539,24 @@ export default function Dashboard({ onSelectAnime }) {
     setCoverUrl(item.banner || item.image || '');
     setShowAddModal(true);
   };
+
+  const handleSelectUpcomingMovie = useCallback((movie) => {
+    setPrefillUpcomingMovie(movie);
+    setShowAddMovieModal(true);
+  }, []);
+
+  const handleSelectUpcomingAnime = useCallback((anime) => {
+    setAnimeTitle(anime.title || '');
+    setAnimeSearchQuery(anime.title || '');
+    setCoverUrl(anime.poster || '');
+    setAnimeBannerUrl(anime.banner || '');
+    setAnimeRomajiTitle(anime.romajiTitle || '');
+    setAnimeOverview(anime.overview || '');
+    setAnimeYear(anime.year || '');
+    setAddGenres(Array.isArray(anime.genres) ? anime.genres : []);
+    setAddTotalEpisodes(anime.episodes ? String(anime.episodes) : '');
+    setShowAddModal(true);
+  }, []);
 
   // ── Top 20 Top Rated Anime from AniList/Jikan with 1-Day Firestore & LocalStorage Cache ──
   const [topRatedAnime, setTopRatedAnime] = useState(() => {
@@ -3822,6 +3843,18 @@ export default function Dashboard({ onSelectAnime }) {
         {/* Popular Genres (Image 1 & 3) */}
         <PopularGenresSection />
 
+        {/* Upcoming Movies & Animes (10 items each, refreshed daily) */}
+        <UpcomingMoviesSection
+          onSelectUpcomingMovie={handleSelectUpcomingMovie}
+          handleCardMouseEnter={handleCardMouseEnter}
+          handleCardMouseLeave={handleCardMouseLeave}
+        />
+        <UpcomingAnimesSection
+          onSelectUpcomingAnime={handleSelectUpcomingAnime}
+          handleCardMouseEnter={handleCardMouseEnter}
+          handleCardMouseLeave={handleCardMouseLeave}
+        />
+
         {/* Endless Scroll Genre Sections (Requirement 5 & Image 4) */}
         <EndlessGenreSections
           movies={movies}
@@ -3853,6 +3886,14 @@ export default function Dashboard({ onSelectAnime }) {
           onMouseLeave={handleModalMouseLeave}
           onOpenDetails={(item) => {
             setActivePreview(null);
+            if (item?.isUpcoming) {
+              if (activePreview?.type === 'movie') {
+                handleSelectUpcomingMovie(item);
+              } else if (activePreview?.type === 'anime') {
+                handleSelectUpcomingAnime(item);
+              }
+              return;
+            }
             if (activePreview?.type === 'movie') {
               router.push(`/movies/${item.id}`);
             } else if (activePreview?.type === 'webseries') {
@@ -4123,7 +4164,11 @@ export default function Dashboard({ onSelectAnime }) {
       {showAddMovieModal && (
         <AddMovieModal
           isOpen={showAddMovieModal}
-          onClose={() => setShowAddMovieModal(false)}
+          initialMovie={prefillUpcomingMovie}
+          onClose={() => {
+            setShowAddMovieModal(false);
+            setPrefillUpcomingMovie(null);
+          }}
           onAddMovie={handleAddMovie}
           existingMovies={movies}
         />
