@@ -6,7 +6,7 @@ import {
   SlidersHorizontal, X, Bookmark, Tv, Film, Headphones,
   BookOpen, Sparkles, Play, StickyNote,
   Compass, Settings, Plus, WifiOff, Wifi, RefreshCw,
-  FolderPlus, Layers, Trophy, Keyboard, Lock
+  FolderPlus, Layers, Trophy, Keyboard, Lock, CalendarDays
 } from 'lucide-react';
 import { GENRES_LIST } from '../utils/dashboardHelpers';
 import { getLocalMovieGroups } from '../../../utils/localStore';
@@ -263,6 +263,14 @@ export default function DashboardMobileMenu({
                     <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">See All</span>
                   </Link>
                   <Link
+                    href="/release-calendar"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center justify-between transition"
+                  >
+                    <span className="flex items-center gap-2"><CalendarDays size={15} className="text-[#7c5cff]" /> Release Calendar</span>
+                    <span className="text-[10px] bg-[#7c5cff]/20 text-purple-300 px-2 py-0.5 rounded-full font-bold">New</span>
+                  </Link>
+                  <Link
                     href="/notes"
                     onClick={() => setMobileMenuOpen(false)}
                     className="hover:text-[#7c5cff] p-2 rounded-xl hover:bg-white/5 flex items-center gap-2 transition"
@@ -349,6 +357,14 @@ export default function DashboardMobileMenu({
                     className="w-full py-2 px-3 rounded-xl text-xs font-bold bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white flex items-center justify-center gap-2 cursor-pointer shadow-md"
                   >
                     <FolderPlus size={15} /> Create Movie Group
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMenuOpen(false); router.push('/release-calendar'); }}
+                    className="w-full py-2 px-3 rounded-xl text-xs font-bold bg-gradient-to-r from-[#7c5cff]/25 to-indigo-600/25 hover:from-[#7c5cff]/40 hover:to-indigo-600/40 border border-[#7c5cff]/40 text-purple-200 flex items-center justify-center gap-2 transition cursor-pointer"
+                  >
+                    <CalendarDays size={15} /> Release Calendar
                   </button>
 
                   <button

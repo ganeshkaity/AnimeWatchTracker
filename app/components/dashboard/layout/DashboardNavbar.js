@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, X, Wifi, WifiOff, Plus, ChevronDown, Settings,
   SlidersHorizontal, Menu, Bookmark, Tv, Film, Headphones, BookOpen,
-  FolderPlus, Layers, Trophy, Keyboard, Lock
+  FolderPlus, Layers, Trophy, Keyboard, Lock, CalendarDays
 } from 'lucide-react';
 import { getVaultPin } from '../../../utils/localStore';
 import CachedImage from '../../../utils/imageCache';
@@ -961,7 +961,25 @@ function DashboardNavbar({
                   </div>
                 </Link>
 
-                {/* 10. Achievements & Badges */}
+                {/* 10. Release Calendar */}
+                <Link
+                  href="/release-calendar"
+                  onClick={() => setShowActionModal(false)}
+                  className="w-full flex items-center gap-3 p-2.5 rounded-xl transition text-left group hover:bg-purple-950/40 border border-transparent hover:border-[#7c5cff]/30 cursor-pointer"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-[#7c5cff]/20 text-purple-300 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <CalendarDays size={16} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-white group-hover:text-purple-300 transition-colors">Release Calendar</h4>
+                      <span className="text-[9px] font-bold text-purple-400 uppercase">Explore</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 truncate">Monthly movie &amp; anime drops</p>
+                  </div>
+                </Link>
+
+                {/* 11. Achievements & Badges */}
                 <button
                   onClick={() => {
                     setShowActionModal(false);
@@ -1185,6 +1203,16 @@ function DashboardNavbar({
             >
               <Wifi size={14} className="text-cyan-300 animate-pulse" />
               <span>Local Stream</span>
+            </Link>
+
+            {/* Release Calendar for Mobile */}
+            <Link
+              href="/release-calendar"
+              onClick={() => setQuickActionsOpen(false)}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#7c5cff]/15 hover:bg-[#7c5cff]/25 text-purple-200 border border-[#7c5cff]/35 transition cursor-pointer text-xs font-bold"
+            >
+              <CalendarDays size={14} />
+              <span>Release Calendar</span>
             </Link>
 
             {/* Achievements & Badges for Mobile */}
