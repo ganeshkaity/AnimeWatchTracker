@@ -33,7 +33,7 @@
 /* Performance: CSS Containment for offscreen dashboard sections */
 .dashboard-section-contain {
   content-visibility: auto;
-  contain-intrinsic-size: 1px 340px;
+  contain-intrinsic-size: 1px 360px;
 }
 
 /* Performance: GPU-accelerated touch scroll for mobile horizontal lists */

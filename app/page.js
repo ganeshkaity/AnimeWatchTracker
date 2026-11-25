@@ -37,7 +37,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen text-white">
+    <div className="min-h-screen bg-black text-white">
       <AnimatePresence mode="wait">
         {activeEpisodeId ? (
           <motion.div

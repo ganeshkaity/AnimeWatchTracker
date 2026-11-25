@@ -68,6 +68,7 @@ import DashboardNavbar from '../components/dashboard/layout/DashboardNavbar';
 import DashboardMobileMenu from '../components/dashboard/layout/DashboardMobileMenu';
 import DashboardHero from '../components/dashboard/layout/DashboardHero';
 import MediaCategoriesBar from '../components/dashboard/layout/MediaCategoriesBar';
+import ThisWeekSection from '../components/dashboard/sections/ThisWeekSection';
 import DashboardFooter from '../components/dashboard/layout/DashboardFooter';
 
 // Extracted Section Components
@@ -300,12 +301,40 @@ export default function Dashboard({ onSelectAnime }) {
   const closeTimeoutRef = useRef(null);
   const activePreviewRef = useRef(activePreview);
 
+  // Desktop scroll lock to prevent layout thrashing & hovering preview jitter during scrolling
+  const isScrollingRef = useRef(false);
+  const scrollDebounceRef = useRef(null);
+
   useEffect(() => {
     activePreviewRef.current = activePreview;
   }, [activePreview]);
 
+  useEffect(() => {
+    const handleScroll = () => {
+      isScrollingRef.current = true;
+      if (activePreviewRef.current) {
+        setActivePreview(null);
+      }
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+        hoverTimeoutRef.current = null;
+      }
+      if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current);
+      scrollDebounceRef.current = setTimeout(() => {
+        isScrollingRef.current = false;
+      }, 150);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current);
+    };
+  }, []);
+
   const handleCardMouseEnter = useCallback((item, type, e) => {
     if (typeof window !== 'undefined' && window.innerWidth < 768) return;
+    if (isScrollingRef.current) return;
     if (closeTimeoutRef.current) {
       clearTimeout(closeTimeoutRef.current);
       closeTimeoutRef.current = null;
@@ -319,7 +348,9 @@ export default function Dashboard({ onSelectAnime }) {
     // Fast switch (80ms) if already previewing another card, else 500ms initial hover
     const delay = activePreviewRef.current ? 80 : 500;
     hoverTimeoutRef.current = setTimeout(() => {
-      setActivePreview({ item, type, rect });
+      if (!isScrollingRef.current) {
+        setActivePreview({ item, type, rect });
+      }
     }, delay);
   }, []);
 
@@ -3588,7 +3619,7 @@ export default function Dashboard({ onSelectAnime }) {
   }
 
   return (
-    <div className="min-h-screen bg-transparent text-white flex flex-col selection:bg-[#7c5cff] selection:text-white">
+    <div className="min-h-screen bg-black text-white flex flex-col selection:bg-[#7c5cff] selection:text-white pb-20 md:pb-0">
 
       {/* 1. TOP NAVBAR */}
       <DashboardNavbar
@@ -3679,6 +3710,9 @@ export default function Dashboard({ onSelectAnime }) {
           watchlistCount={watchlist.length}
           onSectionJump={handleSectionJump}
         />
+
+        {/* This Week Schedule Preview */}
+        <ThisWeekSection />
 
         {/* Continue Watching */}
         <ContinueWatchingSection

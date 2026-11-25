@@ -6,6 +6,7 @@ import CookieConsent from './components/CookieConsent';
 import PwaRegistration from './components/PwaRegistration';
 import NotificationBanner from './components/NotificationBanner';
 import AutoPushPrompt from './components/AutoPushPrompt';
+import MobileBottomNav from './components/MobileBottomNav';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -53,6 +54,7 @@ export default function RootLayout({ children }) {
         <AuthProvider>
           <OfflineProvider>
             {children}
+            <MobileBottomNav />
             <CookieConsent />
             <PwaRegistration />
             <NotificationBanner />

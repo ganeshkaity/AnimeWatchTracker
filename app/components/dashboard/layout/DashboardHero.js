@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -11,7 +11,7 @@ import { toFanartBigPreview, toFanartFull } from '../../../lib/fanartUtils';
 import HeroSkeleton from '../skeletons/HeroSkeleton';
 import { getEffectiveRating } from '../../../utils/ratingUtils';
 
-export default function DashboardHero({
+function DashboardHero({
   heroSlides = [],
   currentSlide: externalSlide,
   setCurrentSlide: externalSetCurrentSlide,
@@ -229,7 +229,7 @@ export default function DashboardHero({
 
             {/* Subtle bottom edge blend */}
             <div
-              className="absolute bottom-0 inset-x-0 h-16 z-10 pointer-events-none bg-gradient-to-t from-[#07090f]/40 to-transparent"
+              className="absolute bottom-0 inset-x-0 h-24 z-10 pointer-events-none bg-gradient-to-t from-black via-black/40 to-transparent"
             />
 
             {/* Hero Content Overlay (Positioned in lower two-thirds with comfortable breathing room) */}
@@ -438,3 +438,5 @@ export default function DashboardHero({
     </>
   );
 }
+
+export default memo(DashboardHero);

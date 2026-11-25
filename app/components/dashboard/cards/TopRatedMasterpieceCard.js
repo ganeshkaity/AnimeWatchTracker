@@ -20,7 +20,7 @@ function TopRatedMasterpieceCard({
       style={{ transform: 'translateZ(0)' }}
     >
       {/* Poster Card */}
-      <div className="relative w-32 sm:w-36 md:w-40 aspect-[2/3] rounded-lg overflow-hidden bg-[#0d121f] border border-white/10 group-hover:border-amber-400/50 shadow-xl group-hover:shadow-2xl transition-all duration-300">
+      <div className="relative w-32 sm:w-36 md:w-40 aspect-[2/3] rounded-lg overflow-hidden bg-[#0d121f] border border-white/10 group-hover:border-amber-400/50 shadow-xl group-hover:shadow-2xl transition-[transform,border-color,box-shadow] duration-200">
         <CachedImage
           src={show.image}
           alt={show.seriesTitle || show.title || ''}
@@ -28,11 +28,9 @@ function TopRatedMasterpieceCard({
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
         />
 
-        <div className="absolute inset-x-0 top-0 h-14 bg-gradient-to-b from-black/80 via-black/35 to-transparent pointer-events-none z-[5]" />
-
-        {/* Liquid Glass Rating Badge (Top-Right) */}
+        {/* Rating Badge (Top-Right) */}
         {displayRating && (
-          <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-full bg-black/80 sm:bg-black/60 sm:backdrop-blur-xl border border-white/20 text-[10px] font-black text-white flex items-center gap-1 shadow-[0_4px_16px_rgba(0,0,0,0.8)] sm:backdrop-saturate-150 pointer-events-none">
+          <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-full bg-black/85 border border-white/20 text-[10px] font-black text-white flex items-center gap-1 shadow-md pointer-events-none">
             <Star size={10} className="fill-amber-400 text-amber-400 shrink-0" />
             <span className="leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">{displayRating}</span>
           </div>
